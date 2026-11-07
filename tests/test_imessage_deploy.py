@@ -283,3 +283,24 @@ def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_on
     assert results and set(results) == {0}  # no send was refused, whichever side of the handover it hit
     wait_for(lambda: len(rig.sent()) == len(results), "every text")
     assert rig.sent() == sorted(f"send text {n}" for n in range(len(results)))  # each exactly once
+
+
+def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
+    """The heal unit's ExecStart, rendered as the role renders it and run the way systemd runs it ($$ is one $)."""
+    import shlex
+    from jinja2 import Environment
+    jinja = Environment()
+    jinja.filters["comment"] = lambda text: "# " + text
+    dir_, state, bin_dir = tmp_path / "imessage", tmp_path / "state", tmp_path / "bin"
+    for d in (dir_ / "green", state, bin_dir):
+        d.mkdir(parents=True)
+    (dir_ / "green/selfheal.ts").write_text("")
+    (state / "active").write_text("green\n")
+    (bin_dir / "bun").write_text('#!/bin/bash\n[ -f "$1" ] && echo "$PWD $*" > "$OUT"\n')
+    (bin_dir / "bun").chmod(0o755)
+    unit = jinja.from_string((ROOT / "blueprint/ansible/templates/fm-imessage-heal.service.j2").read_text()).render(
+        ansible_managed="test", crewship_imessage_dir=str(dir_), crewship_local_bin=str(bin_dir), crewship_firstmate_dir=str(tmp_path))
+    start = next(line.removeprefix("ExecStart=") for line in unit.splitlines() if line.startswith("ExecStart="))
+    out = tmp_path / "out"
+    subprocess.run(shlex.split(start.replace("$$", "$")), env={**os.environ, "STATE_DIRECTORY": str(state), "OUT": str(out)}, check=True)
+    assert out.read_text().strip() == f"{dir_ / 'green'} selfheal.ts failed"

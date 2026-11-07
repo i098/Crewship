@@ -2,11 +2,11 @@ import { afterAll, expect, test } from "bun:test";
 
 // The send command turns --reply-id ID into the query the bridge reads, and keeps --reply N as before.
 const urls: string[] = [];
-const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { if (new URL(req.url).pathname === "/health") return new Response("ok\n"); urls.push(req.url.slice(req.url.indexOf("/send"))); return new Response("queued 1 bubble(s)\n"); } });
+const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { urls.push(req.url.slice(req.url.indexOf("/send"))); return new Response("queued 1 bubble(s)\n"); } });
 afterAll(() => server.stop(true));
 
 const run = async (...args: string[]) => {
-  const p = Bun.spawn([`${import.meta.dir}/fm-imessage`, ...args], { env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port) }, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn([`${import.meta.dir}/fm-imessage`, ...args], { env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port), FM_IMESSAGE_WAIT_S: "0" }, stdout: "pipe", stderr: "pipe" });
   return { code: await p.exited, err: await new Response(p.stderr).text() };
 };
 

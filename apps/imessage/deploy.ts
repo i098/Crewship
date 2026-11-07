@@ -31,8 +31,9 @@ async function sc(...args: string[]) {
   return { out: out.trim(), code };
 }
 const active = async (name: string) => (await sc("is-active", "--quiet", name)).code === 0;
-// The bridge from before slots is the front unit's own process; after a rollback it runs as the slot "legacy".
-const legacyRunning = async () => Number((await sc("show", FRONT, "-p", "MainPID", "--value")).out) > 0 || (await active(unit("legacy")));
+// The bridge from before slots is the front unit's own process, so it is told apart from the front unit's follow process
+// by answering /health on the main port while no slot is recorded. After a rollback it runs as the slot "legacy".
+const legacyRunning = async () => (await active(unit("legacy"))) || (readActive(STATE) === undefined && (await get(PORT, "/health")).ok);
 const get = (port: number, path: string, method = "GET") =>
   fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "X-Firstmate": "1" }, signal: AbortSignal.timeout(40_000) }).then(async (r) => ({ ok: r.ok, body: (await r.text()).trim() }), () => ({ ok: false, body: "no answer" }));
 
@@ -179,8 +180,10 @@ async function follow() {
 
 async function boot() {
   const slot = readActive(STATE);
-  if (!slot || (await active(unit(slot)))) return;
-  await sc("reset-failed", unit(slot));
+  if (!slot) return;
+  const state = (await sc("show", unit(slot), "-p", "ActiveState", "--value")).out.split("\n")[0];
+  if (state !== "failed" && state !== "inactive") return;
+  if (state === "failed") await sc("reset-failed", unit(slot));
   await sc("start", unit(slot));
 }
 

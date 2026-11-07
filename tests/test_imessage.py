@@ -125,6 +125,35 @@ def test_text_goes_to_send(tmp_path):
     assert len(calls) == 1 and calls[0].endswith("http://127.0.0.1:8765/send")
 
 
+def retrying_send(tmp_path, answers, *args, wait="20"):
+    """Run fm-imessage against a curl stand-in that answers each call as listed: "refused" (exit 7), "stopping" (503 body, exit 22), "ok"."""
+    (tmp_path / "answers").write_text("\n".join(answers))
+    (tmp_path / "curl").write_text(
+        f'#!/bin/bash\nn=$(($(cat {tmp_path}/n 2>/dev/null || echo 0) + 1)); echo $n > {tmp_path}/n\n'
+        f'cat >> {tmp_path}/bodies; echo >> {tmp_path}/bodies\n'
+        f'case $(sed -n "${{n}}p" {tmp_path}/answers) in refused) exit 7 ;; stopping) printf stopping; exit 22 ;; *) echo queued; exit 0 ;; esac\n')
+    (tmp_path / "curl").chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": wait}
+    result = subprocess.run([str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=60)
+    return result, int((tmp_path / "n").read_text()), (tmp_path / "bodies").read_text().splitlines()
+
+
+@pytest.mark.parametrize("args", [("--", "hello"), ("--react", "x"), ("--typing",)])
+def test_a_send_during_a_handover_is_retried_and_queued_once(tmp_path, args):
+    result, calls, bodies = retrying_send(tmp_path, ["refused", "stopping", "ok"], *args)
+    assert result.returncode == 0 and "queued" in result.stdout
+    assert calls == 3 and len(set(bodies)) == 1  # the same bytes each time, and the third answer ended it
+
+
+def test_a_real_refusal_is_not_retried_and_a_handover_that_outlasts_the_wait_fails(tmp_path):
+    (tmp_path / "bad").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "bad", ["stopping"] * 5, "--", "hello", wait="0")
+    assert result.returncode != 0 and calls == 1
+    (tmp_path / "other").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "other", ["refused"] * 3 + ["ok"], "--", "hello", wait="2")
+    assert result.returncode != 0 and 1 < calls < 4
+
+
 @pytest.mark.parametrize("option", ["--bogus", "-x", "--typo=1"])
 @pytest.mark.parametrize("options", [[], ["--reply", "1"], ["--no-thread"]])
 def test_unknown_option_sends_nothing(tmp_path, option, options):

@@ -12,8 +12,8 @@
 # --key TOPIC logs the text under a topic key; the same key with the same content on the same local day is skipped (exit 0, the message says skipped).
 # Text and caption pass through the outbound filter (clean.ts: strips tags, ids, raw paths, status prefixes).
 # Exit 0 = queued: the bridge sends in order and retries while the upstream is down. Exit non-zero = nothing queued.
-# Until the bridge port answers /health with 200 (a rolling deploy handing over refuses connections, then answers 503 stopping;
-# docs/imessage.md#rolling-deploys) it waits up to FM_IMESSAGE_WAIT_S seconds (150) before anything is sent, so a handover or a rollback costs no text.
+# A refused connection or a 503 "stopping" answer means nothing was queued (a rolling deploy handing over,
+# docs/imessage.md#rolling-deploys): the request is sent again, up to FM_IMESSAGE_WAIT_S seconds (150), so a handover or a rollback costs no text.
 url=http://127.0.0.1:${FM_IMESSAGE_PORT:-8765}
 B=(curl -sS --fail-with-body --max-time 60 -H 'X-Firstmate: 1' -H "X-Fm-Sender: ${FM_MATE_ID:-${FM_HOME:-}}")
 q=
@@ -22,21 +22,24 @@ rn=
 rid=
 here=$(dirname "$(readlink -f "$0")")
 fail() { echo "fm-imessage: $1 (nothing sent)" >&2; exit 2; }
-wait_up() { # nothing is sent while waiting, so waiting cannot duplicate a text
-  local end=$((SECONDS + ${FM_IMESSAGE_WAIT_S:-150})) port=${FM_IMESSAGE_PORT:-8765}
-  until (exec 3<>"/dev/tcp/127.0.0.1/$port"; printf 'GET /health HTTP/1.0\r\nHost: 127.0.0.1:%s\r\nX-Firstmate: 1\r\n\r\n' "$port" >&3; read -r -t 3 status <&3; [[ $status == *' 200 '* ]]) 2>/dev/null; do
-    [ $SECONDS -lt $end ] || return 0 # the send then reports the failure
+post() { # post CURL_ARGS...: stdin is kept in a file, so a retry sends the same bytes
+  local body out err code end=$((SECONDS + ${FM_IMESSAGE_WAIT_S:-150}))
+  body=$(mktemp) out=$(mktemp) err=$(mktemp); cat > "$body"
+  while :; do
+    "${B[@]}" "$@" < "$body" > "$out" 2> "$err"; code=$?
+    { [ $code = 7 ] || { [ $code = 22 ] && [ "$(head -c 8 "$out")" = stopping ]; }; } && [ $SECONDS -lt $end ] || break
     sleep 1
   done
+  cat "$out"; cat "$err" >&2; rm -f "$body" "$out" "$err"
+  return $code
 }
-case "${1:-}" in -h|--help) ;; *) wait_up ;; esac
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) sed -n '2,14p' "$0" | cut -c3-; exit 0 ;;
-    --typing) "${B[@]}" -X POST "$url/typing"; exit ;;
-    --react) printf '%s' "${2:?emoji}" | "${B[@]}" --data-binary @- "$url/react"; exit ;;
+    --typing) post -X POST "$url/typing" </dev/null; exit ;;
+    --react) printf '%s' "${2:?emoji}" | post --data-binary @- "$url/react"; exit ;;
     --card) [ -n "${2:-}" ] || fail "--card needs JSON, - or a file"
-            if [ "$2" = - ]; then cat; elif [ -f "$2" ]; then cat -- "$2"; else printf '%s' "$2"; fi | "${B[@]}" --data-binary @- "$url/card"; exit ;;
+            if [ "$2" = - ]; then cat; elif [ -f "$2" ]; then cat -- "$2"; else printf '%s' "$2"; fi | post --data-binary @- "$url/card"; exit ;;
     --reply) case "${2:-}" in [1-9]|10) ;; *) echo "fm-imessage: --reply needs a number from 1 to 10 (nothing sent)" >&2; exit 2 ;; esac
              [ -z "$rid" ] || fail "use either --reply or --reply-id, not both"
              q="${q:+$q&}reply=$2"; rn=1; shift 2 ;;
@@ -70,6 +73,6 @@ if [ -n "$image" ]; then
   p=${p//\"/\\\"}
   cap=$*
   if [ -n "$cap" ]; then cap=$(printf '%s' "$cap" | clean; echo x); cap=${cap%x}; fi
-  exec "${B[@]}" -F "image=@\"$p\"" --form-string "caption=$cap" "$url/image${q:+?$q}"
+  post -F "image=@\"$p\"" --form-string "caption=$cap" "$url/image${q:+?$q}" </dev/null; exit
 fi
-{ if [ $# -gt 0 ]; then printf '%s' "$*"; else cat; fi; } | clean | "${B[@]}" --data-binary @- "$url/send${q:+?$q}"
+{ if [ $# -gt 0 ]; then printf '%s' "$*"; else cat; fi; } | clean | post --data-binary @- "$url/send${q:+?$q}"
