@@ -18,36 +18,53 @@ export type State = Record<string, Entry>
 
 const stepOf = (left: number) => Math.ceil(left / 10) * 10
 
+function isReset(prev: Entry | undefined, r: QuotaRow): boolean {
+  if (!prev) return true
+  const lastUsed = prev.samples.at(-1)?.used ?? 0
+  const moved = r.resetsAt != null && prev.resetsAt != null && r.resetsAt > prev.resetsAt + 60_000
+  return moved || r.leftPct! > 100 - lastUsed + 1
+}
+
+// Returns the acceleration text when the last hour's rate is at least 2x the average over the kept history.
+function accelText(samples: Sample[], used: number, now: number, label: string, tail: string): string | null {
+  const first = samples[0]
+  const hourAgo = [...samples].reverse().find(s => now - s.t >= HOUR)
+  if (!first || !hourAgo || now - first.t < MIN_SPAN) return null
+  const hourRate = (used - hourAgo.used) / ((now - hourAgo.t) / HOUR)
+  const avgRate = (used - first.used) / ((now - first.t) / HOUR)
+  if (hourRate < MIN_HOUR_USE || avgRate <= 0 || hourRate < 2 * avgRate) return null
+  return `Usage: ${label} is burning fast, ${hourRate.toFixed(1)}% per hour against a 24h average of ${avgRate.toFixed(1)}% per hour, ${tail}.`
+}
+
+function evaluateRow(prev: Entry | undefined, r: QuotaRow, now: number, tz: string): { entry: Entry; messages: string[] } {
+  const left = r.leftPct!
+  const step = stepOf(left)
+  const base: Entry = isReset(prev, r) ? { step, resetsAt: r.resetsAt, fast: false, samples: [] } : { ...prev!, resetsAt: r.resetsAt ?? prev!.resetsAt }
+  const e: Entry = { ...base, samples: [...base.samples, { t: now, used: r.usedPct! }].filter(s => now - s.t <= DAY) }
+  const label = `${r.account} ${r.window}`
+  const when = r.resetsAt ? `, resets ${clockAt(r.resetsAt, tz)}` : ""
+  const messages: string[] = []
+  if (step < e.step) {
+    messages.push(`Usage: ${label} is at ${Math.round(left)}% left, at or below the ${step}% step${when}.`)
+    e.step = step
+  }
+  const fast = e.fast ? null : accelText(e.samples, r.usedPct!, now, label, `${Math.round(left)}% left${when}`)
+  if (fast) {
+    messages.push(fast)
+    e.fast = true
+  }
+  return { entry: e, messages }
+}
+
 export function evaluate(state: State, rows: QuotaRow[], now: number, tz: string): { state: State; messages: string[] } {
   const next: State = {}
   const messages: string[] = []
   for (const r of rows) {
     if (!WINDOWS.includes(r.window) || r.leftPct == null || r.usedPct == null || r.note) continue
     const key = `${r.account}|${r.window}`
-    const step = stepOf(r.leftPct)
-    const prev = state[key]
-    const reset = prev && (r.leftPct > 100 - (prev.samples.at(-1)?.used ?? 0) + 1 || (r.resetsAt != null && prev.resetsAt != null && r.resetsAt > prev.resetsAt + 60_000))
-    let e: Entry = !prev || reset ? { step, resetsAt: r.resetsAt, fast: false, samples: [] } : { ...prev, resetsAt: r.resetsAt ?? prev.resetsAt }
-    e.samples = [...e.samples, { t: now, used: r.usedPct }].filter(s => now - s.t <= DAY)
-    const label = `${r.account} ${r.window}`
-    const when = r.resetsAt ? `, resets ${clockAt(r.resetsAt, tz)}` : ""
-    if (step < e.step) {
-      messages.push(`Usage: ${label} is at ${Math.round(r.leftPct)}% left, at or below the ${step}% step${when}.`)
-      e.step = step
-    }
-    if (!e.fast) {
-      const first = e.samples[0]
-      const hourAgo = [...e.samples].reverse().find(s => now - s.t >= HOUR)
-      if (first && hourAgo && now - first.t >= MIN_SPAN) {
-        const hourRate = (r.usedPct - hourAgo.used) / ((now - hourAgo.t) / HOUR)
-        const avgRate = (r.usedPct - first.used) / ((now - first.t) / HOUR)
-        if (hourRate >= MIN_HOUR_USE && avgRate > 0 && hourRate >= 2 * avgRate) {
-          messages.push(`Usage: ${label} is burning fast, ${hourRate.toFixed(1)}% per hour against a 24h average of ${avgRate.toFixed(1)}% per hour, ${Math.round(r.leftPct)}% left${when}.`)
-          e.fast = true
-        }
-      }
-    }
-    next[key] = e
+    const out = evaluateRow(state[key], r, now, tz)
+    next[key] = out.entry
+    messages.push(...out.messages)
   }
   return { state: next, messages }
 }
