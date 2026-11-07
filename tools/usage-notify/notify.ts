@@ -37,7 +37,7 @@ function accelText(samples: Sample[], used: number, now: number, label: string, 
 }
 
 function evaluateRow(prev: Entry | undefined, r: QuotaRow, now: number, tz: string): { entry: Entry; messages: string[] } {
-  const left = r.leftPct!
+  const left = Math.max(0, r.leftPct!)
   const step = stepOf(left)
   const base: Entry = isReset(prev, r) ? { step, resetsAt: r.resetsAt, fast: false, samples: [] } : { ...prev!, resetsAt: r.resetsAt ?? prev!.resetsAt }
   const e: Entry = { ...base, samples: [...base.samples, { t: now, used: r.usedPct! }].filter(s => now - s.t <= DAY) }

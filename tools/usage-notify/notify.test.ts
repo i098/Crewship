@@ -43,6 +43,15 @@ test("a Mercury key crossing a step texts one line despite its token note", () =
   const r = evaluate(first.state, mercuryRows([1], { 1: 95_000_000 }), H, "UTC")
   expect(r.messages).toHaveLength(1)
   expect(r.messages[0]).toContain("mercury key 1")
+  expect(evaluate(r.state, mercuryRows([1], { 1: 95_000_000 }), 2 * H, "UTC").messages).toEqual([])
+})
+
+test("a Mercury key over 100% used texts once at 0% left", () => {
+  const first = evaluate({}, mercuryRows([1], { 1: 1_000_000 }), 0, "UTC")
+  const r = evaluate(first.state, mercuryRows([1], { 1: 120_000_000 }), H, "UTC")
+  expect(r.messages).toHaveLength(1)
+  expect(r.messages[0]).toContain("0% left")
+  expect(evaluate(r.state, mercuryRows([1], { 1: 120_000_000 }), 2 * H, "UTC").messages).toEqual([])
 })
 
 test("a window missing for one run keeps its latch and step", () => {
