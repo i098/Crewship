@@ -582,7 +582,9 @@ def guard(stubs, tmp_path, used, *, paused="", active=True, env=None):
     bin_dir, log = stubs
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
     (bin_dir / "systemctl").write_text(
-        f'#!/bin/sh\necho "systemctl $*" >> {log}\n' + ("" if active else '[ "$2" = is-active ] && exit 3\n') + "exit 0\n"
+        f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
+        + ("" if active else '[ "$2" = is-active ] && exit 3\n')
+        + "exit 0\n"
     )
     for name in ("df", "systemctl"):
         (bin_dir / name).chmod(0o755)
@@ -594,7 +596,9 @@ def guard(stubs, tmp_path, used, *, paused="", active=True, env=None):
     return [c for c in calls if c.startswith("systemctl")], state
 
 
-def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_forces_running_ones(stubs, tmp_path):
+def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_forces_running_ones(
+    stubs, tmp_path
+):
     guard(stubs, tmp_path, 10)
     calls = stubs[1].read_text().splitlines()
     assert calls[0] == "docker container prune --force --filter label=runner-up.place"
@@ -642,7 +646,9 @@ def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
 def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None):
     """Run `guard` at time `now` with a stub pressure file; state lives in tmp_path between runs."""
     pressure = tmp_path / "io"
-    pressure.write_text(f"some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nfull avg10=1.00 avg60={avg60} avg300=0.00 total=1\n")
+    pressure.write_text(
+        f"some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nfull avg10=1.00 avg60={avg60} avg300=0.00 total=1\n"
+    )
     io_state = tmp_path / "io.paused"
     if io:
         io_state.write_text(io)
@@ -682,9 +688,48 @@ def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
     assert calls == [] and left == ["a", "b"]
 
 
+def io_hot_guard(stubs, tmp_path, avg60, now, heavy="h1 h2 h3"):
+    pressure = tmp_path / "io"
+    pressure.write_text(f"full avg10=1.00 avg60={avg60} avg300=0.00 total=1\n")
+    env = {
+        "RUNNER_UP_PRESSURE_FILE": str(pressure),
+        "RUNNER_UP_IO_STATE": str(tmp_path / "io.paused"),
+        "RUNNER_UP_NOW": str(now),
+        "RUNNER_UP_IO_HEAVY": heavy,
+        "RUNNER_UP_INSTANCES": "",
+    }
+    stubs[1].write_text("")
+    calls, _ = guard(stubs, tmp_path, 10, env=env)
+    return [c for c in calls if " stop " in c]
+
+
+def test_io_pause_stops_the_newest_heavy_unit_after_three_minutes_above_the_level(stubs, tmp_path):
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1000) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1179) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1180) == [
+        "systemctl --user stop runner-up@h3.service"
+    ]
+    assert (tmp_path / "io.paused").read_text() == "runner-up@h3.service\n"
+    # one unit per window: the next one needs three more minutes (the stub keeps h3 active, so it leaves the list)
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1200) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1380, heavy="h1 h2") == [
+        "systemctl --user stop runner-up@h2.service"
+    ]
+
+
+def test_io_pause_does_not_flap_on_a_short_spike_or_pause_unlisted_units(stubs, tmp_path):
+    io_hot_guard(stubs, tmp_path, "64.0", 1000)
+    assert io_hot_guard(stubs, tmp_path, "40.0", 1170) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1180) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1359) == []
+    assert io_hot_guard(stubs, tmp_path, "64.0", 1360, heavy="") == []
+
+
 def test_io_pause_stops_and_records_units_once(stubs, tmp_path):
     bin_dir, log = stubs
-    (bin_dir / "systemctl").write_text(f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$3" = bad ] && exit 1\nexit 0\n')
+    (bin_dir / "systemctl").write_text(
+        f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$3" = bad ] && exit 1\nexit 0\n'
+    )
     (bin_dir / "systemctl").chmod(0o755)
     state = tmp_path / "io.paused"
     env = {"RUNNER_UP_IO_STATE": str(state)}
@@ -737,7 +782,9 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
 def gate(tmp_path, *args, env=None, timeout=20):
     pressure = tmp_path / "pressure"
     if not pressure.exists():
-        pressure.write_text("some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=1.00 avg300=0.00 total=0\n")
+        pressure.write_text(
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=1.00 avg300=0.00 total=0\n"
+        )
     environment = {
         "PATH": "/usr/bin:/bin",
         "BUILD_GATE_DIR": str(tmp_path / "gate"),
@@ -749,7 +796,11 @@ def gate(tmp_path, *args, env=None, timeout=20):
         **(env or {}),
     }
     return subprocess.Popen(
-        [str(MAINTENANCE / "build-gate"), *args], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        [str(MAINTENANCE / "build-gate"), *args],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
 
 
@@ -835,7 +886,9 @@ def cargo_shim(tmp_path, *args, io="99.00"):
         "BUILD_GATE_PRESSURE_FILE": str(pressure),
         "BUILD_GATE_POLL": "1",
     }
-    return subprocess.Popen([str(bindir / "cargo"), *args], env=environment, stdout=subprocess.PIPE, text=True)
+    return subprocess.Popen(
+        [str(bindir / "cargo"), *args], env=environment, stdout=subprocess.PIPE, text=True
+    )
 
 
 def test_the_cargo_shim_holds_heavy_subcommands_at_the_gate_and_runs_the_real_cargo(tmp_path):
@@ -868,7 +921,9 @@ def test_the_shim_starts_jobs_through_the_build_gate_when_it_is_set(stubs, tmp_p
     gate_stub.chmod(0o755)
     env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_BUILD_GATE": str(gate_stub)}
     calls = run_script("runner-up-docker", stubs, "run", "img", env=env)
-    assert calls[0].startswith("gate ") and calls[0].endswith("docker run --cgroup-parent runnerup.slice --pids-limit 8192 img")
+    assert calls[0].startswith("gate ") and calls[0].endswith(
+        "docker run --cgroup-parent runnerup.slice --pids-limit 8192 img"
+    )
     assert calls[1].startswith("docker run")
 
 

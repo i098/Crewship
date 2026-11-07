@@ -29,6 +29,7 @@ crewship:
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
   #   pause_pct: 88             # data disk use at or above which no new job starts
   #   resume_pct: 85            # data disk use below which jobs start again
+  #   io_heavy: []              # repos the guard pauses while the io pressure stays high
   #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
@@ -114,8 +115,9 @@ It never touches a running container.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
 Below `resume_pct` (85) it starts again only the coordinators it stopped.
-`runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them.
-When `/proc/pressure/io` `full avg60` stays below 40% for 10 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 10 minutes.
+`runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
+The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
+When `full avg60` stays below 40% for 10 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 10 minutes.
 The disk rule keeps its own units: no unit starts while the disk is at `resume_pct` or above.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.

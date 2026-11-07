@@ -60,10 +60,15 @@ guard)
   # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   io_calm=$io_state.calm
+  io_hot=$io_state.hot
+  now=${RUNNER_UP_NOW:-$(date +%s)}
+  avg=$(awk '$1 == "full" { sub("avg60=", "", $3); print $3 }' "${RUNNER_UP_PRESSURE_FILE:-/proc/pressure/io}" 2>/dev/null) || avg=
+  io_above() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a > m) }'; }
+  io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
+  # IO resume: below the level for the whole window, then one unit per run.
+  # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
   if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
-    avg=$(awk '$1 == "full" { sub("avg60=", "", $3); print $3 }' "${RUNNER_UP_PRESSURE_FILE:-/proc/pressure/io}" 2>/dev/null) || avg=
-    now=${RUNNER_UP_NOW:-$(date +%s)}
-    if [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_RESUME_PCT:-40}" 'BEGIN { exit !(a < m) }'; then
+    if io_below; then
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
       if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-600}" ]; then
         read -r unit < "$io_state"
@@ -76,6 +81,25 @@ guard)
     else
       rm -f "$io_calm"
     fi
+  fi
+  # IO pause: above the level for the whole window, then the newest running heavy coordinator, one per window.
+  # Jobs that run keep running; the unit comes back through the IO resume above.
+  if io_above; then
+    [ -s "$io_hot" ] || echo "$now" > "$io_hot"
+    if [ $((now - $(cat "$io_hot"))) -ge "${RUNNER_UP_IO_HOT_SECS:-180}" ]; then
+      newest=
+      newest_at=-1
+      for i in ${RUNNER_UP_IO_HEAVY-}; do
+        u=runner-up@$i.service
+        systemctl --user is-active --quiet "$u" || continue
+        at=$(systemctl --user show -p ActiveEnterTimestampMonotonic --value "$u" | tr -dc 0-9)
+        if [ "${at:-0}" -gt "$newest_at" ]; then newest=$u; newest_at=${at:-0}; fi
+      done
+      [ -z "$newest" ] || "$0" io-pause "$newest"
+      rm -f "$io_hot"
+    fi
+  else
+    rm -f "$io_hot"
   fi
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
