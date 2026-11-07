@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { evaluate, processSnapshot, type State } from "./notify.ts"
-import type { QuotaRow } from "./../usage-tui/quota.ts"
+import { mercuryRows, type QuotaRow } from "./../usage-tui/quota.ts"
 
 const H = 3_600_000
 const row = (left: number, resetsAt: number | null = 10 * 24 * H): QuotaRow => ({ account: "claude a", window: "5h", usedPct: 100 - left, leftPct: left, resetsAt })
@@ -36,6 +36,13 @@ test("acceleration texts once per window", () => {
 test("rows without numbers or other windows are ignored", () => {
   const rows: QuotaRow[] = [{ account: "x", window: "5h", usedPct: null, leftPct: null, resetsAt: null }, { ...row(50), window: "30d" }]
   expect(evaluate({}, rows, 0, "UTC").state).toEqual({})
+})
+
+test("a Mercury key crossing a step texts one line despite its token note", () => {
+  const first = evaluate({}, mercuryRows([1], { 1: 1_000_000 }), 0, "UTC")
+  const r = evaluate(first.state, mercuryRows([1], { 1: 95_000_000 }), H, "UTC")
+  expect(r.messages).toHaveLength(1)
+  expect(r.messages[0]).toContain("mercury key 1")
 })
 
 test("a window missing for one run keeps its latch and step", () => {

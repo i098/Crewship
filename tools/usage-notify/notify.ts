@@ -10,7 +10,7 @@ const HOUR = 3_600_000
 const DAY = 24 * HOUR
 const MIN_SPAN = 2 * HOUR // shortest history before a 24h average means anything
 const MIN_HOUR_USE = 2 // percentage points used in the last hour before "accelerating" is worth a text
-const WINDOWS = ["5h", "7d"]
+const WINDOWS = ["5h", "7d", "100M"]
 
 export type Sample = { t: number; used: number }
 export type Entry = { step: number; resetsAt: number | null; fast: boolean; samples: Sample[] }
@@ -60,7 +60,7 @@ export function evaluate(state: State, rows: QuotaRow[], now: number, tz: string
   const next: State = { ...state }
   const messages: string[] = []
   for (const r of rows) {
-    if (!WINDOWS.includes(r.window) || r.leftPct == null || r.usedPct == null || r.note) continue
+    if (!WINDOWS.includes(r.window) || r.leftPct == null || r.usedPct == null || (r.note && r.window !== "100M")) continue
     const key = `${r.account}|${r.window}`
     const out = evaluateRow(state[key], r, now, tz)
     next[key] = out.entry
