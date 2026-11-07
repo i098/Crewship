@@ -13,12 +13,15 @@
 //     as its diff is non-empty, before any commit or pull request.
 //     The first part present carries the indent.
 // Lookups run in the background on session start, turn end and every 30
-// seconds, and never fail or slow a turn. git runs niced, two at a time.
+// seconds, and never fail or slow a turn. The pull request lookup is cached
+// on disk and rare (see lookupPr). git runs niced, two at a time.
 // @ts-nocheck
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat, mkdir, open, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -160,16 +163,89 @@ export function prOwners(remotes: string): string[] {
   return [...new Set(["{owner}", ...[...remotes.matchAll(/github\.com[:/]([^/\s]+)\//g)].map((m) => m[1])])];
 }
 
-async function lookupPr(cwd: string) {
-  const branch = (await run("git", ["-C", cwd, "branch", "--show-current"])).trim();
-  if (!branch) return undefined;
-  for (const owner of prOwners(await run("git", ["-C", cwd, "remote", "-v"]))) {
-    // REST, not GraphQL: gh fills {owner}/{repo} from the checkout's remote.
-    const endpoint = `repos/{owner}/{repo}/pulls?state=open&head=${owner}:${encodeURIComponent(branch)}`;
-    const pr = JSON.parse(await run("gh", ["api", "-X", "GET", endpoint], cwd))[0];
-    if (pr) return pr;
+// The open pull request for a branch changes rarely, so the lookup is cached
+// on disk per repository and branch, shared by every omp process on the host.
+// It runs again when local HEAD moved (a commit) or the entry outlived its TTL:
+// 10 minutes for a found PR, 1 minute for none (a PR is created without moving
+// HEAD), 5 minutes after a failed lookup. A stale lookup sends the stored ETag,
+// and a 304 costs nothing.
+const PR_TTL_MS = 10 * 60 * 1000;
+const NO_PR_TTL_MS = 60 * 1000;
+const FAILED_TTL_MS = 5 * 60 * 1000;
+const cacheDir = () =>
+  process.env.CREWSHIP_SIDEBAR_CACHE ||
+  path.join(process.env.XDG_CACHE_HOME || path.join(homedir(), ".cache"), "crewship-sidebar");
+
+async function ghPulls(cwd: string, owner: string, branch: string, etag?: string) {
+  // REST, not GraphQL: gh fills {owner}/{repo} from the checkout's remote.
+  const endpoint = `repos/{owner}/{repo}/pulls?state=open&head=${owner}:${encodeURIComponent(branch)}`;
+  const args = ["api", "-i", "-X", "GET", ...(etag ? ["-H", `If-None-Match: ${etag}`] : []), endpoint];
+  let out: string;
+  try {
+    out = await run("gh", args, cwd);
+  } catch (e) {
+    out = e?.stdout || ""; // gh exits non-zero on 304
+    if (!/^HTTP\/\S+ 304/.test(out)) throw e;
   }
-  return undefined;
+  const [head, ...rest] = out.split(/\r?\n\r?\n/);
+  const tag = head.match(/^etag:\s*(.+?)\s*$/im)?.[1];
+  if (/^HTTP\/\S+ 304/.test(head)) return { etag: tag || etag, notModified: true };
+  return { etag: tag, pr: JSON.parse(rest.join("\n\n"))[0] || null };
+}
+
+type Owners = Record<string, { etag?: string; pr?: any }>;
+const firstPr = (owners: Owners) => Object.values(owners).find((o) => o.pr)?.pr || undefined;
+
+// The default branch and a branch with no commits beyond it have no pull request.
+async function hasNoPr(cwd: string, branch: string) {
+  const git = (...args: string[]) => run("git", ["-C", cwd, ...args]);
+  for (const r of ["origin/HEAD", "origin/main", "origin/master"]) {
+    const base = (await git("rev-parse", "--verify", "--quiet", `${r}^{commit}`).catch(() => "")).trim();
+    if (!base) continue;
+    const name = (await git("rev-parse", "--abbrev-ref", r).catch(() => r)).trim().replace(/^origin\//, "");
+    return name === branch || (await git("rev-list", "--count", `${base}..HEAD`).catch(() => "")).trim() === "0";
+  }
+  return false;
+}
+
+async function fetchPulls(cwd: string, branch: string, remotes: string, owners: Owners) {
+  const next: Owners = {};
+  for (const owner of prOwners(remotes)) {
+    const got = await ghPulls(cwd, owner, branch, owners[owner]?.etag);
+    next[owner] = got.notModified ? { etag: got.etag, pr: owners[owner]?.pr } : { etag: got.etag, pr: got.pr };
+    if (next[owner].pr) break;
+  }
+  return next;
+}
+
+export async function lookupPr(cwd: string) {
+  const branch = (await run("git", ["-C", cwd, "branch", "--show-current"])).trim();
+  if (!branch || (await hasNoPr(cwd, branch))) return undefined;
+  const head = (await run("git", ["-C", cwd, "rev-parse", "HEAD"]).catch(() => "")).trim();
+  const remotes = await run("git", ["-C", cwd, "remote", "-v"]);
+  const file = path.join(cacheDir(), createHash("sha1").update(`${remotes}\n${branch}`).digest("hex") + ".json");
+  let entry: { at?: number; head?: string; ttl?: number; owners?: Owners } = {};
+  try {
+    entry = JSON.parse(readFileSync(file, "utf8"));
+  } catch {}
+  const owners = entry.owners || {};
+  if (entry.head === head && Date.now() - (entry.at || 0) < (entry.ttl ?? PR_TTL_MS)) return firstPr(owners);
+  let kept = owners;
+  let failed = false;
+  try {
+    kept = await fetchPulls(cwd, branch, remotes, owners);
+  } catch {
+    failed = true;
+  }
+  const found = firstPr(kept);
+  try {
+    await mkdir(cacheDir(), { recursive: true });
+    const tmp = `${file}.${process.pid}`;
+    const ttl = failed ? FAILED_TTL_MS : found ? PR_TTL_MS : NO_PR_TTL_MS;
+    await writeFile(tmp, JSON.stringify({ at: Date.now(), head, ttl, owners: kept }));
+    await rename(tmp, file);
+  } catch {}
+  return found;
 }
 
 // A worker's issue from its orchestrator home: the backlog entry, then the
