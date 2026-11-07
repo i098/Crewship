@@ -16,3 +16,8 @@ export function pickTarget<T extends { id: string }>(recent: T[], params: URLSea
   }
   return {};
 }
+
+// The 400 answer for a refused target, or undefined when the pick succeeded.
+export function refusal(picked: Picked<unknown>): Response | undefined {
+  return picked.error ? new Response(`nothing queued: ${picked.error}\n`, { status: 400 }) : undefined;
+}

@@ -44,8 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendOnce, transient, Turns } from "./outbox.ts";
-import { pickTarget } from "./reply-target.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, pickTarget, refusal, sendRecorded, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -532,7 +531,8 @@ Bun.serve({
     if (!parts.length && !photo) return new Response("empty message", { status: 400 });
     // ?reply=N targets his Nth latest text; ?reply-id=ID targets that exact message id. ?no-thread forces plain, even with an explicit target.
     const chosen = pickTarget(recent, url.searchParams);
-    if (chosen.error) return new Response(`nothing queued: ${picked.error}\n`, { status: 400 });
+    const refused = refusal(chosen);
+    if (refused) return refused;
     const target = chosen.target;
     // A threaded reply goes out on the transport and in the conversation of the text it replies to.
     const destination = target ?? proactiveRef;
@@ -541,8 +541,8 @@ Bun.serve({
     const key = keyOf(req);
     if (key instanceof Response) return key;
     const who = mateOfSender(sender) ?? sender ?? "main";
-    if (target) recordRoute({ replyTarget: target.id, space: target.space, by: url.searchParams.has("reply-id") ? "id" : "position" });
-    return sendOnce(STATE, { key, sender: who, text: parts.join("\n\n"), alone: !!photo }, (dup) =>
+    const record = () => { if (target) recordRoute({ replyTarget: target.id, space: target.space, by: url.searchParams.has("reply-id") ? "id" : "position" }); };
+    return sendRecorded(STATE, { key, sender: who, text: parts.join("\n\n"), alone: !!photo }, record, (dup) =>
       queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }));
   },
 });
@@ -1465,6 +1465,7 @@ async function rewriteVoice(source: VoiceSource, question: string): Promise<stri
 }
 
 function applyRoute(event: RouteEvent) {
+  if ("replyTarget" in event) return; // audit-only row: it changes no routing state on replay
   if ("deskCancelled" in event) deskGeneration++;
   else if ("received" in event) {
     deskGeneration++;

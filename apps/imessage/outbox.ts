@@ -216,6 +216,15 @@ export function sendOnce(dir: string, o: Send & { alone?: boolean }, send: (dup:
   return res;
 }
 
+// sendOnce that runs `record` only after a send answered ok, so a deduped or refused send leaves no row.
+export function sendRecorded(dir: string, o: Send & { alone?: boolean }, record: () => void, send: (dup: boolean) => Response): Response {
+  return sendOnce(dir, o, (dup) => {
+    const res = send(dup);
+    if (res.ok) record();
+    return res;
+  });
+}
+
 // The topic key of a /send request: undefined without one, or the 400 refusing a malformed one.
 export function keyOf(req: Request): string | undefined | Response {
   const key = req.headers.get("x-fm-key")?.trim() || undefined;
@@ -229,3 +238,5 @@ export const deskLog = (dir: string) => ({
   record: (key: string | undefined, text: string) => logSend(dir, { key, sender: "desk", text }),
   report: (text: string) => logSend(dir, { sender: "desk", text }),
 });
+
+export { pickTarget, refusal } from "./reply-target.ts";
