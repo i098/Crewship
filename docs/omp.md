@@ -194,7 +194,7 @@ The `gh-axi` check therefore runs before its preliminary issue lookups or API ca
 Shell quoting, here-documents, here-strings, and working-directory changes cannot borrow a target from another invocation.
 Text in titles, bodies, and comments is not a repository target.
 
-The `gh` wrapper also adds `--cache 60s` to plain `gh api` REST reads (including `-X GET`; not graphql or writes), so a read can be up to 60 s stale.
+The `gh` wrapper also adds `--cache 60s` to plain `gh api` REST reads (including `-X GET`; not graphql, writes, or calls with `-f`/`-F` fields, which keep an explicit GET uncached), so a read can be up to 60 s stale.
 Set `GH_NO_CACHE=1` to bypass the cache.
 Every wrapped call is appended to `~/.local/state/gh/calls.log`.
 
