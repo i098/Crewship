@@ -1931,7 +1931,7 @@ export const edit = (content, target) => ({ type: "edit", content, target });
 
 
 def wait_for(check, what, timeout=30):
-    end = time.monotonic() + timeout
+    end = time.monotonic() + timeout * 4  # hosts at load ~30 starve the bridge subprocesses
     while not check():
         assert time.monotonic() < end, f"timed out waiting for {what}"
         time.sleep(0.05)
