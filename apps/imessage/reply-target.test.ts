@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sendRecorded } from "./outbox";
-import { pickTarget, refusal } from "./reply-target";
+import { pickTarget, refusal, routeRow, withTarget } from "./reply-target";
 
 const texts = (...ids: string[]) => ids.map((id) => ({ id, space: "chat" }));
 const q = (s: string) => new URLSearchParams(s);
@@ -47,4 +47,26 @@ test("a deduped repeat of the same key and text records no reply row", () => {
   expect(rows).toEqual(["row"]);
   expect((go().status)).toBe(200);
   expect(rows).toEqual(["row"]);
+});
+
+test("reply-id takes the raw message id or the inbox request id <line>-<id>", () => {
+  const recent = [{ id: "g1", space: "chat" }, { id: "g2", space: "chat", line: "bluebubbles" }];
+  expect(pickTarget(recent, q("reply-id=photon-g1")).target?.id).toBe("g1");
+  expect(pickTarget(recent, q("reply-id=bluebubbles-g2")).target?.id).toBe("g2");
+  expect(pickTarget(recent, q("reply-id=g2")).target?.id).toBe("g2");
+  expect(pickTarget(recent, q("reply-id=photon-g2")).error).toContain("no kept text");
+});
+
+test("the send seam answers 400 with the real reason and queues nothing for an unknown reply-id", async () => {
+  let queued = 0;
+  const res = withTarget(texts("a"), q("reply-id=zzz"), () => (queued++, new Response("queued")));
+  expect(res.status).toBe(400);
+  expect(await res.text()).toContain("nothing queued: no kept text has the id zzz");
+  expect(queued).toBe(0);
+  expect(withTarget(texts("a"), q("reply-id=a"), (t) => new Response(t?.id)).status).toBe(200);
+});
+
+test("the routing row names the target, its space and how it was chosen", () => {
+  expect(routeRow({ id: "a", space: "chat" }, q("reply-id=a"))).toEqual({ replyTarget: "a", space: "chat", by: "id" });
+  expect(routeRow({ id: "a", space: "chat" }, q("reply=1"))).toEqual({ replyTarget: "a", space: "chat", by: "position" });
 });

@@ -239,4 +239,4 @@ export const deskLog = (dir: string) => ({
   report: (text: string) => logSend(dir, { sender: "desk", text }),
 });
 
-export { pickTarget, refusal } from "./reply-target.ts";
+export { routeRow, withTarget } from "./reply-target.ts";
