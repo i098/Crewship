@@ -1,0 +1,7 @@
+[Unit]
+Description=Usage notifier (one run)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/code-factory/tools/usage-notify
+ExecStart=%h/.bun/bin/bun notify.ts
