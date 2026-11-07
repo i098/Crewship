@@ -91,6 +91,10 @@ args+=(--bind "$scratch/tmp" /tmp --bind "$scratch/home" "$home" --bind "$scratc
 for d in .cargo .rustup .local/bin .local/share/uv .local/share/code-factory .omp/puppeteer .bun .nvm .pyenv .volta .deno go; do
   [[ -e $home/$d ]] && args+=(--ro-bind "$(realpath "$home/$d")" "$home/$d")
 done
+# The bun package cache is a symlink inside the read-only .bun; the omp native addon lives at its target.
+for d in .bun/install/cache; do
+  [[ -e $home/$d ]] && args+=(--ro-bind "$(realpath "$home/$d")" "$(realpath "$home/$d")")
+done
 for d in .cargo/registry .cargo/git; do
   [[ -e $home/$d ]] && args+=(--bind "$(realpath "$home/$d")" "$(realpath "$home/$d")")
 done
@@ -115,7 +119,7 @@ for p in "${ro[@]}"; do [[ -n $p ]] && args+=(--ro-bind "$(realpath "$p")" "$(re
 
 # Names that point at a live socket, bus or agent never cross into the sandbox.
 unset_vars=(DBUS_SESSION_BUS_ADDRESS SSH_AUTH_SOCK GPG_AGENT_INFO DOCKER_HOST TMUX TMUX_TMPDIR
-  GOTMPDIR MEMORY_PRESSURE_WATCH XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME)
+  GOTMPDIR MEMORY_PRESSURE_WATCH XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME PI_CONFIG_FILES)
 while IFS= read -r name; do unset_vars+=("$name"); done < <(compgen -e | grep -E '^(HERDR|TUIOS)_' || true)
 for v in "${unset_vars[@]}"; do args+=(--unsetenv "$v"); done
 args+=(--setenv HOME "$home" --setenv XDG_RUNTIME_DIR "$runtime" --setenv TMPDIR /tmp
