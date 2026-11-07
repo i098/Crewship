@@ -119,3 +119,23 @@ def test_marker_is_written_at_start_and_removed_at_shutdown(home):
     seen = json.loads(out.stdout)
     assert seen["during"]["pid"] == seen["pid"]
     assert seen["after"] is False
+
+
+def test_note_arriving_after_session_start_wakes_an_idle_session(home):
+    code = """
+import ext from {ext};
+import {{ writeFileSync, utimesSync }} from 'node:fs';
+const handlers = {{}};
+const sent = [];
+ext({{ on: (e, h) => (handlers[e] = h), sendUserMessage: (t) => sent.push(t) }});
+await handlers.session_start({{}}, {{ cwd: {home}, agent: {{ kind: 'main' }}, isIdle: () => true }});
+const note = {home} + '/state/inbox/9-late.note';
+writeFileSync(note, 'owner text\\n');
+const old = Date.now() / 1000 - 61;
+utimesSync(note, old, old);
+await new Promise((r) => setTimeout(r, 3000));
+handlers.session_shutdown({{}});
+console.log(JSON.stringify({{ sent }}));
+""".format(ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")), home=json.dumps(str(home)))
+    out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60)
+    assert len(json.loads(out.stdout)["sent"]) == 1

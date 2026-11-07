@@ -1,5 +1,6 @@
 """scripts/stale_omp_extension.py: a firstmate omp session without a stranded-wake load marker is reported."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -31,8 +32,10 @@ def test_session_without_a_load_marker_is_reported(tmp_path):
         assert check() == [f"{procs[0].pid}\t{home}"]
         marker = home / "state/.stranded-wake.loaded" / str(procs[0].pid)
         marker.parent.mkdir()
-        marker.write_text("{}")
+        marker.write_text(json.dumps({"pid": procs[0].pid, "at": int(time.time())}))
         assert check() == []  # loaded: nothing reported
+        marker.write_text(json.dumps({"pid": procs[0].pid, "at": int(time.time()) - 3600}))
+        assert check() == [f"{procs[0].pid}\t{home}"]  # marker predates the process: reused pid
     finally:
         for p in procs:
             p.kill()
