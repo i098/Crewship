@@ -312,7 +312,7 @@ The brief includes the batching rule: a feature branch built from several slices
 ## Board phone fit
 
 `~/.local/bin/board-phone-fit BOARD.html` (the `agents` role) loads the board in a 390x844 frame in headless Chrome.
-It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), two or more children at least 120 px wide that sit side by side and are each under half the phone width (`columns not stacked`; it skips `nav`, `.no-stack` and `inline-flex` rows, and `button`, `a`, `.pill`, `.chip` or `.tag` children), or a missing `width=device-width` viewport meta.
+It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), a `flex` or `grid` row that the shared CSS stacks but that shows two or more children side by side, each at least 120 px wide and under half the phone width (`columns not stacked`), or a missing `width=device-width` viewport meta.
 It prints `fits 390x844` and exits 0 when the board fits.
 `board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, and one column under 600 px for grids and for flex rows of two or more block children (`div`, `section`, `article`, `aside`, `ul`, `ol`, `table`, `pre`, `figure`).
 It does not stack a row in `nav`, or a row with a `button`, `a`, `.pill`, `.chip` or `.tag` child.

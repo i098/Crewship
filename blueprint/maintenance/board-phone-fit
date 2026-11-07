@@ -10,6 +10,11 @@ from pathlib import Path
 
 WIDTH, HEIGHT, MIN_TEXT_PX = 390, 844, 14
 
+# The flex rows the shared CSS stacks under 600 px; the probe checks exactly these rows.
+STACK = (":not(nav, nav *, .no-stack)"
+         ":has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure))"
+         ":not(:has(> .pill, > button, > a, > .chip, > .tag))")
+
 MOBILE_CSS = """/* board-phone-fit: shared mobile defaults; keep at the end of the board's <style> */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { overflow-wrap: break-word; }
@@ -20,14 +25,14 @@ pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
   body * { min-width: 0; max-width: 100%; }
   * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }
   table { display: block; overflow-x: auto; }
-  :not(nav, nav *, .no-stack):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)):not(:has(> .pill, > button, > a, > .chip, > .tag)) { flex-direction: column !important; }
-  :not(nav, nav *, .no-stack):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)):not(:has(> .pill, > button, > a, > .chip, > .tag)) > * { flex-basis: auto !important; }
+  STACK { flex-direction: column !important; }
+  STACK > * { flex-basis: auto !important; }
 }
-"""
+""".replace("STACK", STACK)
 
 # Runs in the board after load and posts its findings as JSON to the frame page (FRAME).
 PROBE = """<script>addEventListener('load', () => {
-  const MIN = %d, doc = document.documentElement, vw = doc.clientWidth, out = [];
+  const MIN = %d, STACK = %s, doc = document.documentElement, vw = doc.clientWidth, out = [];
   const sel = e => {
     const p = [];
     for (; e && e.nodeType === 1 && p.length < 4; e = e.parentElement) {
@@ -45,9 +50,8 @@ PROBE = """<script>addEventListener('load', () => {
       if (past(e) && !past(e.parentElement)) out.push(`overflow: ${sel(e)} ends at ${Math.round(e.getBoundingClientRect().right)}px`);
   }
   for (const e of document.querySelectorAll('body, body *')) {
-    if (e.closest('nav') || e.matches('.no-stack') || getComputedStyle(e).display === 'inline-flex') continue;
-    const cols = [...e.children].filter(c => !c.matches('.pill, .chip, .tag, button, a') && !getComputedStyle(c).display.startsWith('inline'))
-      .map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw / 2);
+    if (!['flex', 'grid'].includes(getComputedStyle(e).display) || !e.matches(STACK)) continue;
+    const cols = [...e.children].map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw / 2);
     if (cols.some((a, i) => cols.slice(i + 1).some(b => a.top < b.bottom - 1 && b.top < a.bottom - 1 && Math.abs(a.left - b.left) >= 1)))
       out.push(`columns not stacked: ${sel(e)}`);
   }
@@ -67,7 +71,7 @@ PROBE = """<script>addEventListener('load', () => {
     }
   }
   parent.postMessage({boardPhoneFit: out}, '*');
-});</script>""" % MIN_TEXT_PX
+});</script>""" % (MIN_TEXT_PX, json.dumps(STACK))
 
 # Headless Chrome will not make its window narrower than 500 px, so the board loads in a phone-sized iframe;
 # the frame page writes the findings into a <pre> that --dump-dom prints.

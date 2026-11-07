@@ -67,6 +67,7 @@ def test_columns_with_centered_unequal_heights_fail(tmp_path):
     '<div style="display:inline-flex;gap:8px"><div style="width:150px">alpha</div><div style="width:150px">beta</div></div>',
     '<div class="no-stack" style="display:flex;gap:8px"><div style="width:150px">alpha</div><div style="width:150px">beta</div></div>',
     '<div style="display:flex;gap:8px"><div class="pill" style="width:150px">alpha</div><div class="pill" style="width:150px">beta</div></div>',
+    '<table><tr><td style="width:150px">alpha</td><td style="width:150px">beta</td></tr></table>',
 ])
 def test_pill_rows_are_not_columns(tmp_path, row):
     assert fit.failures(board(tmp_path, row, fit.MOBILE_CSS)) == []
