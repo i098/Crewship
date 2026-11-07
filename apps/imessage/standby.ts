@@ -71,17 +71,17 @@ export async function ownership(o: {
 
 // A rolling deploy's confirm step: `start` queues one probe item through the real outbox and answers when its delivery
 // ran; `confirm` is that delivery (a transport read, no text). `add` queues the item, `read` is the transport read.
-export function probeKit(add: (id: string) => void, read: (item: { id?: string }) => Promise<unknown>) {
+export function probeKit<R, I extends { requestId?: string }>(add: (ref: R, id: string) => void, read: (item: I) => Promise<unknown>) {
   const waiting = new Map<string, () => void>();
   return {
-    start() {
+    start(ref: R) {
       const id = `probe-${crypto.randomUUID()}`;
       const { promise, resolve } = Promise.withResolvers<void>();
       waiting.set(id, resolve);
-      add(id);
+      add(ref, id);
       return Promise.race([promise.then(() => new Response("probe ok\n")), Bun.sleep(30_000).then(() => new Response("probe timed out\n", { status: 503 }))]).finally(() => waiting.delete(id));
     },
-    async confirm(item: { id?: string; requestId?: string }) {
+    async confirm(item: I) {
       await read(item);
       waiting.get(item.requestId!)?.();
     },

@@ -1,22 +1,23 @@
 {{ ansible_managed | comment }}
 # Front of the iMessage bridge (docs/imessage.md#rolling-deploys). The bridge itself runs as fm-imessage@<slot>.service;
-# this unit only starts the active slot at boot and stops the slots with it, so `is-active` still answers for the line.
+# this unit starts the active slot and follows it: its process exits while the active slot is gone, so `is-active` is
+# active only while a slot serves the line (activating while it restarts), and stopping it stops the slots.
 # Upgrades go through imessage-deploy, never through a restart of this unit.
 
 [Unit]
-Description=iMessage bridge front, starts the active slot (Crewship managed)
+Description=iMessage bridge front, follows the active slot (Crewship managed)
 After=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Restart=always
+RestartSec=15
 WorkingDirectory={{ crewship_imessage_dir }}
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment="FM_IMESSAGE_DIR={{ crewship_imessage_dir }}"
 StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-deploy.ts" boot'
+ExecStart=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-deploy.ts" follow'
 ExecStop=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-deploy.ts" stop-all'
 
 [Install]

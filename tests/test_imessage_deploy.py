@@ -121,6 +121,9 @@ class Rig:
     def deploy(self):
         return subprocess.run(["bun", str(ROOT / "apps/imessage/deploy.ts")], capture_output=True, text=True, env=self.env, timeout=180)
 
+    def needed(self):
+        return subprocess.run(["bun", str(ROOT / "apps/imessage/deploy.ts"), "needed"], capture_output=True, text=True, env=self.env, timeout=60).returncode
+
     def gap_during(self, action):
         """Runs action while polling /health; returns (action result, longest stretch in seconds with no answer)."""
         stop, longest, down_since = threading.Event(), [0.0], [None]
@@ -217,3 +220,65 @@ def test_a_slot_that_fails_after_the_handover_rolls_back_to_the_old_slot(rig):
     wait_for(lambda: len(rig.sent()) == 2, "a text through the restored slot")
     assert rig.sent() == ["send after", "send kept"]
     wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "an empty outbox")  # no item left behind
+
+
+PLANT_AFTER_HANDOVER = ('memory = new Memory(', 'if (process.env.FM_IMESSAGE_SLOT) throw new Error("planted failure after the handover");\nmemory = new Memory(')
+
+
+def plant_after_handover(stage):  # the build passes the gate, then dies when it takes the line
+    bridge = stage / "bridge.ts"
+    bridge.write_text(bridge.read_text().replace(*PLANT_AFTER_HANDOVER, 1))
+
+
+def test_a_failed_first_install_leaves_the_legacy_slot_and_the_next_deploy_still_works(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    rig.stage(plant_after_handover)
+    assert rig.needed() == 3
+    failed = rig.deploy()
+    assert failed.returncode == 1 and "rolling back to legacy" in failed.stdout, failed.stdout + failed.stderr
+    assert rig.active() == "legacy" and rig.alive("legacy") and rig.health()
+    assert rig.needed() == 3  # a failed deploy is not recorded, so the next apply tries again
+
+    rig.stage()
+    good = rig.deploy()
+    assert good.returncode == 0, good.stdout + good.stderr
+    assert rig.active() == "blue" and rig.alive("blue") and not rig.alive("legacy") and rig.health()
+    assert rig.needed() == 0
+    rig.stage(lambda stage: (stage / "extra.ts").write_text("// a new build\n"))
+    assert rig.needed() == 3
+
+
+def test_the_confirm_step_fails_when_there_is_no_text_to_read_back(rig):
+    rig.legacy()  # no inbound text: the bridge knows no latest text, so a probe would reach no transport
+    rig.stage()
+    result = rig.deploy()
+    assert result.returncode == 1 and "rolling back to legacy" in result.stdout, result.stdout + result.stderr
+    assert rig.active() == "legacy" and rig.alive("legacy") and rig.health()
+
+
+def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_once(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    rig.stage()
+    results, stop = [], threading.Event()
+
+    def keep_sending():
+        n = 0
+        while not stop.is_set():
+            r = subprocess.run([str(SEND), "--", f"text {n}"], capture_output=True, text=True, env=rig.env, timeout=200)
+            results.append(r.returncode)
+            n += 1
+            time.sleep(0.05)
+
+    sender = threading.Thread(target=keep_sending)
+    sender.start()
+    try:
+        deploy = rig.deploy()
+    finally:
+        stop.set()
+        sender.join()
+    assert deploy.returncode == 0, deploy.stdout + deploy.stderr
+    assert results and set(results) == {0}  # no send was refused, whichever side of the handover it hit
+    wait_for(lambda: len(rig.sent()) == len(results), "every text")
+    assert rig.sent() == sorted(f"send text {n}" for n in range(len(results)))  # each exactly once

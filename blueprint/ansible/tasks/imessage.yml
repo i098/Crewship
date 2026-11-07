@@ -112,6 +112,23 @@
     - reload user systemd
     - deploy fm-imessage
 
+# A deploy that failed leaves its record unchanged, so this task asks again on every apply until the staged build and units are deployed.
+- name: Check whether the staged iMessage bridge is deployed
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_local_bin }}/bun"
+      - "{{ crewship_local_bin }}/imessage-deploy.ts"
+      - needed
+  environment: "{{ crewship_user_systemd_env | combine({'HOME': crewship_cfg.home, 'FM_IMESSAGE_DIR': crewship_imessage_dir}) }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  register: crewship_imessage_needed
+  changed_when: crewship_imessage_needed.rc == 3
+  failed_when: crewship_imessage_needed.rc not in [0, 3]
+  check_mode: false
+  when: crewship_manage_services | bool
+  notify: deploy fm-imessage
+
 - name: Render the iMessage self-heal unit
   ansible.builtin.template:
     src: fm-imessage-heal.service.j2
