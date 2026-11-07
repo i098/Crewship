@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 
 import pytest
 from test_imessage import FAKE_UPSTREAM, ROOT, SEND, free_port, publish_json, wait_for
@@ -119,6 +121,28 @@ class Rig:
     def deploy(self):
         return subprocess.run(["bun", str(ROOT / "apps/imessage/deploy.ts")], capture_output=True, text=True, env=self.env, timeout=180)
 
+    def gap_during(self, action):
+        """Runs action while polling /health; returns (action result, longest stretch in seconds with no answer)."""
+        stop, longest, down_since = threading.Event(), [0.0], [None]
+
+        def poll():
+            while not stop.is_set():
+                now = time.monotonic()
+                if self.health():
+                    down_since[0] = None
+                else:
+                    down_since[0] = down_since[0] or now
+                    longest[0] = max(longest[0], time.monotonic() - down_since[0])
+                time.sleep(0.05)
+
+        thread = threading.Thread(target=poll)
+        thread.start()
+        try:
+            return action(), longest[0]
+        finally:
+            stop.set()
+            thread.join()
+
     def alive(self, slot):
         return subprocess.run(["systemctl", "--user", "is-active", f"fm-imessage@{slot}.service"], env=self.env).returncode == 0
 
@@ -148,8 +172,10 @@ def test_rolls_out_over_a_running_bridge_and_a_planted_broken_build_rolls_back(r
     rig.send("two")
     rig.stage()
 
-    good = rig.deploy()
+    good, gap = rig.gap_during(rig.deploy)
     assert good.returncode == 0, good.stdout + good.stderr
+    print(f"handover gap: {gap:.1f} s")
+    assert gap < 30  # the line answers /health again within seconds of the old slot stopping
     assert rig.active() == "blue" and rig.alive("blue") and not (rig.run / "front.pid").exists()
     (rig.fake / "send-hold").unlink()
     wait_for(lambda: len(rig.sent()) == 2, "the held texts")

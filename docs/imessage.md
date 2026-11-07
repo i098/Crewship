@@ -447,7 +447,7 @@ To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=fals
 
 ## Rolling deploys
 
-An install never restarts the bridge in place: a new process needs about 100 s before it listens, and a build with broken natives can start while systemd says `active`. `bun ~/.local/bin/imessage-deploy.ts` rolls the build in `<imessage dir>/stage/` out beside the running one. The Ansible role runs it as its only upgrade step; it is the only call workers and the heal unit make. The code is `apps/imessage/deploy.ts` and `ownership.ts`.
+An install never restarts the bridge in place: a new process needs about 100 s before it listens, and a build with broken natives can start while systemd says `active`. `bun ~/.local/bin/imessage-deploy.ts` rolls the build in `<imessage dir>/stage/` out beside the running one. The Ansible role runs it as its only upgrade step; it is the only call workers and the heal unit make. The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
 
 - **Slots.** The bridge runs as `fm-imessage@blue`, `fm-imessage@green` or `fm-imessage@legacy` (the files from before slots, kept as the rollback target of the first rolling install). The slot named in `~/.local/state/fm-imessage/active` owns the line. `fm-imessage.service` is only the front: it starts the active slot at boot and stops the slots with it.
 - **Standby.** A slot that is not active starts, connects the transports and serves only `GET /ready` and `/health` on `127.0.0.1:8766` (`FM_IMESSAGE_NEXT_PORT`). It builds no memory, outbox, routing replay or inbound loop, so it can send nothing.

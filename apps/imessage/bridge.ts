@@ -45,10 +45,9 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, createReadAfter, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
+import { brief, createReadAfter, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
-import { ownership } from "./ownership.ts";
-import { natives } from "./selfheal.ts";
+
 
 let stopping = false;
 const children = new Set<Bun.Subprocess>();
@@ -209,7 +208,11 @@ type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { replyTarget: string; space: string; by: "id" | "position" };
-const probes = new Map<string, () => void>(); // rolling deploy probes waiting for their outbox item
+// Rolling deploy confirm (ownership.ts): one item through the outbox that reads from the transport and sends no text.
+const probe = probeKit(
+  (id) => outbox.add({ ...(latestRef ?? { space: "", id: "" }), requestId: id, requests: [], guid: id, probe: true, front: true }),
+  (o) => (o.id ? lineOf(o as Ref)?.find(o as Ref).catch((e: unknown) => { if (!permanent(e)) throw e; }) : undefined),
+);
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -403,18 +406,7 @@ if (env.FM_IMESSAGE_SLOT) {
   await ownership({
     state: STATE, slot: env.FM_IMESSAGE_SLOT, port: PORT, standbyPort: Number(env.FM_IMESSAGE_NEXT_PORT || 8766), line: startups[0]!,
     say: (line) => console.log(`fm-imessage: ${line}`),
-    checks: {
-      natives: async () => {
-        const probe = env.FM_IMESSAGE_TEST === "1" ? env.FM_IMESSAGE_TEST_NATIVES : undefined; // the suite cannot load a real pi_natives .node
-        if (probe && await Bun.spawn(["sh", "-c", probe]).exited) throw new Error("natives do not load");
-        if (!probe) await natives(env);
-      },
-      desk: async () => {
-        const stub = spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env });
-        const read = await readDesk(stub);
-        if (!read.ok || !read.drafted.trim()) throw new Error("the desk model gave no stub reply");
-      },
-    },
+    checks: standbyChecks(env, () => readDesk(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }))),
   });
 } else await startups[0];
 memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
@@ -466,7 +458,7 @@ if (existsSync(ROUTING_LOG)) {
   if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
   else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
 }
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", (o, save) => (o.probe ? probe.confirm(o) : deliver(o, save)), RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
@@ -510,13 +502,7 @@ Bun.serve({
         return new Response(`no location: ${e instanceof Error ? e.message : String(e)}; he shares it with the line in Find My\n`, { status: 503 });
       }
     }
-    if (req.method === "POST" && url.pathname === "/probe") {
-      const id = `probe-${crypto.randomUUID()}`;
-      const { promise, resolve } = Promise.withResolvers<void>();
-      probes.set(id, resolve);
-      outbox.add({ ...(latestRef ?? { space: "", id: "" }), requestId: id, requests: [], guid: id, probe: true });
-      return await Promise.race([promise.then(() => new Response("probe ok\n")), Bun.sleep(30_000).then(() => new Response("probe timed out\n", { status: 503 }))]).finally(() => probes.delete(id));
-    }
+    if (req.method === "POST" && url.pathname === "/probe") return probe.start();
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
@@ -715,11 +701,6 @@ function checkDeskDelivery(o: Out) {
 
 async function deliver(o: Out, save: (o: Out) => void) {
   if (stopping) throw new Error("bridge stopping");
-  if (o.probe) { // rolling deploy confirm: read from the transport, send nothing
-    if (o.id) await lineOf(o)?.find(o).catch((e: unknown) => { if (!permanent(e)) throw e; });
-    probes.get(o.requestId!)?.();
-    return;
-  }
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
   if (o.done) recordResponse(o);
@@ -877,7 +858,6 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
 // Each chat has one lane for its answers, so their bubbles stay in order, and one for the front desk's ack, so a slow
 // send never holds the ack of a new text. Other chats never wait on this chat.
 function outLane(o: Out): string {
-  if (o.probe) return "probe"; // a deploy probe never waits behind a held send
   return `${o.line ?? "photon"}|${o.space}|${o.front ? "front" : ""}`;
 }
 
