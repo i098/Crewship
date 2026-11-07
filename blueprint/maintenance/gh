@@ -298,7 +298,8 @@ def read_cache(argv, cli):
             word += " " + next(words, "")
         if word.upper().replace("=", " ").replace("-XGET", "-X GET") in {"-X GET", "--METHOD GET"}:
             continue
-        if word.startswith(("-X", "--method")) or word.split("=")[0] in WRITE_FLAGS:
+        short = word if word.startswith("--") else word[:2]
+        if word.startswith(("-X", "--method")) or short.split("=")[0] in WRITE_FLAGS:
             return argv
         rest.append(word)
     return ["api", "--cache", READ_CACHE_TTL, *rest]
