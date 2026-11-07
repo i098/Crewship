@@ -200,6 +200,21 @@ def test_rolls_out_over_a_running_bridge_and_a_planted_broken_build_rolls_back(r
     assert rig.health()
 
 
+def test_a_gate_failure_on_the_first_install_leaves_the_state_as_it_was(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    (rig.fake / "natives-broken").touch()
+    rig.stage()
+    bad = rig.deploy()
+    assert bad.returncode == 1 and "natives do not load" in bad.stdout, bad.stdout + bad.stderr
+    assert not (rig.state / "active").exists() and rig.alive("front") and rig.health()
+
+    (rig.fake / "natives-broken").unlink()
+    good = rig.deploy()
+    assert good.returncode == 0, good.stdout + good.stderr
+    assert rig.active() == "blue" and rig.alive("blue") and not rig.alive("legacy") and rig.health()
+
+
 def test_a_slot_that_fails_after_the_handover_rolls_back_to_the_old_slot(rig):
     rig.legacy()
     rig.inbound("m1")

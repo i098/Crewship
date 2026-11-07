@@ -31,9 +31,10 @@ async function sc(...args: string[]) {
   return { out: out.trim(), code };
 }
 const active = async (name: string) => (await sc("is-active", "--quiet", name)).code === 0;
-// The bridge from before slots is the front unit's own process, so it is told apart from the front unit's follow process
-// by answering /health on the main port while no slot is recorded. After a rollback it runs as the slot "legacy".
-const legacyRunning = async () => (await active(unit("legacy"))) || (readActive(STATE) === undefined && (await get(PORT, "/health")).ok);
+// The bridge from before slots is the front unit's own process: it is live when the main port answers /health while no slot
+// unit runs and no active file names a slot. The front unit's follow process never answers /health. After a rollback it is the slot "legacy".
+const slotUp = async () => (await Promise.all(["blue", "green", "legacy"].map((s) => active(unit(s))))).some(Boolean);
+const legacyRunning = async () => (await active(unit("legacy"))) || (readActive(STATE) === undefined && !(await slotUp()) && (await get(PORT, "/health")).ok);
 const get = (port: number, path: string, method = "GET") =>
   fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "X-Firstmate": "1" }, signal: AbortSignal.timeout(40_000) }).then(async (r) => ({ ok: r.ok, body: (await r.text()).trim() }), () => ({ ok: false, body: "no answer" }));
 
@@ -97,7 +98,8 @@ async function deploy() {
   mkdirSync(STATE, { recursive: true, mode: 0o700 });
   const lock = await holdLock(`${STATE}/deploy.lock`, 900_000);
   if (!lock) throw new Error("another imessage-deploy holds the lock");
-  const cur = readActive(STATE) ?? ((await legacyRunning()) ? "legacy" : undefined);
+  const prior = readActive(STATE);
+  const cur = prior ?? ((await legacyRunning()) ? "legacy" : undefined);
   const live = cur === "legacy" ? await legacyRunning() : cur ? await active(unit(cur)) : false;
   const target = cur === "blue" ? "green" : "blue";
   if (cur === "legacy") snapshotLegacy();
@@ -107,6 +109,7 @@ async function deploy() {
 
   if (!live) { // nothing to protect: start the new slot as the owner
     if (cur) await sc("stop", unit(cur));
+    if (!prior) await sc("stop", FRONT);
     setActive(STATE, target);
     await sc("start", unit(target));
     const up = await until(BACK_MS, () => get(PORT, "/health"), target);
@@ -120,6 +123,7 @@ async function deploy() {
   if (!gate.ok) {
     await sc("stop", unit(target));
     say(`FAILED: health gate of ${target}: ${gate.body}; ${cur} was not touched`);
+    if (prior === undefined) rmSync(`${STATE}/active`, { force: true });
     process.exit(1);
   }
   say(`${target} passed the gate: ${gate.body}`);
