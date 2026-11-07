@@ -111,10 +111,21 @@ def test_marker_is_written_at_start_and_removed_at_shutdown(home):
         "console.log(JSON.stringify({{ during, after: existsSync(m), pid: process.pid }}));",
     )
     out = subprocess.run(
-        ["bun", "-e", code.format(
-            ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")),
-            home=json.dumps(str(home)), kind='"main"', idle="true", again="false")],
-        capture_output=True, text=True, check=True, timeout=60,
+        [
+            "bun",
+            "-e",
+            code.format(
+                ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")),
+                home=json.dumps(str(home)),
+                kind='"main"',
+                idle="true",
+                again="false",
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
     )
     seen = json.loads(out.stdout)
     assert seen["during"]["pid"] == seen["pid"]
@@ -136,6 +147,11 @@ utimesSync(note, old, old);
 await new Promise((r) => setTimeout(r, 3000));
 handlers.session_shutdown({{}});
 console.log(JSON.stringify({{ sent }}));
-""".format(ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")), home=json.dumps(str(home)))
-    out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60)
+""".format(
+        ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")),
+        home=json.dumps(str(home)),
+    )
+    out = subprocess.run(
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60
+    )
     assert len(json.loads(out.stdout)["sent"]) == 1

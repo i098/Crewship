@@ -40,9 +40,13 @@ def missing_marker() -> list[tuple[int, str]]:
             if (pid_dir / "comm").read_text().strip() != "omp":
                 continue
             home = os.readlink(pid_dir / "cwd")
-            if not (Path(home, "bin/fm-wake-drain.sh").exists() and Path(home, "state/inbox").is_dir()):
+            if not (
+                Path(home, "bin/fm-wake-drain.sh").exists() and Path(home, "state/inbox").is_dir()
+            ):
                 continue
-            if not loaded(Path(home, "state/.stranded-wake.loaded", pid_dir.name), started_at(pid_dir, btime)):
+            if not loaded(
+                Path(home, "state/.stranded-wake.loaded", pid_dir.name), started_at(pid_dir, btime)
+            ):
                 found.append((int(pid_dir.name), home))
         except OSError:
             continue  # process exited or is not ours
