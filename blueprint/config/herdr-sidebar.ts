@@ -35,7 +35,11 @@ const paneId = process.env.HERDR_PANE_ID;
 const workspaceId = process.env.HERDR_WORKSPACE_ID;
 const herdr = process.env.HERDR_BIN_PATH || "herdr";
 
-const HAS_IONICE = (process.env.PATH || "").split(path.delimiter).some((d) => d && existsSync(path.join(d, "ionice")));
+const onPath = (name: string) => (process.env.PATH || "").split(path.delimiter).some((d) => d && existsSync(path.join(d, name)));
+const HAS_IONICE = onPath("ionice");
+// The PR lookup reads with the repository's GitHub App token (gh-read-token falls back to the user login)
+// so the refresh of every pane stays off the user's rate limit.
+const GH = onPath("gh-read-token") ? ["gh-read-token", "run", "gh"] : ["gh"];
 let gitBusy = 0;
 const gitQueue: (() => void)[] = [];
 
@@ -182,7 +186,7 @@ async function ghPulls(cwd: string, owner: string, branch: string, etag?: string
   const args = ["api", "-i", "-X", "GET", ...(etag ? ["-H", `If-None-Match: ${etag}`] : []), endpoint];
   let out: string;
   try {
-    out = await run("gh", args, cwd);
+    out = await run(GH[0], [...GH.slice(1), ...args], cwd);
   } catch (e) {
     out = e?.stdout || ""; // gh exits non-zero on 304
     if (!/^HTTP\/\S+ 304/.test(out)) throw e;

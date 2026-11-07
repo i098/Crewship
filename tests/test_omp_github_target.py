@@ -204,6 +204,18 @@ def test_both_commands_resolve_to_managed_wrappers(home, run):
     assert (guard / "gh-axi-real").resolve().name == "gh-axi.js"
 
 
+def test_repository_reads_go_through_the_read_token_helper_and_writes_do_not(home, run, tmp_path):
+    helper = home / ".local/bin/gh-read-token"
+    seen = tmp_path / "helper-calls"
+    helper.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {seen}\nshift\nexec "$@"\n')
+    helper.chmod(0o755)
+    assert run("gh api repos/o/r/pulls").returncode == 0
+    assert run("gh api -X POST repos/o/r/labels -f name=x", contract="o/r").returncode == 0
+    assert run("gh api user").returncode == 0
+    real = home / ".local/share/crewship/gh-guard/gh-real"
+    assert seen.read_text().splitlines() == [f"run {real.resolve()} api repos/o/r/pulls"]
+
+
 def test_argv_cwd_env_stdin_and_status_pass_through(run, tmp_path):
     (tmp_path / "work/sub").mkdir()
     argv = ["issue", "create", "-R", CONTRACT, "--title", "two words", "--body", "$x 'q' \\n"]
