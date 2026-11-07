@@ -44,7 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, routeRow, sendRecorded, transient, Turns, withTarget } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -530,18 +530,10 @@ Bun.serve({
     const parts = bubbles(cleanText(rawText));
     if (!parts.length && !photo) return new Response("empty message", { status: 400 });
     // ?reply=N targets his Nth latest text; ?reply-id=ID targets that exact message id. ?no-thread forces plain, even with an explicit target.
-    return withTarget(recent, url.searchParams, (target) => {
-      // A threaded reply goes out on the transport and in the conversation of the text it replies to.
-      const destination = target ?? proactiveRef;
-      if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
-      if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
-      const key = keyOf(req);
-      if (key instanceof Response) return key;
-      const who = mateOfSender(sender) ?? sender ?? "main";
-      const record = () => { if (target) recordRoute(routeRow(target, url.searchParams)); };
-      return sendRecorded(STATE, { key, sender: who, text: parts.join("\n\n"), alone: !!photo }, record, (dup) =>
-        queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }));
-    });
+    const who = mateOfSender(sender) ?? sender ?? "main";
+    return sendReply({ recent, params: url.searchParams, proactive: proactiveRef, muted: muted(), dir: STATE, sender: who, text: parts.join("\n\n"), alone: !!photo,
+      key: () => keyOf(req), record: recordRoute,
+      queue: (target, destination, dup) => queueSend({ destination, target, photo, parts: dup ? [] : parts, sender, plain: url.searchParams.has("no-thread") }) });
   },
 });
 

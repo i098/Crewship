@@ -3,6 +3,7 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 // The line's reliability pieces live together: the self-heal heartbeat is exported here so the bridge keeps one import for them.
 export { heartbeat, Turns } from "./selfheal.ts";
+import { routeRow, withTarget } from "./reply-target.ts";
 import { alreadySent, KEY_PATTERN, logSend, type Send } from "./sender-log.ts";
 
 const NETWORK = /^(TimeoutError|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EPIPE|ConnectionRefused|ConnectionClosed|FailedToOpenSocket|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_CLOSED)$/;
@@ -239,4 +240,22 @@ export const deskLog = (dir: string) => ({
   report: (text: string) => logSend(dir, { sender: "desk", text }),
 });
 
-export { routeRow, withTarget } from "./reply-target.ts";
+type Spot = { id: string; space: string; line?: string };
+
+// The target, destination and send of /send and /image after the text is checked: a refused target is a 400 and queues nothing;
+// the replyTarget row is written only for a threaded send that went out ok.
+export function sendReply<T extends Spot>(o: {
+  recent: T[]; params: URLSearchParams; proactive?: T; muted: boolean; dir: string; sender: string; text: string; alone: boolean;
+  key: () => string | undefined | Response; record: (row: ReturnType<typeof routeRow>) => void; queue: (target: T | undefined, destination: T, dup: boolean) => Response;
+}): Response {
+  return withTarget(o.recent, o.params, (target) => {
+    const destination = target ?? o.proactive;
+    if (!destination) return new Response("no direct text from the owner yet; he must text the line first\n", { status: 503 });
+    if (o.muted) return new Response("nothing queued: muted\n", { status: 503 });
+    const key = o.key();
+    if (key instanceof Response) return key;
+    const record = () => { if (target && !o.params.has("no-thread")) o.record(routeRow(target, o.params)); };
+    return sendRecorded(o.dir, { key, sender: o.sender, text: o.text, alone: o.alone }, record, (dup) => o.queue(target, destination, dup));
+  });
+}
+
