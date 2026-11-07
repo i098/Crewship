@@ -2,7 +2,7 @@
 // to Firstmate or a listed second mate, waits for the routed answer, and hands it back to the bridge's checked reply path.
 // The target answers by writing a file, the only answer channel. A task file beside it keeps the chat and the text on disk,
 // so an answer that comes after a restart or after the wait limit is still sent, once, by the sweep.
-// A task that is lost (not delivered, no answer in time, answer refused) is put in Firstmate's inbox, and the owner gets one fixed follow-up.
+// A task that is lost (not delivered, no answer in time, answer refused) is put in Firstmate's inbox (a mate task with no answer in time goes to the mate first), and the owner gets one fixed follow-up.
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { STE_STYLE } from "./ste.ts";
 import { replyText, TASK_GUID_PREFIX } from "./desk-actions.ts";
@@ -26,6 +26,11 @@ export type DelegateHost<O> = {
 };
 
 export const FOLLOW_UP = "Still with Firstmate; you will hear back";
+export const QUEUED = (mate: Secondmate) => `I could not reach the ${mate.id} mate. Firstmate has your text queued`;
+export const UNDELIVERED = "I could not deliver your text to anyone. Send it again";
+
+// What a mate task's ack may claim: `sent` only after the mate's inbox took the task.
+export type Outcome = "sent" | "queued" | "failed";
 export const WAIT_MS = 600_000;
 
 type Job<O> = { id: string; text: string; origin: O; guid: string };
@@ -41,12 +46,14 @@ async function attempt<O>(host: DelegateHost<O>, target: DelegateTarget, id: str
   }
 }
 
-async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused = "") {
+// A task nobody answered goes to the named mate once more (one retry), else to Firstmate. `mate` is set only for a timeout.
+async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused = "", mate?: Secondmate) {
   const note = `${job.text}\nThe desk stopped waiting for this task (${why}). Answer the owner directly.${refused && `\nThe answer the desk refused to send:\n${refused}`}`;
-  let held = false;
-  try { held = await host.send("firstmate", `${job.id}-lost`, note); } catch (error) { host.log(error); }
+  let held: Secondmate | "firstmate" | undefined;
+  if (mate) for (let i = 0; i < 2 && !held; i++) if (await attempt(host, mate, `${job.id}-lost`, note)) held = mate;
+  if (!held) try { if (await host.send("firstmate", `${job.id}-lost`, note)) held = "firstmate"; } catch (error) { host.log(error); }
   if (!held) return host.log(new Error(`desk task ${job.id} reached no inbox`));
-  if (!host.muted()) try { host.report([FOLLOW_UP], `${job.guid}-followup`, job.origin); } catch (error) { host.log(error); }
+  if (!host.muted()) try { host.report([held === "firstmate" ? FOLLOW_UP : `Still with the ${held.id} mate; you will hear back`], `${job.guid}-followup`, job.origin); } catch (error) { host.log(error); }
 }
 
 // The answer reaches the owner through the checked reply path; a muted desk drops it.
@@ -78,7 +85,7 @@ async function helped<O>(host: DelegateHost<O>, kind: HelperKind, text: string, 
   return await finish(host, job, answer);
 }
 
-async function run<O>(host: DelegateHost<O>, live: Set<string>, target: DelegateTarget, text: string, origin: O) {
+async function run<O>(host: DelegateHost<O>, live: Set<string>, target: DelegateTarget, text: string, origin: O, ack?: (outcome: Outcome) => void) {
   const kind = typeof target === "string" ? helperKind(target) : undefined;
   if (kind) return helped(host, kind, text, origin); // no await first: the helper is busy before the tool call returns
   mkdirSync(host.answerDir, { recursive: true, mode: 0o700 });
@@ -92,10 +99,13 @@ async function run<O>(host: DelegateHost<O>, live: Set<string>, target: Delegate
     if (!await attempt(host, target, id, task)) {
       rmSync(`${base}.task`, { force: true });
       host.log(new Error(`desk task for ${typeof target === "string" ? target : target.id} was not delivered`));
-      return await lost(host, job, "not delivered");
+      if (!ack) return await lost(host, job, "not delivered");
+      const held = await host.send("firstmate", `${id}-lost`, `${text}\nThe desk could not deliver this task to ${(target as Secondmate).id}. Answer the owner directly.`).catch((error) => (host.log(error), false));
+      return ack(held ? "queued" : "failed");
     }
+    ack?.("sent");
     const answer = await answerFrom(host, `${base}.answer`);
-    if (answer === undefined) return host.stopping() ? undefined : await lost(host, job, "no answer in time");
+    if (answer === undefined) return host.stopping() ? undefined : await lost(host, job, "no answer in time", "", typeof target === "string" ? undefined : target);
     rmSync(`${base}.task`, { force: true });
     return await finish(host, job, answer);
   } finally {
@@ -124,5 +134,5 @@ function sweep<O>(host: DelegateHost<O>, live: Set<string>) {
 export function createDelegator<O>(host: DelegateHost<O>) {
   const live = new Set<string>();
   setInterval(() => sweep(host, live), host.pollMs).unref();
-  return (target: DelegateTarget, text: string, origin: O) => void run(host, live, target, text, origin).catch(host.log);
+  return (target: DelegateTarget, text: string, origin: O, ack?: (outcome: Outcome) => void) => void run(host, live, target, text, origin, ack).catch(host.log);
 }

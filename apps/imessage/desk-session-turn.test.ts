@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createSessionTurn, type TurnRequest } from "./desk-session-turn.ts";
+import { QUEUED } from "./desk-delegate.ts";
 
 const FAKE = join(import.meta.dir, "../../tests/fake_desk_omp.ts");
 const cleanup: (() => void)[] = [];
@@ -95,6 +96,30 @@ test("delegate_task answers as a delegated ack first, then the task is sent once
   await turn([request], new AbortController(), () => true);
   for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
   expect(events).toEqual([["answer", ["On it."], true], ["send", "firstmate", "DELEGATE firstmate"]]);
+});
+
+test("a mate delegation acks \"sent\" only after the send, else says it is queued for Firstmate", async () => {
+  for (const [delivered, expected] of [[true, ["On it."]], [false, [QUEUED({ id: "mate1", home: "/srv/mate1", scope: "s" })]]] as const) {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "data"), { recursive: true });
+    writeFileSync(join(dir, "data", "secondmates.md"), "- mate1 - Mate one (home: /srv/mate1; scope: s; projects: none)\n");
+    const wrapper = join(dir, "omp");
+    writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
+    chmodSync(wrapper, 0o755);
+    const events: unknown[][] = [];
+    const turn = createSessionTurn<TurnRequest>({ sent: () => false, record: () => {}, message: async () => true,
+      env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+      stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
+      memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
+      log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts) => events.push(["answer", parts]),
+      react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true,
+      send: async (target) => target === "firstmate" || delivered, report: () => {},
+    });
+    await turn([{ requestId: "r1", text: "DELEGATE mate1", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" }], new AbortController(), () => true);
+    for (let i = 0; i < 300 && !events.length; i++) await Bun.sleep(10);
+    expect(events).toEqual([["answer", expected]]);
+  }
 });
 
 test("an owner instruction is acked with handoff_main: one handoff, one ack text, no background task", async () => {

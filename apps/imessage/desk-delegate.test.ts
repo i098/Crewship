@@ -206,3 +206,46 @@ test("a helper that fails or times out hands the ask to Firstmate and texts a sh
     expect(r.sent[0].text).toContain("install the ripgrep skill");
   }
 });
+
+test("a mate task's ack says sent only after the mate's inbox took it", async () => {
+  const acks: string[] = [];
+  const r = rig();
+  r.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
+  await until(() => acks.length === 1);
+  expect(acks).toEqual(["sent"]);
+});
+
+test("a mate task that cannot be sent is queued for Firstmate: the ack says queued, with no second follow-up", async () => {
+  const acks: string[] = [];
+  const r = rig({ send: async (target, _id, text) => { r.sent.push({ target, text }); return target === "firstmate"; } });
+  r.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
+  await until(() => acks.length === 1);
+  expect(acks).toEqual(["queued"]);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
+  expect(r.reports).toEqual([]);
+  const none = rig({ send: async () => false });
+  none.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
+  await until(() => acks.length === 2);
+  expect(acks[1]).toBe("failed");
+});
+
+test("a mate task that times out is sent to the mate, retried once, and the follow-up names the mate", async () => {
+  let fails = 1;
+  const r = rig({ waitMs: 60, send: async (target, _id, text) => {
+    r.sent.push({ target, text });
+    return !(target === mate1 && r.sent.length > 1 && fails-- > 0);
+  } });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, mate1]);
+  expect(r.sent[2].text).toContain("The desk stopped waiting for this task (no answer in time)");
+  expect(r.reports[0].parts[0]).toContain("mate1");
+});
+
+test("a mate task that times out falls back to Firstmate when both sends to the mate fail", async () => {
+  const r = rig({ waitMs: 60, send: async (target, _id, text) => { r.sent.push({ target, text }); return target === "firstmate" || r.sent.length === 1; } });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, mate1, "firstmate"]);
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
+});

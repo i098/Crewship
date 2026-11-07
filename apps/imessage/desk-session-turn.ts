@@ -2,7 +2,7 @@
 // The bridge passes its effects in (SessionHost); a turn that ends with no action gets one reminder, then its words go out as the reply or the text goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
-import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
+import { createDelegator, QUEUED, UNDELIVERED, WAIT_MS } from "./desk-delegate.ts";
 import { createHelper, spawnHelper, type HelperKind } from "./desk-helper.ts";
 import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
@@ -181,8 +181,10 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       handoff: (reason, ack) => handoffWithAck(host, pending, reason, ack),
       helperBusy: helper.busy,
       delegate: (mate, parts, target) => {
-        host.answer(pending, parts, pending[target - 1], true);
-        delegate(mate, original.join("\n"), pending.at(-1)!);
+        const answer = (text: string[]) => host.answer(pending, text, pending[target - 1], true);
+        // A mate task's ack waits for the send: the owner is told "sent" only after the mate's inbox took it.
+        if (typeof mate === "string") { answer(parts); return delegate(mate, original.join("\n"), pending.at(-1)!); }
+        delegate(mate, original.join("\n"), pending.at(-1)!, (outcome) => answer(outcome === "sent" ? parts : [outcome === "queued" ? QUEUED(mate) : UNDELIVERED]));
       },
       status: async () => {
         const inbox = await host.inbox();
