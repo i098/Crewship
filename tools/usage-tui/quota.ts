@@ -147,8 +147,8 @@ export function githubRows(g: GithubRate, topCaller?: string): QuotaRow[] {
 // ---- which detected providers get a row ---------------------------------------------
 // A provider shows only with a key in use and some use in the last ACTIVE_DAYS; ALWAYS_SHOW labels always show.
 // rtk has no key, so the rule does not apply to it.
-const ACTIVE_DAYS = Number(process.env.USAGE_TUI_ACTIVE_DAYS) || 7
-const ALWAYS_SHOW = (process.env.USAGE_TUI_ALWAYS_SHOW ?? "claude,codex,deepseek,mercury,glm").split(",").map(s => s.trim()).filter(Boolean)
+const ACTIVE_DAYS = 7
+const ALWAYS_SHOW = ["claude", "codex", "deepseek", "mercury", "glm"]
 
 // `active`: provider ids with use in the window; undefined means usage is unknown, so nothing is hidden.
 function visibleProviders(providers: DetectedProvider[], active?: string[]): DetectedProvider[] {
@@ -259,7 +259,7 @@ const SESSIONS = `${HOME}/.omp/agent/sessions`
 const AGENT_DB = `${HOME}/.omp/agent/agent.db`
 const STATS_DB = `${HOME}/.omp/stats.db`
 // Optional: a GitHub App helper may write the top API caller here as one line of text.
-const GH_TOP = process.env.USAGE_TUI_GH_TOP_CALLER ?? `${HOME}/.local/state/crewship/github-top-caller.txt`
+const GH_TOP = `${HOME}/.local/state/crewship/github-top-caller.txt`
 
 // setsid -f: the child leaves the pane's foreground group, so herdr does not list the pane as omp.
 // setsid -w keeps the child's exit status for the check below.
