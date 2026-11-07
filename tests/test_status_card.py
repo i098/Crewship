@@ -87,6 +87,22 @@ def test_parser_keeps_today_since_from_json(card):
     assert card.parse('{"title": "T", "today_since": "2026-11-07T00:00:00-08:00"}')["today_since"] == "2026-11-07T00:00:00-08:00"
 
 
+@pytest.mark.parametrize("bad", ["2026-11-07T00:00:00", "yesterday", 5, None])
+def test_unusable_today_since_prints_no_footer(card, bad):
+    c = card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5}, "today_since": bad}))
+    assert c["today_since"] is None and "Today counts" not in card.render(c)[0]
+
+
+@pytest.mark.parametrize(
+    ("tz", "since", "shown"),
+    [("America/Los_Angeles", "2026-11-06T08:00:00+00:00", "00:00"), ("Asia/Tokyo", "2026-11-06T15:30:00+00:00", "00:30")],
+)
+def test_footer_shows_the_cutoff_in_the_card_zone(card, monkeypatch, tz, since, shown):
+    monkeypatch.setenv("STATUS_CARD_TZ", tz)
+    c = card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5}, "today_since": since}))
+    assert f"Today counts from {shown}, {tz} time." in card.render(c)[0]
+
+
 def test_card_without_today_since_has_no_zone_footer(card):
     page, _ = card.render(card.parse("T\n- a: open 1\ndisk: 5%"))
     assert "Today counts" not in page

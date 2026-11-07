@@ -86,13 +86,21 @@ def parse_text(text):
     return card
 
 
+def aware_time(value):
+    """The value when it is an ISO 8601 string with a UTC offset, else None."""
+    try:
+        return value if datetime.fromisoformat(value).utcoffset() is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_json(data):
     projects = [{"name": str(p["name"]), **{k: int(p.get(k) or 0) for k in COUNTS},
                  "states": [STATES[s.lower()] for s in p.get("states", []) if s.lower() in STATES], "note": str(p.get("note") or "")}
                 for p in data.get("projects", [])]
     return {"title": str(data.get("title", "")), "projects": projects,
             "gauges": {str(k): round(float(v)) for k, v in dict(data.get("gauges") or {}).items()},
-            "notes": [str(n) for n in data.get("notes", [])], "today_since": data.get("today_since")}
+            "notes": [str(n) for n in data.get("notes", [])], "today_since": aware_time(data.get("today_since"))}
 
 
 def parse(text):
