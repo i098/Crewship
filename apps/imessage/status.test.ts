@@ -78,3 +78,10 @@ test("a compaction reply reads text and usage from the json stream, or takes pla
   expect(compactReply(stream)).toEqual({ text: "line", model: "gpt-6-luna", input: 9, output: 2 });
   expect(compactReply("plain line")).toEqual({ text: "plain line", model: "gpt-6-luna" });
 });
+
+test("a front timeout falls back to Firstmate and says so; other failures do not", async () => {
+  globalThis.fetch = (async () => { throw new DOMException("limit", "TimeoutError"); }) as unknown as typeof fetch;
+  expect(await runFront(front(["please fix the footer"]))).toMatchObject({ timedOut: true, intents: [{ kind: "relay", target: "firstmate" }] });
+  globalThis.fetch = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
+  expect((await runFront(front(["please fix the footer"]))).timedOut).toBeUndefined();
+});

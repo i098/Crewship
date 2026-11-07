@@ -7,7 +7,7 @@ import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT,
 import { logTokens, usageTokens } from "./tokenlog.ts";
 import { STE_STYLE } from "./ste.ts";
 export { steChecked } from "./ste.ts";
-export { TIMEOUT_REPLY, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline } from "./desk-deadline.ts";
+export { FRONT_TIMEOUT_REPLY, TIMEOUT_REPLY, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline } from "./desk-deadline.ts";
 import { type Heard, isAudio } from "./transcribe.ts";
 
 // The front desk's system prompt. The owner's name and the model names come from config, never from this text.

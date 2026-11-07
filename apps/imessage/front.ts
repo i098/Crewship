@@ -12,7 +12,8 @@ export type FrontIntent = { kind: "status" } | { kind: "dispatch"; model: string
   domains: string[];
   category: (typeof RELAY_CATEGORIES)[number];
 };
-export type FrontResult = { intents: FrontIntent[] };
+// `timedOut` marks the fallback relay after the 15 s model limit, so the desk can say that Firstmate has the text.
+export type FrontResult = { intents: FrontIntent[]; timedOut?: true };
 export type FrontInput = {
   original: readonly string[];
   recent: readonly FrontMessage[];
@@ -236,7 +237,8 @@ export async function runFront(input: FrontInput): Promise<FrontResult> {
     }
   } catch (error) {
     input.signal.throwIfAborted();
-    return failed(input, error instanceof Error ? error.name : "error");
+    const name = error instanceof Error ? error.name : "error";
+    return name === "TimeoutError" ? { ...failed(input, name), timedOut: true } : failed(input, name);
   }
   return failed(input, "two invalid answers");
 }

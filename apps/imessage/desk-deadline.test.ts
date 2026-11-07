@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { TIMEOUT_REPLY, timeOutTurn, typingOutlivesTurn, withDeadline } from "./desk-deadline.ts";
+import { createBurst, TIMEOUT_REPLY, timeOutTurn, typingOutlivesTurn, withDeadline } from "./desk-deadline.ts";
 
 test("a stuck turn times out once and the late result is ignored", async () => {
   let fired = 0;
@@ -43,4 +43,11 @@ test("typing outlives a turn only for a desk answer awaiting delivery", () => {
   expect(typingOutlivesTurn([{ route: "desk", out: { bubbles: ["hi"] } }])).toBe(true);
   expect(typingOutlivesTurn([{ route: "handoff" }])).toBe(false);
   expect(typingOutlivesTurn([{ route: "desk", out: { bubbles: [] } }])).toBe(false);
+});
+
+test("a burst allows one honest line until the next desk reply resets it", () => {
+  const burst = createBurst();
+  expect([burst.claim(), burst.claim()]).toEqual([true, false]);
+  burst.reset();
+  expect(burst.claim()).toBe(true);
 });
