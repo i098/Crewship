@@ -99,3 +99,59 @@ def test_a_stuck_item_wakes_once_and_a_new_item_wakes_again(home):
     note.write_text("another\n")
     age(note, 61)
     assert len(run(home)["sent"]) == 1
+
+
+def test_marker_is_written_at_start_and_removed_at_shutdown(home):
+    code = SCRIPT.replace("handlers.session_shutdown({{}});", "").replace(
+        "console.log(JSON.stringify({{ sent }}));",
+        "import {{ existsSync, readFileSync }} from 'node:fs';"
+        "const m = {home} + '/state/.stranded-wake.loaded/' + process.pid;"
+        "const during = existsSync(m) ? JSON.parse(readFileSync(m, 'utf8')) : null;"
+        "handlers.session_shutdown({{}});"
+        "console.log(JSON.stringify({{ during, after: existsSync(m), pid: process.pid }}));",
+    )
+    out = subprocess.run(
+        [
+            "bun",
+            "-e",
+            code.format(
+                ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")),
+                home=json.dumps(str(home)),
+                kind='"main"',
+                idle="true",
+                again="false",
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    seen = json.loads(out.stdout)
+    assert seen["during"]["pid"] == seen["pid"]
+    assert seen["after"] is False
+
+
+def test_note_arriving_after_session_start_wakes_an_idle_session(home):
+    code = """
+import ext from {ext};
+import {{ writeFileSync, utimesSync }} from 'node:fs';
+const handlers = {{}};
+const sent = [];
+ext({{ on: (e, h) => (handlers[e] = h), sendUserMessage: (t) => sent.push(t) }});
+await handlers.session_start({{}}, {{ cwd: {home}, agent: {{ kind: 'main' }}, isIdle: () => true }});
+const note = {home} + '/state/inbox/9-late.note';
+writeFileSync(note, 'owner text\\n');
+const old = Date.now() / 1000 - 61;
+utimesSync(note, old, old);
+await new Promise((r) => setTimeout(r, 3000));
+handlers.session_shutdown({{}});
+console.log(JSON.stringify({{ sent }}));
+""".format(
+        ext=json.dumps(str(ROOT / "blueprint/config/omp-stranded-wake.ts")),
+        home=json.dumps(str(home)),
+    )
+    out = subprocess.run(
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60
+    )
+    assert len(json.loads(out.stdout)["sent"]) == 1

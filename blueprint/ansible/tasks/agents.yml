@@ -317,6 +317,26 @@
     remote_src: true
   become: true
 
+# omp loads extensions only at process start. A main without the extension's load marker
+# has no stranded-wake guard, so name it instead of leaving it silent (docs/omp.md).
+- name: Find firstmate omp sessions without the stranded-wake load marker
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_repo }}/scripts/stale_omp_extension.py"
+  register: crewship_stale_wake_sessions
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Warn that a running main lacks the stranded-wake extension
+  ansible.builtin.debug:
+    msg: >-
+      These firstmate omp sessions (pid, home) have no stranded-wake load marker and run without the extension.
+      Restart each one once so it loads the extension:
+      {{ crewship_stale_wake_sessions.stdout_lines | default([]) }}
+  when: crewship_stale_wake_sessions.stdout_lines | default([]) | length > 0
+
 - name: Install the spawned Opus effort cap omp extension
   ansible.builtin.copy:
     src: "{{ crewship_blueprint }}/config/omp-opus-effort-cap.ts"

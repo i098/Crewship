@@ -21,10 +21,11 @@
  * Active only for a non-subagent session whose cwd holds bin/fm-wake-drain.sh and
  * state/inbox; any other omp session ignores it.
  */
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 
 export const GRACE_MS = 45_000;
+export const VERSION = 2;
 
 interface Ctx {
 	cwd?: string;
@@ -71,6 +72,7 @@ export default function (pi: Api) {
 	let ctx: Ctx | undefined;
 	let timer: NodeJS.Timeout | undefined;
 	const watchers: FSWatcher[] = [];
+	let marker = "";
 
 	function firedIds(): Set<string> {
 		try {
@@ -128,6 +130,14 @@ export default function (pi: Api) {
 		home = cwd;
 		for (const w of watchers.splice(0)) w.close();
 		try {
+			const dir = join(home, "state", ".stranded-wake.loaded");
+			mkdirSync(dir, { recursive: true });
+			marker = join(dir, String(process.pid));
+			writeFileSync(marker, JSON.stringify({ pid: process.pid, at: Math.floor(Date.now() / 1000), version: VERSION }));
+		} catch {
+			// the marker only feeds the apply-time check; the wake path matters more
+		}
+		try {
 			watchers.push(watch(join(home, "state", "inbox"), schedule));
 			watchers.push(watch(join(home, "state"), (_kind, name) => name === ".wake-queue" && schedule()));
 		} catch {
@@ -137,6 +147,8 @@ export default function (pi: Api) {
 	});
 	pi.on("session_shutdown", () => {
 		for (const w of watchers.splice(0)) w.close();
+		if (marker) rmSync(marker, { force: true });
+		marker = "";
 		clearTimeout(timer);
 		timer = undefined;
 		home = "";
