@@ -1,6 +1,6 @@
 // Remaining-quota rows for usage-tui: parsing, percent-left maths, colors, reset formatting, loaders.
 // Sources: `omp usage --json` (Claude, Codex), the Z.ai quota endpoint, omp session files (Mercury per key),
-// the reseller's quotaMe call (DeepSeek plan quota).
+// the reseller's quotaMe call (DeepSeek plan quota), `gh api rate_limit` (GitHub API).
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -129,10 +129,38 @@ export function rtkRows(g: RtkGain): QuotaRow[] {
   return [{ account: "rtk", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: text }]
 }
 
+// ---- GitHub API ------------------------------------------------------------------
+// `gh api rate_limit`: reset is epoch seconds. The call does not count against the limit.
+type GhLimit = { limit?: unknown; remaining?: unknown; reset?: unknown }
+export type GithubRate = { resources?: { core?: GhLimit; graphql?: GhLimit } }
+
+export function githubRows(g: GithubRate, topCaller?: string): QuotaRow[] {
+  const rows = (["core", "graphql"] as const).map(win => {
+    const l = g.resources?.[win] ?? {}
+    const m = finite(l.remaining) && finite(l.limit) ? leftOf(l.limit - l.remaining, l.limit) : null
+    return { account: "github", window: win, usedPct: m?.usedPct ?? null, leftPct: m?.leftPct ?? null, resetsAt: finite(l.reset) ? l.reset * 1000 : null, note: m ? `${l.remaining} / ${l.limit}` : "not reported" }
+  })
+  if (topCaller) rows.push({ account: "github", window: "top", usedPct: null, leftPct: null, resetsAt: null, note: topCaller })
+  return rows
+}
+
+// ---- which detected providers get a row ---------------------------------------------
+// A provider shows only with a key in use and some use in the last ACTIVE_DAYS; ALWAYS_SHOW labels always show.
+// rtk has no key, so the rule does not apply to it.
+const ACTIVE_DAYS = 7
+const ALWAYS_SHOW = ["claude", "codex", "deepseek", "mercury", "glm"]
+
+// `active`: provider ids with use in the window; undefined means usage is unknown, so nothing is hidden.
+function visibleProviders(providers: DetectedProvider[], active?: string[]): DetectedProvider[] {
+  if (!active) return providers
+  return providers.filter(p => ALWAYS_SHOW.includes(p.label) || p.source === "rtk-gain" || (p.accounts > 0 && active.includes(p.id)))
+}
+
 // ---- assembly ---------------------------------------------------------------
 export type QuotaInput = {
   now?: number // fixtures pin the clock
   providers?: DetectedProvider[] // from usage-tui-detect; absent means every source is shown
+  active?: string[] // provider ids with use in the last ACTIVE_DAYS, from omp's stats store
   omp?: OmpUsage
   ompError?: string
   zai?: ZaiQuota
@@ -143,11 +171,15 @@ export type QuotaInput = {
   deepseekError?: string
   rtk?: RtkGain
   rtkError?: string
+  github?: GithubRate
+  githubError?: string
+  githubTop?: string // first line of the optional top-caller file
 }
 
 export function buildRows(inp: QuotaInput): QuotaRow[] {
   const rows: QuotaRow[] = []
-  const on = (s: QuotaSource) => !inp.providers || inp.providers.some(p => p.source === s)
+  const providers = inp.providers && visibleProviders(inp.providers, inp.active)
+  const on = (s: QuotaSource) => !providers || providers.some(p => p.source === s)
   const note = (account: string, text: string): QuotaRow => ({ account, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: text })
   if (on("omp-usage")) {
     const ompRows = inp.omp ? parseOmp(inp.omp) : []
@@ -160,9 +192,11 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
   }
   if (on("deepseek")) rows.push(...(inp.deepseek ? deepseekRows(inp.deepseek) : [resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a")]))
   // rtk is never assumed: without a provider list it shows only when a reading was supplied.
-  if (inp.providers ? on("rtk-gain") : inp.rtk) rows.push(...(inp.rtk ? rtkRows(inp.rtk) : [note("rtk", inp.rtkError ?? "not reported")]))
+  if (providers ? on("rtk-gain") : inp.rtk) rows.push(...(inp.rtk ? rtkRows(inp.rtk) : [note("rtk", inp.rtkError ?? "not reported")]))
+  if (inp.github) rows.push(...githubRows(inp.github, inp.githubTop))
+  else if (inp.githubError) rows.push(note("github", `unavailable: ${inp.githubError}`))
   // Detected providers with no quota source still get a row, so the list matches the host's accounts.
-  for (const p of inp.providers ?? []) {
+  for (const p of providers ?? []) {
     if (p.source === "none") rows.push(note(p.label, `${p.accounts} account${p.accounts === 1 ? "" : "s"}, quota not reported`))
   }
   return rows
@@ -223,6 +257,9 @@ export function quotaText(rows: QuotaRow[], now: number, tz: string): string {
 const HOME = process.env.HOME ?? ""
 const SESSIONS = `${HOME}/.omp/agent/sessions`
 const AGENT_DB = `${HOME}/.omp/agent/agent.db`
+const STATS_DB = `${HOME}/.omp/stats.db`
+// Optional: a GitHub App helper may write the top API caller here as one line of text.
+const GH_TOP = `${HOME}/.local/state/crewship/github-top-caller.txt`
 
 // setsid -f: the child leaves the pane's foreground group, so herdr does not list the pane as omp.
 // setsid -w keeps the child's exit status for the check below.
@@ -276,6 +313,22 @@ function mercuryKeyIds(): number[] {
   } finally {
     db.close()
   }
+}
+
+function activeProviders(): string[] {
+  const db = new Database(STATS_DB, { readonly: true })
+  try {
+    return (db.query("select distinct provider from messages where timestamp > ?1").all(Date.now() - ACTIVE_DAYS * 86_400_000) as { provider: string }[]).map(r => r.provider)
+  } finally {
+    db.close()
+  }
+}
+
+// `call` is injectable so tests stub gh.
+export async function readGithub(call = () => run(["gh", "api", "rate_limit"]), topFile = GH_TOP): Promise<{ github: GithubRate; githubTop?: string }> {
+  const github = JSON.parse(await call()) as GithubRate
+  const top = (await Bun.file(topFile).text().catch(() => "")).split("\n")[0].trim()
+  return { github, githubTop: top || undefined }
 }
 
 const DEEPSEEK_MIN_MS = 10 * 60_000
@@ -383,15 +436,18 @@ export async function loadQuota(): Promise<QuotaInput> {
   const providers = readProviders({ home: HOME, env: process.env }).providers
   const on = (s: QuotaSource) => providers.some(p => p.source === s)
   const off = Promise.resolve(undefined)
-  const [omp, zai, mercury, ds, rtk] = await Promise.allSettled([
+  const [omp, zai, mercury, ds, rtk, gh, active] = await Promise.allSettled([
     on("omp-usage") ? run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage) : off,
     on("zai") ? fetchZai() : off,
     on("mercury-tokens") ? mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })) : off,
     on("deepseek") ? deepseek() : off,
     on("rtk-gain") ? run(["rtk", "gain", "-f", "json"]).then(t => JSON.parse(t) as RtkGain) : off,
+    Bun.which("gh") ? readGithub() : off, // no gh on the host means no row
+    Promise.resolve().then(activeProviders),
   ])
   return {
     providers,
+    active: active.status === "fulfilled" ? active.value : undefined,
     omp: omp.status === "fulfilled" ? omp.value : undefined,
     ompError: omp.status === "rejected" ? msg(omp.reason) : undefined,
     zai: zai.status === "fulfilled" ? zai.value : undefined,
@@ -402,5 +458,6 @@ export async function loadQuota(): Promise<QuotaInput> {
     deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value?.error,
     rtk: rtk.status === "fulfilled" ? rtk.value : undefined,
     rtkError: rtk.status === "rejected" ? msg(rtk.reason) : undefined,
+    ...(gh.status === "fulfilled" ? gh.value : { githubError: msg(gh.reason) }),
   }
 }
