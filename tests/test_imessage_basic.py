@@ -147,7 +147,9 @@ def basic_rig(tmp_path, test_mode=True):
     )
 
     def receive(mid, message, **fields):
-        held = lambda: text(state / "desk.log").count(f" {mid} inbound-held\n")
+        def held():
+            return text(state / "desk.log").count(f" {mid} inbound-held\n")
+
         read_count = held()
         publish_json(fake / "inbound" / f"{mid}.json", {
             "id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": message, **fields,

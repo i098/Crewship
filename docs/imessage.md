@@ -11,7 +11,7 @@ For each message from the owner, the service does these steps:
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
    It keeps authored text separate from quoted thread metadata for action and social checks.
-3. It marks the text as read only when a real answer to it is sent. A tapback or progress line does not count, and a text that gets no answer stays unread.
+3. It marks the text as read only when a real answer to it is sent. A progress line or a tapback sent through main's `/react` does not count, and a text that gets no answer stays unread. The service keeps the last 100 pending texts in memory, so a text answered after a restart also stays unread.
 4. It combines text until 350 milliseconds of silence or 2 seconds from the first text, whichever comes first.
    This cap limits the batching wait, not status retrieval, model work, or delivery.
    Each new text cancels a running draft, resets the quiet timer, and starts a fresh status read.
