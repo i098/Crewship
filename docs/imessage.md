@@ -146,6 +146,7 @@ For each message from the owner, the service does these steps:
    A prompt answer leaves nothing to hand off; typing alone does not.
    A queued supervisor response ends the wait only after the transport accepts that response.
    An explicit `--reply N` confirms only its selected message and that message's current edit requests, even with `--no-thread`.
+   A send without `--reply` confirms only the owner texts that arrived before it was queued. A secondmate's text and a tapback confirm none.
    Each queued response stores its covered request ids; later arrivals cannot become covered through equal timestamps.
    The deadline applies to the latest unanswered request, even when a newer request already has a targeted answer.
    An accepted initial card counts as a response, like an accepted text.

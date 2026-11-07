@@ -383,3 +383,63 @@ def test_front_timeout_sends_one_honest_line_per_burst(tmp_path):
             assert len(lines) == 1 and "Firstmate" in lines[0], lines
     finally:
         hang.close()
+
+
+RELAY = [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]
+
+
+def handed_off(rig, guid):
+    wait_for(
+        lambda: any(
+            e.get("route") == "done" and f"bluebubbles-{guid}" in e.get("ids", [])
+            for e in events(rig)
+        ),
+        f"the finished route of {guid}",
+        timeout=60,
+    )
+
+
+def answered(rig):
+    return {i for e in events(rig) if "responded" in e for i in e["ids"]}
+
+
+def test_reply_answers_only_its_target(tmp_path):
+    with v2_rig(tmp_path, RELAY) as rig:
+        for guid in ("m1", "m2"):
+            deliver(rig, guid, f"please check the repo {guid}")
+            handed_off(rig, guid)
+        rig.cli("--reply", "1", "Done with the second one.")
+        wait_for(lambda: answered(rig), "the answered text", timeout=30)
+        time.sleep(2)
+        assert answered(rig) == {"bluebubbles-m2"}
+
+
+def test_plain_send_answers_only_texts_older_than_it(tmp_path):
+    with v2_rig(tmp_path, RELAY) as rig:
+        deliver(rig, "m1", "please check the repo m1")
+        handed_off(rig, "m1")
+        rig.cli("The first one is done.")
+        deliver(rig, "m2", "please check the repo m2")
+        wait_for(lambda: answered(rig), "the answered text", timeout=30)
+        time.sleep(2)
+        assert answered(rig) == {"bluebubbles-m1"}
+
+
+def test_mate_text_and_tapback_answer_nothing(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "secondmates.md").write_text(
+        "- web - Website mate (home: /fleet/web; scope: website; projects: site)\n"
+    )
+    with v2_rig(tmp_path, RELAY) as rig:
+        deliver(rig, "m1", "please check the repo")
+        handed_off(rig, "m1")
+        base = f"http://127.0.0.1:{rig.env['FM_IMESSAGE_PORT']}"
+        for path, sender, body in (("send", "/fleet/web", "Site is up."), ("react", "main", "👍")):
+            subprocess.run(
+                ["curl", "-sS", "--fail", "-H", "X-Firstmate: 1", "-H", f"X-Fm-Sender: {sender}",
+                 "--data-binary", body, f"{base}/{path}"],
+                check=True, capture_output=True,
+            )
+        wait_for(lambda: len(texts(rig)) >= 2, "both sends", timeout=30)
+        time.sleep(2)
+        assert answered(rig) == set()
