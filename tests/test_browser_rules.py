@@ -29,7 +29,17 @@ CASES = [(LADDER, p) for p in SHARED + TURNSTILE] + [(LOGIN, p) for p in SHARED]
 
 def triggered(rule, source, phrase):
     out = subprocess.run(
-        ["omp", "ttsr", "test", "-r", str(RULES / f"{rule}.md"), "--source", source, "--json", phrase],
+        [
+            "omp",
+            "ttsr",
+            "test",
+            "-r",
+            str(RULES / f"{rule}.md"),
+            "--source",
+            source,
+            "--json",
+            phrase,
+        ],
         capture_output=True,
         text=True,
         check=True,
