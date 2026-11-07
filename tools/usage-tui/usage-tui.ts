@@ -3,7 +3,7 @@
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, createCliRenderer, fg, type TextChunk } from "@opentui/core"
 import { Database } from "bun:sqlite"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, BAR_W, fitName, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, type QuotaInput, type QuotaRow } from "./quota.ts"
+import { ACCOUNT_W, BAR_W, fitName, QUOTA_MIN_MS, buildRows, cells, loadQuota, quotaText, saveSnapshot, type QuotaInput, type QuotaRow } from "./quota.ts"
 
 const TZ = "America/Los_Angeles"
 const DB_PATH = `${process.env.HOME}/.omp/stats.db`
@@ -344,7 +344,7 @@ function refreshQuota() {
   quotaBusy = true
   quotaAt = Date.now()
   loadQuota()
-    .then(q => { quota = q })
+    .then(q => { quota = q; saveSnapshot(q) })
     .catch(e => { error = `Quota: ${(e as Error).message}` })
     .finally(() => { quotaBusy = false; draw() })
 }

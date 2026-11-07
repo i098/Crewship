@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readGithub, readQuotaMe, quotaText, relReset, rtkRows, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readGithub, readQuotaMe, quotaText, relReset, rtkRows, saveSnapshot, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -237,6 +237,19 @@ test("readGithub turns a stubbed gh rate_limit into core and graphql rows, plus 
     const rows = buildRows({ ...(await readGithub(gh, top)), providers: [] })
     expect(rows.at(-1)).toMatchObject({ account: "github", window: "top", leftPct: null, note: "fm-worker 412 calls" })
     expect(buildRows({ githubError: "gh exited non-zero", providers: [] })).toEqual([{ account: "github", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "unavailable: gh exited non-zero" }])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("snapshot is written whole, replaces the previous one and leaves no temp file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "usage-snap-"))
+  const path = join(dir, "state", "snapshot.json")
+  try {
+    saveSnapshot({ now: 1, omp: { reports: [] } }, path)
+    saveSnapshot({ now: 2, mercury: { keyIds: [1], tokens: { 1: 95_000_000 } } }, path)
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ now: 2, mercury: { keyIds: [1], tokens: { "1": 95_000_000 } } })
+    expect(readdirSync(join(dir, "state"))).toEqual(["snapshot.json"])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

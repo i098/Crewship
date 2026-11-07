@@ -3,9 +3,9 @@
 // the reseller's quotaMe call (DeepSeek plan quota), `gh api rate_limit` (GitHub API).
 // Accounts are labelled by position ("claude 2", "mercury key 1"), never by email, id or key text.
 import { Database } from "bun:sqlite"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
 import { readProviders, type DetectedProvider, type QuotaSource } from "./detect.ts"
 
@@ -460,4 +460,14 @@ export async function loadQuota(): Promise<QuotaInput> {
     rtkError: rtk.status === "rejected" ? msg(rtk.reason) : undefined,
     ...(gh.status === "fulfilled" ? gh.value : { githubError: msg(gh.reason) }),
   }
+}
+
+// The notifier (../usage-notify) reads this file; rename keeps its path unit to one change per refresh.
+export const SNAPSHOT_PATH = () => process.env.USAGE_SNAPSHOT ?? join(process.env.HOME ?? "", ".local/state/usage-tui/snapshot.json")
+
+export function saveSnapshot(input: QuotaInput, path = SNAPSHOT_PATH()) {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(input))
+  renameSync(tmp, path)
 }
