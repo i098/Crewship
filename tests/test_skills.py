@@ -455,6 +455,7 @@ VENDORED_OWNER = {
     "blueprint/skills/public/appllama-usage/": ("github.com/Appllama",),
     "blueprint/skills/public/appllama-app-design-skill/": ("github.com/Appllama", "process.env"),
     "blueprint/skills/public/code-clarity/": ("github.com/Lakr233",),
+    "blueprint/skills/public/stack-diagram/": ("github.com/caru-ini", "github.com/JetBrains", "github.com/vercel"),
     "blueprint/skills/public/pr-preview/": ("sindresorhus@gmail.com",),
 }
 
@@ -470,7 +471,10 @@ def test_public_skills_and_rules_are_named_and_hold_no_private_details():
     assert files
     for path in files:
         rel = path.relative_to(repo).as_posix()
-        text = path.read_text()
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:  # vendored fonts carry no text to check
+            continue
         allowed = next((v for k, v in VENDORED_OWNER.items() if rel.startswith(k)), ())
         hits = [m.group(0) for m in PRIVATE.finditer(text) if m.group(0) not in allowed]
         assert not hits, f"{rel}: {hits[0]!r}"
