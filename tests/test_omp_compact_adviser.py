@@ -79,7 +79,8 @@ out.completed = completed;
 
 // Factory: maps agent_end, drops session_before_compact, skips excluded sessions, keeps existing settings.
 const events = {};
-mod.default({ on: (e, h) => (events[e] = h), registerCommand() {} });
+const all = {};
+mod.default({ on: (e, h) => ((all[e] ||= []).push(h), events[e] = h), registerCommand() {} });
 const shim = globalThis.__installed.pi;
 shim.on("session_before_compact", () => {});
 let settled = 0;
@@ -94,6 +95,18 @@ events.agent_end({}, idle("/work/app"));
 events.turn_end({}, idle("/work/client-x/app"));
 await Bun.sleep(400);
 out.settled = settled;
+
+// Status segment: the mode, "off" for an excluded cwd, nothing when the kill switch is set.
+const status = cwd => {
+  const calls = [];
+  all.session_start[0]({}, { ...idle(cwd), hasUI: true, ui: { setStatus: (k, t) => calls.push([k, t]) } });
+  return calls[0];
+};
+out.statusOn = status("/work/app");
+out.statusExcluded = status("/work/client-x/app");
+process.env.COMPACT_ADVISER_DISABLE = "1";
+out.statusKill = status("/work/app");
+delete process.env.COMPACT_ADVISER_DISABLE;
 out.settings = JSON.parse(readFileSync(join(dir, "compact-adviser.json"), "utf8"));
 writeFileSync(join(dir, "compact-adviser.json"), '{"version":1,"mode":"hint"}');
 mod.default({ on() {}, registerCommand() {} });
@@ -119,7 +132,10 @@ def test_compact_adviser_extension():
     assert out["textOnly"] == ["remote", "soft"]
     assert out["retrySucceeds"] == ["snapcompact", "snapcompact"] and out["completed"] == 1
     # agent_end replaces agent_settled; session_before_compact is dropped; the excluded cwd and a continuing run never settle.
-    assert out["events"] == ["agent_end", "turn_end"]
+    assert out["events"] == ["agent_end", "session_start", "session_switch", "turn_end"]
     assert out["settled"] == 1
+    assert out["statusOn"] == ["compact-adviser", "compact: auto"]
+    assert out["statusExcluded"] == ["compact-adviser", "compact: off"]
+    assert out["statusKill"] == ["compact-adviser", None]
     assert out["settings"]["mode"] == "auto" and out["settings"]["autoAcknowledged"] is True
     assert '"mode":"hint"' in out["settingsKept"]

@@ -168,4 +168,18 @@ export default function (pi: PiLike) {
 		version: VERSION,
 		key: () => typesafeKey(process.env, join(homedir(), "super.env")),
 	});
+
+	// The package only ever clears its status key, so show the mode here. It goes last so it
+	// runs after the package's own handlers on the same event.
+	const show = (_event: unknown, ctx: Ctx & { hasUI?: boolean; ui?: { setStatus(key: string, text?: string): void } }) => {
+		if (!ctx.hasUI || !ctx.ui) return;
+		let mode = "off";
+		try {
+			if (!excluded(ctx.cwd)) mode = JSON.parse(readFileSync(join(agentDir, "compact-adviser.json"), "utf8")).mode;
+		} catch {
+			// An unreadable settings file means the package takes no action.
+		}
+		ctx.ui.setStatus("compact-adviser", process.env.COMPACT_ADVISER_DISABLE === "1" ? undefined : `compact: ${mode}`);
+	};
+	for (const event of ["session_start", "session_switch", "agent_end"]) pi.on(event, show);
 }
