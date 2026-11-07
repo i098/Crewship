@@ -779,7 +779,7 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
     assert any(c.startswith("docker build") for c in calls[1:])
 
 
-def gate(tmp_path, *args, env=None, timeout=20):
+def gate(tmp_path, *args, env=None, timeout=20, stdin=None):
     pressure = tmp_path / "pressure"
     if not pressure.exists():
         pressure.write_text(
@@ -798,6 +798,7 @@ def gate(tmp_path, *args, env=None, timeout=20):
     return subprocess.Popen(
         [str(MAINTENANCE / "build-gate"), *args],
         env=environment,
+        stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -810,6 +811,12 @@ def test_build_gate_runs_the_command_and_passes_its_status(tmp_path):
     bad = gate(tmp_path, "sh", "-c", "exit 7")
     bad.communicate(timeout=20)
     assert bad.returncode == 7
+
+
+def test_build_gate_hands_its_standard_input_to_the_command(tmp_path):
+    # runner-up sends the job's JIT config on stdin of `docker run -i`; a lost stdin ended every runner at once.
+    piped = gate(tmp_path, "sh", "-c", "read -r x; echo got=$x", stdin=subprocess.PIPE)
+    assert piped.communicate("config\n", timeout=20)[0] == "got=config\n"
 
 
 def test_build_gate_waits_while_io_pressure_is_high_and_then_runs(tmp_path):
