@@ -312,9 +312,9 @@ The brief includes the batching rule: a feature branch built from several slices
 ## Board phone fit
 
 `~/.local/bin/board-phone-fit BOARD.html` (the `agents` role) loads the board in a 390x844 frame in headless Chrome.
-It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), or a missing `width=device-width` viewport meta.
+It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), block columns side by side that are each under half the phone width (`columns not stacked`, outside `nav`), or a missing `width=device-width` viewport meta.
 It prints `fits 390x844` and exits 0 when the board fits.
-`board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, and one column under 600 px.
+`board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, and one column under 600 px for grids and for flex rows of two or more block children (`div`, `section`, `article`, `aside`, `ul`, `ol`, `table`, `pre`, `figure`) outside `nav`.
 It does not raise small text: the check fails text under 14 px, and the board author sets that text to 14 px or larger.
 Paste it at the end of the board's `<style>`, and make a wide diagram fit with a narrower `viewBox` or stacked parts.
 The `board-phone-fit` rule (it fires when an agent opens a board with `lavish-axi`), the `tooling-conventions` and `pr-preview` skills, and the brief include tell agents to run it before they send a link.

@@ -48,3 +48,10 @@ def test_text_under_14px_fails_with_its_selector(tmp_path):
 def test_shared_mobile_css_wraps_but_leaves_small_text_failing(tmp_path):
     found = fit.failures(board(tmp_path, WIDE + SMALL, "pre{font-size:16px}" + fit.MOBILE_CSS))
     assert found == ['text: html > body > p.note is 12px: "fine print"']
+
+
+def test_flex_columns_fail_until_shared_css_stacks_them(tmp_path):
+    cols = '<div class="cols"><div>Left column text</div><div>Right column text</div></div>'
+    css = ".cols{display:flex;gap:16px} .cols>div{flex:1}"
+    assert fit.failures(board(tmp_path, cols, css)) == ["columns not stacked: html > body > div.cols"]
+    assert fit.failures(board(tmp_path, cols, css + fit.MOBILE_CSS)) == []
