@@ -25,6 +25,8 @@ busy() {
   [ -z "$io" ] || [ "$io" -le "$max_io" ] || echo "io full avg60 $io (limit $max_io)"
 }
 
+# An async command gets /dev/null as fd 0 before its own redirections, so keep the real stdin on fd 8 for it.
+exec 8<&0
 waited=0
 while :; do
   why=$(busy)
@@ -36,7 +38,7 @@ while :; do
       if flock -n 9; then
         # Fd 9 stays with this shell: the command and its daemons (sccache) must not hold the slot.
         # A signal for the gate goes on to the command, so a cancelled job does not outlive its slot.
-        BUILD_GATE_HELD=1 "$@" 9>&- <&0 &
+        BUILD_GATE_HELD=1 "$@" 9>&- <&8 8<&- &
         child=$!
         trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP
         status=0
