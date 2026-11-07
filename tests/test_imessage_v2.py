@@ -443,3 +443,32 @@ def test_mate_text_and_tapback_answer_nothing(tmp_path):
         wait_for(lambda: len(texts(rig)) >= 2, "both sends", timeout=30)
         time.sleep(2)
         assert answered(rig) == set()
+
+
+def read_marks(rig):
+    return read_text(rig.fake / "relay-read").splitlines()
+
+
+def test_text_is_marked_read_only_after_its_answer(tmp_path):
+    with v2_rig(tmp_path, RELAY) as rig:
+        deliver(rig, "m1", "please check the repo")
+        handed_off(rig, "m1")
+        time.sleep(2)
+        assert read_marks(rig) == []
+        rig.cli("The repo is checked.")
+        wait_for(lambda: read_marks(rig), "the read mark after the answer", timeout=30)
+
+
+def test_tapback_does_not_mark_read(tmp_path):
+    with v2_rig(tmp_path, RELAY) as rig:
+        deliver(rig, "m1", "please check the repo")
+        handed_off(rig, "m1")
+        base = f"http://127.0.0.1:{rig.env['FM_IMESSAGE_PORT']}"
+        subprocess.run(
+            ["curl", "-sS", "--fail", "-H", "X-Firstmate: 1", "-H", "X-Fm-Sender: main",
+             "--data-binary", "👍", f"{base}/react"],
+            check=True, capture_output=True,
+        )
+        wait_for(lambda: any("react" in t for t in texts(rig)), "the tapback", timeout=30)
+        time.sleep(2)
+        assert read_marks(rig) == []

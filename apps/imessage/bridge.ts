@@ -44,7 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
+import { brief, createReadAfter, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -149,6 +149,7 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
+const readAfter = createReadAfter(log);
 const trace = (id: string, event: string) => {
   try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
   catch (e) { log("trace")(e); }
@@ -994,6 +995,7 @@ function recordResponse(o: Out) {
       selected.push(id);
     } else legacy.push(id);
   }
+  readAfter.answered([...legacy, ...selected]);
   if (legacy.length) recordRoute({ ids: legacy, responded: true });
   if (selected.length) {
     recordRoute({ ids: selected, responded: o.guid! });
@@ -1634,7 +1636,8 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
+  readAfter.hold(`${line.name}-${message.id}`, () => message.read().then(() => trace(message.id, "read")));
+  trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
