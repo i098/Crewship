@@ -186,6 +186,9 @@ def axi(run, command, calls, **options):
 @pytest.mark.parametrize("command,expected", [
     ("api -X GET repos/i098/sanctum/pulls", ["api", "--cache", "60s", "repos/i098/sanctum/pulls"]),
     ("api --method=get repos/i098/sanctum/pulls", ["api", "--cache", "60s", "repos/i098/sanctum/pulls"]),
+    ("api -X GET repos/o/r/pulls -f state=open", ["api", "-X", "GET", "repos/o/r/pulls", "-f", "state=open"]),
+    ("api -XGET repos/o/r/pulls -fstate=open", ["api", "-XGET", "repos/o/r/pulls", "-fstate=open"]),
+    ("api --method GET repos/o/r/pulls -Fstate=open", ["api", "--method", "GET", "repos/o/r/pulls", "-Fstate=open"]),
     ("api repos/i098/sanctum/pulls -f state=open", ["api", "repos/i098/sanctum/pulls", "-f", "state=open"]),
     ("api -X PATCH repos/i098/sanctum/pulls/1 -f body=x", ["api", "-X", "PATCH", "repos/i098/sanctum/pulls/1", "-f", "body=x"]),
     ("pr list", ["pr", "list"]),
