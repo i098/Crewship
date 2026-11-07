@@ -308,7 +308,19 @@ See [Default config](default-config.md) for the gate tiers and their model and e
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
 Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
-The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`.
+The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`, and tells every agent to run [`board-phone-fit`](#board-phone-fit) before it sends a board link.
+
+## Board phone fit
+
+`~/.local/bin/board-phone-fit BOARD.html` (the `agents` role) loads the board in a 390x844 frame in headless Chrome.
+It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), a `flex` or `grid` row that the shared CSS stacks but that shows two or more children side by side, each at least 120 px wide and under half the phone width (`columns not stacked`), or a missing `width=device-width` viewport meta.
+It prints `fits 390x844` and exits 0 when the board fits.
+`board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, and one column under 600 px for every grid and for flex rows of two or more block children (`div`, `section`, `article`, `aside`, `ul`, `ol`, `table`, `pre`, `figure`).
+It does not stack a grid or flex row in `nav`, or a row with a `button`, `a`, `.pill`, `.chip` or `.tag` child.
+CSS cannot tell an `inline-flex` row from a `flex` row, so give a row that must stay side by side the class `no-stack`.
+It does not raise small text: the check fails text under 14 px, and the board author sets that text to 14 px or larger.
+Paste it at the end of the board's `<style>`, and make a wide diagram fit with a narrower `viewBox` or stacked parts.
+The `board-phone-fit` rule (it fires when an agent opens a board with `lavish-axi`), the `tooling-conventions` and `pr-preview` skills, and the brief include tell agents to run it before they send a link.
 
 ## Chat archive
 

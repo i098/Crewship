@@ -19,7 +19,8 @@ The board is one HTML file. It renders in GitHub dark mode only. The body comes 
    - One comment: `pr_preview.py comment --repo OWNER/REPO --body-file /tmp/comment.md`
    - Open-source target: add `--rules /tmp/rules.json` to any of these modes (see "Contribution rules").
 3. The script prints the HTML path (default `.lavish/pr-preview.html`; use `--out` for a name per topic). Open it: `lavish-axi .lavish/pr-preview.html`.
-4. Give the reader the board. If the reader asks for changes, edit the body file, run the script again and reload.
+4. Run `board-phone-fit .lavish/pr-preview.html`. It MUST print `fits 390x844`; if it lists failures, fix the script or the body and run it again.
+5. Give the reader the board. If the reader asks for changes, edit the body file, run the script again and reload.
 
 ## What the board shows
 
