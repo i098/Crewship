@@ -29,7 +29,7 @@ crewship:
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
   #   pause_pct: 88             # data disk use at or above which no new job starts
   #   resume_pct: 85            # data disk use below which jobs start again
-  #   io_heavy: []              # repos the guard pauses while the io pressure stays high
+  #   io_heavy: []              # instance names (repo lowercased, other characters to '-') the guard pauses while the io pressure stays high
   #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
