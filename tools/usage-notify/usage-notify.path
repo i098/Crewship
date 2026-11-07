@@ -1,0 +1,8 @@
+[Unit]
+Description=Run the usage notifier when the usage snapshot changes
+
+[Path]
+PathChanged=%h/.local/state/usage-tui/snapshot.json
+
+[Install]
+WantedBy=default.target

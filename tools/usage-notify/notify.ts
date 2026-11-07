@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // Usage notifier: texts one line when remaining quota crosses a 10% step down, and once per window when the burn rate accelerates.
-// Reads the same rows as the Usage TUI (../usage-tui/quota.ts). Runs once and exits; a systemd timer triggers it (see README).
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+// Reads the same rows as the Usage TUI (../usage-tui/quota.ts). Reads only the snapshot the TUI writes; a systemd path unit runs it once per snapshot change (see README).
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { buildRows, clockAt, loadQuota, type QuotaRow } from "../usage-tui/quota.ts"
+import { buildRows, clockAt, type QuotaInput, type QuotaRow } from "../usage-tui/quota.ts"
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -57,7 +57,7 @@ function evaluateRow(prev: Entry | undefined, r: QuotaRow, now: number, tz: stri
 }
 
 export function evaluate(state: State, rows: QuotaRow[], now: number, tz: string): { state: State; messages: string[] } {
-  const next: State = {}
+  const next: State = { ...state }
   const messages: string[] = []
   for (const r of rows) {
     if (!WINDOWS.includes(r.window) || r.leftPct == null || r.usedPct == null || r.note) continue
@@ -69,6 +69,14 @@ export function evaluate(state: State, rows: QuotaRow[], now: number, tz: string
   return { state: next, messages }
 }
 
+export type Saved = { snap: string; windows: State }
+
+export function processSnapshot(saved: Saved, snap: string, input: QuotaInput, now: number, tz: string): { saved: Saved; messages: string[] } | null {
+  if (saved.snap === snap) return null
+  const out = evaluate(saved.windows, buildRows(input), now, tz)
+  return { saved: { snap, windows: out.state }, messages: out.messages }
+}
+
 async function send(cmd: string[], text: string) {
   const p = Bun.spawn(["timeout", "60", ...cmd], { stdin: new Blob([text]), stdout: "ignore", stderr: "inherit" })
   if ((await p.exited) !== 0) throw new Error(`send failed: ${cmd.join(" ")}`)
@@ -78,13 +86,16 @@ if (import.meta.main) {
   const statePath = process.env.USAGE_NOTIFY_STATE ?? join(homedir(), ".local/state/usage-notify/state.json")
   const sendCmd = (process.env.USAGE_NOTIFY_SEND ?? "fm-imessage").split(" ")
   const fx = process.argv.indexOf("--fixture")
-  const input = fx > 0 ? JSON.parse(readFileSync(process.argv[fx + 1], "utf8")) : await loadQuota()
-  let state: State = {}
-  try { state = JSON.parse(readFileSync(statePath, "utf8")) } catch {}
+  const snapPath = fx > 0 ? process.argv[fx + 1] : (process.env.USAGE_SNAPSHOT ?? join(homedir(), ".local/state/usage-tui/snapshot.json"))
+  const st = statSync(snapPath)
+  let saved: Saved = { snap: "", windows: {} }
+  try { saved = JSON.parse(readFileSync(statePath, "utf8")) } catch {}
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-  const out = evaluate(state, buildRows(input), Date.now(), tz)
-  // State is saved only after every text is sent, so a failed send is retried on the next run.
-  for (const m of out.messages) await send(sendCmd, m)
-  mkdirSync(dirname(statePath), { recursive: true })
-  writeFileSync(statePath, JSON.stringify(out.state))
+  const out = processSnapshot(saved, `${st.mtimeMs}:${st.size}`, JSON.parse(readFileSync(snapPath, "utf8")), Date.now(), tz)
+  if (out) {
+    // State is saved only after every text is sent, so a failed send is retried on the next run.
+    for (const m of out.messages) await send(sendCmd, m)
+    mkdirSync(dirname(statePath), { recursive: true })
+    writeFileSync(statePath, JSON.stringify(out.saved))
+  }
 }

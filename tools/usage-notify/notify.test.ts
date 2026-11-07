@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { evaluate, type State } from "./notify.ts"
+import { evaluate, processSnapshot, type State } from "./notify.ts"
 import type { QuotaRow } from "./../usage-tui/quota.ts"
 
 const H = 3_600_000
@@ -36,4 +36,24 @@ test("acceleration texts once per window", () => {
 test("rows without numbers or other windows are ignored", () => {
   const rows: QuotaRow[] = [{ account: "x", window: "5h", usedPct: null, leftPct: null, resetsAt: null }, { ...row(50), window: "30d" }]
   expect(evaluate({}, rows, 0, "UTC").state).toEqual({})
+})
+
+test("a window missing for one run keeps its latch and step", () => {
+  let r = run({}, 100, 0)
+  for (let h = 1; h <= 3; h++) r = run(r.state, 100 - h, h * H)
+  r = run(r.state, 90, 4 * H)
+  expect(r.messages.filter(m => m.includes("burning fast"))).toHaveLength(1)
+  const gap = evaluate(r.state, [{ ...row(0), usedPct: null, leftPct: null }], 5 * H, "UTC")
+  expect(gap.state).toEqual(r.state)
+  r = run(gap.state, 80, 6 * H)
+  expect(r.messages.filter(m => m.includes("burning fast"))).toEqual([])
+})
+
+test("a changed snapshot is processed once, an unchanged one is skipped", () => {
+  const input = { claude: [{ name: "a", five_hour: { utilization: 15, resets_at: "2030-01-01T00:00:00Z" } }] } as any
+  const empty = { snap: "", windows: {} }
+  const first = processSnapshot(empty, "1:10", input, 0, "UTC")!
+  expect(first.saved.snap).toBe("1:10")
+  expect(processSnapshot(first.saved, "1:10", input, H, "UTC")).toBeNull()
+  expect(processSnapshot(first.saved, "2:10", input, H, "UTC")).not.toBeNull()
 })
