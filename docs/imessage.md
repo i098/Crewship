@@ -53,6 +53,7 @@ For each message from the owner, the service does these steps:
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
    It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, handed off, or discarded.
    The service stops refreshes before saving delivery progress, even if that save fails.
+   A desk turn that runs past 150 seconds is aborted. If it is still current and no item has routed yet, it is handed off to Firstmate and the owner gets one short delay reply.
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
    Command typing has an eight-second expiry timer; another typing command renews it.
