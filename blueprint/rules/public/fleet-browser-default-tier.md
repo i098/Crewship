@@ -1,8 +1,8 @@
 ---
 name: fleet-browser-default-tier
-description: "Browser work uses the shared fleet ladder (obscura -> chrome -> voxl), never a private per-lane Chrome profile or a DISPLAY probe"
-condition: ["--user-data-dir=(?!\\S*/\\.fleet-browser/|/tmp/puppeteer)", "DISPLAY=:(?!9\\b)\\d", "fm-desktop", "\\.vnc-chrome-profile", "(?:pgrep|ps -eo)[^\\n]{0,80}chrom[^\\n]{0,200}DISPLAY", "installed browsers[\\s\\S]{0,400}google-chrome-stable"]
-scope: "tool:bash"
+description: "Browser work uses the shared fleet ladder (obscura -> chrome headless -> chrome headed in voxl, each direct first, then with the Geonode proxy), never a private per-lane Chrome profile, a DISPLAY probe, or a wait for the owner's Mac"
+condition: ["--user-data-dir=(?!\\S*/\\.fleet-browser/|/tmp/puppeteer)", "DISPLAY=:(?!9\\b)\\d", "fm-desktop", "\\.vnc-chrome-profile", "(?:pgrep|ps -eo)[^\\n]{0,80}chrom[^\\n]{0,200}DISPLAY", "installed browsers[\\s\\S]{0,400}google-chrome-stable", "Cloudflare[^\\n]{0,60}Turnstile[^\\n]{0,60}(?:block|stop|stuck|fail)", "(?:block|stop|stuck|fail)[^\\n]{0,60}Turnstile", "his Mac is offline", "need(?:s)? (?:his )?Mac (?:to be )?awake", "(?:wait(?:ing)? for|needs?) (?:his|the owner's) Mac", "open (?:a|the) login URL"]
+scope: ["tool:bash", "text", "thinking"]
 ---
 ## Use the shared ladder; do not probe for private browsers
 
@@ -10,9 +10,14 @@ The box runs ONE browser ladder, already wired into your shell:
 
 | Tier | Endpoint | When |
 | --- | --- | --- |
-| **obscura** (default) | `CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222` | All normal browsing, screenshots, clicks. Rust engine, ~5x less RAM than Chrome. |
-| **chrome** (fallback) | `fleet-browser up chrome` -> `:9522` | Pixel-critical before/after evidence, or a page Obscura misrenders. |
-| **voxl** (last resort) | always on at `:9523`, voxl viewer `:6913` | A human must see or drive it: OAuth consent, captcha, native dialog. |
+| **1 obscura** (default, headless) | `CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222` | All normal browsing, screenshots, clicks. Rust engine, ~5x less RAM than Chrome. |
+| **2 chrome** (headless) | `fleet-browser up chrome` -> `:9522` | Pixel-critical before/after evidence, or a page Obscura misrenders. |
+| **3 voxl** (chrome headed) | always on at `:9523`, voxl viewer `:6913` | A challenge the headless tiers fail. You click Cloudflare Turnstile, consent and captchas yourself in the viewer. |
+
+The Geonode residential sticky proxy is an option on any tier, not a tier. At each tier try without it first; if that fails, run `fleet-browser up <tier> --proxy`, then go to the next tier.
+Order: obscura, obscura `--proxy`, chrome, chrome `--proxy`, voxl, voxl `--proxy`.
+Dia (the owner's Mac browser) is only a source for a cookie pull, never a tier.
+A Cloudflare Turnstile block, an offline Mac, or a login URL is never a reason to wait for the owner: climb the ladder and click it yourself in voxl.
 
 Do NOT:
 - launch Chrome/Chromium with your own `--user-data-dir` (the regex above allows the fleet tiers' own profiles and puppeteer temp dirs only);
