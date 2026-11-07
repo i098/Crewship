@@ -503,7 +503,7 @@ Bun.serve({
     if (url.pathname === "/react") {
       const emoji = (await req.text()).trim();
       if (!emoji) return new Response("no emoji", { status: 400 });
-      return queue({ ...ref, ...(DESK_V2 ? { requests: v2ResponseIds(ref) } : {}), react: emoji }, `tapback ${emoji}`);
+      return queue({ ...ref, requests: [], react: emoji }, `tapback ${emoji}`);
     }
     if (url.pathname === "/card") {
       if (!cards) return new Response("nothing queued: cards are off; set FM_IMESSAGE_CARD_URL\n", { status: 503 });
@@ -550,8 +550,9 @@ function queueSend(o: { destination: Ref; target?: Ref; photo?: PreparedImage; p
   const { destination, target, photo, parts } = o;
   const image = photo && stage(photo);
   const what = [image && `image ${image.name}${photo?.resized ? " (downscaled)" : ""}`, parts.length && `${parts.length} bubble(s)`].filter(Boolean).join(" and ");
+  // A mate's text answers none of his texts. A reply answers only its target; any other main text answers the texts that arrived before it was queued.
   return queue({ ...destination, image, bubbles: parts,
-    ...(DESK_V2 ? { requests: v2ResponseIds(destination, target) }
+    ...(mateOfSender(o.sender) ? { requests: [] } : DESK_V2 ? { requests: v2ResponseIds(destination, target) }
       : target ? { requests: [...routing.values()].filter((r) => sameChat(r.ref, target) && r.ref.id === target.id).map((r) => r.requestId) } : {}),
     reply: o.plain ? undefined : target?.id, sender: o.sender }, what);
 }
