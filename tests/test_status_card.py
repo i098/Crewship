@@ -26,6 +26,7 @@ CARD_DATA = {
         {"name": "swarms", "merged": 0, "open": 1, "today": 0, "states": ["waiting on you"], "note": "needs the screenshot OK"},
     ],
     "gauges": {"disk": 62},
+    "today_since": None,
     "notes": ["- plain bullet: fix CI, then ship", "# Next", "eta: 40 min"],
 }
 
@@ -54,7 +55,7 @@ def test_page_has_rows_chips_and_only_hsl_colors(card, theme):
     page, height = card.render(data, theme)
     assert "a &lt;b&gt;" in page and "67% merged" in page and "waiting on you" in page and "62%" in page
     assert not re.search(r"#[0-9a-f]{3,6}\b|rgb\(", page)
-    assert height == 2 * card.PAD + card.TITLE + card.GAUGES + 3 * card.GAP + 2 * card.ROW + card.ROW_NOTE + card.HEAD + 3 * card.NOTE
+    assert height == 2 * card.PAD + card.TITLE + card.GAUGES + 3 * card.GAP + 2 * card.ROW + card.ROW_NOTE + card.HEAD + 2 * card.NOTE
 
 
 def test_heading_over_only_projects_is_dropped(card):
@@ -72,17 +73,22 @@ def test_heading_over_only_projects_is_dropped(card):
         ({"STATUS_CARD_TZ": "Not/AZone", "TZ": "Asia/Tokyo"}, "2026-11-06T16:00:00+00:00", "2026-11-07T00:00:00+09:00", "Asia/Tokyo"),
     ],
 )
-def test_today_starts_at_local_midnight_and_the_footer_names_the_zone(card, monkeypatch, env, now, start, name):
+def test_today_start_is_local_midnight(card, monkeypatch, env, now, start, name):
     monkeypatch.delenv("STATUS_CARD_TZ", raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     assert card.today_start(card.datetime.fromisoformat(now)).isoformat() == start
+    page, _ = card.render(card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5},
+                                                 "today_since": start})))
+    assert f"Today counts from 00:00, {name} time." in page
+
+
+def test_parser_keeps_today_since_from_json(card):
+    assert card.parse('{"title": "T", "today_since": "2026-11-07T00:00:00-08:00"}')["today_since"] == "2026-11-07T00:00:00-08:00"
+
+
+def test_card_without_today_since_has_no_zone_footer(card):
     page, _ = card.render(card.parse("T\n- a: open 1\ndisk: 5%"))
-    assert f"Today counts from midnight, {name} time." in page
-
-
-def test_card_without_projects_has_no_today_footer(card):
-    page, _ = card.render(card.parse("T\ndisk: 5%\nplain note"))
     assert "Today counts" not in page
 
 
