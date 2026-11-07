@@ -12,10 +12,10 @@ WIDTH, HEIGHT, MIN_TEXT_PX = 390, 844, 14
 # A child narrower than this share of the viewport, beside another one, is a column that should stack.
 MAX_COLUMN_SHARE = 0.5
 
-# The flex rows the shared CSS stacks under 600 px; the probe checks exactly these rows.
-STACK = (":not(nav, nav *, .no-stack)"
-         ":has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure))"
-         ":not(:has(> .pill, > button, > a, > .chip, > .tag))")
+# The rows the shared CSS stacks under 600 px; the probe checks exactly these rows.
+# Every grid stacks unless excluded; a flex row stacks only when it also holds 2 or more block children.
+STACK_OK = ":not(nav, nav *, .no-stack):not(:has(> .pill, > button, > a, > .chip, > .tag))"
+FLEX_STACK = STACK_OK + ":has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure))"
 
 MOBILE_CSS = """/* board-phone-fit: shared mobile defaults; keep at the end of the board's <style> */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -25,16 +25,17 @@ img, video, canvas { height: auto; }
 pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   body * { min-width: 0; max-width: 100%; }
-  * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }
+  * { flex-wrap: wrap; }
   table { display: block; overflow-x: auto; }
-  STACK { flex-direction: column !important; }
-  STACK > * { flex-basis: auto !important; }
+  STACK_OK { grid-template-columns: minmax(0, 1fr) !important; }
+  FLEX_STACK { flex-direction: column !important; }
+  FLEX_STACK > * { flex-basis: auto !important; }
 }
-""".replace("STACK", STACK)
+""".replace("FLEX_STACK", FLEX_STACK).replace("STACK_OK", STACK_OK)
 
 # Runs in the board after load and posts its findings as JSON to the frame page (FRAME).
 PROBE = """<script>addEventListener('load', () => {
-  const MIN = %d, MAX_COLUMN = %s, STACK = %s, doc = document.documentElement, vw = doc.clientWidth, out = [];
+  const MIN = %d, MAX_COLUMN = %s, STACK_OK = %s, FLEX_STACK = %s, doc = document.documentElement, vw = doc.clientWidth, out = [];
   const sel = e => {
     const p = [];
     for (; e && e.nodeType === 1 && p.length < 4; e = e.parentElement) {
@@ -52,7 +53,8 @@ PROBE = """<script>addEventListener('load', () => {
       if (past(e) && !past(e.parentElement)) out.push(`overflow: ${sel(e)} ends at ${Math.round(e.getBoundingClientRect().right)}px`);
   }
   for (const e of document.querySelectorAll('body, body *')) {
-    if (!['flex', 'grid'].includes(getComputedStyle(e).display) || !e.matches(STACK)) continue;
+    const display = getComputedStyle(e).display;
+    if (!(display === 'grid' ? e.matches(STACK_OK) : display === 'flex' && e.matches(FLEX_STACK))) continue;
     const cols = [...e.children].map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw * MAX_COLUMN);
     if (cols.some((a, i) => cols.slice(i + 1).some(b => a.top < b.bottom - 1 && b.top < a.bottom - 1 && Math.abs(a.left - b.left) >= 1)))
       out.push(`columns not stacked: ${sel(e)}`);
@@ -73,7 +75,7 @@ PROBE = """<script>addEventListener('load', () => {
     }
   }
   parent.postMessage({boardPhoneFit: out}, '*');
-});</script>""" % (MIN_TEXT_PX, MAX_COLUMN_SHARE, json.dumps(STACK))
+});</script>""" % (MIN_TEXT_PX, MAX_COLUMN_SHARE, json.dumps(STACK_OK), json.dumps(FLEX_STACK))
 
 # Headless Chrome will not make its window narrower than 500 px, so the board loads in a phone-sized iframe;
 # the frame page writes the findings into a <pre> that --dump-dom prints.
