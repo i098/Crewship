@@ -33,7 +33,6 @@ import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessag
 import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
-import { createReadAfter } from "./read-after.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
@@ -45,7 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
+import { brief, createReadAfter, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
