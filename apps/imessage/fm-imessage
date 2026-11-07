@@ -1,6 +1,6 @@
 #!/bin/bash
 # Send iMessage to the owner from the Firstmate line (docs/imessage.md).
-# Usage: fm-imessage [--reply N | --reply-id ID] [--no-thread] [--key TOPIC] [--] 'text' | fm-imessage [--reply N] [--no-thread] --image PATH ['caption']
+# Usage: fm-imessage [--reply N | --reply-id ID] [--no-thread] [--key TOPIC] [--] 'text' | fm-imessage [--reply N | --reply-id ID] [--no-thread] --image PATH ['caption']
 #        fm-imessage --typing | fm-imessage --react '👍' | fm-imessage --card '<json>'|-|FILE
 # Blank-line-separated paragraphs become separate bubbles; a list stays one bubble. Sends are plain by default.
 # --reply N threads the first bubble only across later bubbles; --no-thread forces plain even with --reply N.
