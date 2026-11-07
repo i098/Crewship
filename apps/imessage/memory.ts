@@ -23,6 +23,7 @@ const COMPACT_MAX = 16_000; // includes the conversation's replies and retry tur
 const RETRY_MS = 5 * 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
 export const WORKERS = 3; // compaction calls at once
+export const FAILURES_MAX = 10; // failed compaction calls before a line leaves the queue until the next restart
 export const TRIES = 5; // calls per compaction when the line comes back too long
 export const UNBUILT = "(not summarized yet: zoom it)";
 // The desk request byte ceiling and its token estimate are documented in docs/imessage.md#desk-memory.
@@ -177,6 +178,7 @@ export class Memory {
   nodes: Map<string, Node>;
   view: Line[];
   private queue: Line[] = [];
+  private failed = new Map<string, number>();
   private queued = new Set<string>();
   private retry = { failures: 0, nextAllowed: 0 };
   private retryTimer?: NodeJS.Timeout;
@@ -318,6 +320,7 @@ export class Memory {
       this.build(x)
         .then((compacted) => {
           this.queued.delete(key(x));
+          this.failed.delete(key(x));
           if (compacted && Date.now() >= this.retry.nextAllowed && this.retry.failures) {
             this.retry = { failures: 0, nextAllowed: 0 };
             this.saveRetry();
@@ -328,7 +331,15 @@ export class Memory {
           this.retry.nextAllowed = Date.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(this.retry.failures - 1, 4));
           this.log(e);
           this.saveRetry();
-          this.queue.push(x);
+          const failed = (this.failed.get(key(x)) ?? 0) + 1;
+          if (failed < FAILURES_MAX) {
+            this.failed.set(key(x), failed);
+            this.queue.push(x);
+            return;
+          }
+          this.failed.delete(key(x));
+          this.queued.delete(key(x));
+          this.log(`compaction of ${name(x)} failed ${FAILURES_MAX} times: dropped, rebuilt at the next restart`);
         })
         .finally(() => {
           this.running--;

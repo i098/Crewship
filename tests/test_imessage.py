@@ -820,6 +820,46 @@ console.log(JSON.stringify({{
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_a_line_that_keeps_failing_leaves_the_queue_until_restart(tmp_path):
+    """A line whose compaction fails FAILURES_MAX times is dropped with one log line, and the next start retries it."""
+    result = bun(f"""
+import {{ Memory, FAILURES_MAX, load }} from {MEMORY};
+let now = 0;
+Date.now = () => now;
+const timers = [];
+globalThis.setTimeout = (fn, ms) => {{
+  const timer = {{ fn, at: now + ms, unref() {{ return this; }} }};
+  timers.push(timer); return timer;
+}};
+async function settle() {{ for (let n = 0; n < 20; n++) await Bun.sleep(0); }}
+async function advance(ms) {{
+  now += ms;
+  for (const timer of [...timers]) if (timer.at <= now) {{ timers.splice(timers.indexOf(timer), 1); timer.fn(); }}
+  await settle();
+}}
+let calls = 0;
+const logs = [];
+const dir = {json.dumps(str(tmp_path))};
+const runner = () => ({{ async say() {{ calls++; throw new Error("model unavailable"); }}, end() {{}} }});
+const m = new Memory(dir, runner, (e) => logs.push(e));
+m.append("owner", "x".repeat(600));
+await settle();
+for (let n = 0; n < FAILURES_MAX + 10; n++) await advance(3600000);
+const dropped = logs.filter((e) => typeof e === "string" && e.includes("dropped"));
+const callsAfterDrop = calls;
+const restarted = new Memory(dir, runner, () => {{}});
+await settle();
+console.log(JSON.stringify({{
+  FAILURES_MAX, callsAfterDrop, pending: m.pending, dropped: dropped.length,
+  stored: load(dir).msgs.length, retriedOnRestart: calls > callsAfterDrop,
+}}));
+""")
+    assert result["callsAfterDrop"] == result["FAILURES_MAX"]
+    assert result["pending"] == 0 and result["dropped"] == 1
+    assert result["stored"] == 1 and result["retriedOnRestart"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_compaction_timeout_limits_all_nodes_and_survives_restart(tmp_path):
     """A timed-out runner cannot drain a backlog or bypass the cooldown on new turns or restarts."""
     result = bun(f"""
