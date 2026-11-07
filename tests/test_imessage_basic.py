@@ -147,7 +147,8 @@ def basic_rig(tmp_path, test_mode=True):
     )
 
     def receive(mid, message, **fields):
-        read_count = text(fake / "read").splitlines().count(mid)
+        held = lambda: text(state / "desk.log").count(f" {mid} inbound-held\n")
+        read_count = held()
         publish_json(fake / "inbound" / f"{mid}.json", {
             "id": mid, "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": message, **fields,
         })
@@ -156,7 +157,7 @@ def basic_rig(tmp_path, test_mode=True):
             if read_count:
                 wait_for(lambda: not (fake / "inbound" / f"{mid}.json").exists(), "the duplicate input")
             else:
-                wait_for(lambda: text(fake / "read").splitlines().count(mid) > read_count, "the completed inbound handling")
+                wait_for(lambda: held() > read_count, "the completed inbound handling")
 
     def records():
         return [json.loads(line) for p in (state / "memory/main").glob("*.jsonl") for line in p.read_text().splitlines()]

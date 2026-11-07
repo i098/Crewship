@@ -2547,6 +2547,7 @@ const server = Bun.serve({ port: 0, async fetch(req) {
     }
     return Response.json({ data: { private_api: !existsSync(`${dir}/no-private-api`), helper_connected: true } });
   }
+  if (/^chat\\/[^/]+\\/read$/.test(path)) appendFileSync(`${dir}/relay-read`, `${path}\\n`);
   if (path === "message/text") {
     const b = await req.json();
     appendFileSync(`${dir}/relay-payloads`, `${JSON.stringify(b)}\\n`);

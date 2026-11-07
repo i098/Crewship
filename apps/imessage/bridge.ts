@@ -33,6 +33,7 @@ import type { AdvancedIMessage, EventTypeMap } from "@photon-ai/advanced-imessag
 import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
+import { createReadAfter } from "./read-after.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
@@ -149,6 +150,7 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
+const readAfter = createReadAfter(log);
 const trace = (id: string, event: string) => {
   try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
   catch (e) { log("trace")(e); }
@@ -994,6 +996,7 @@ function recordResponse(o: Out) {
       selected.push(id);
     } else legacy.push(id);
   }
+  readAfter.answered([...legacy, ...selected]);
   if (legacy.length) recordRoute({ ids: legacy, responded: true });
   if (selected.length) {
     recordRoute({ ids: selected, responded: o.guid! });
@@ -1634,7 +1637,8 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
+  readAfter.hold(`${line.name}-${message.id}`, () => message.read().then(() => trace(message.id, "read")));
+  trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
