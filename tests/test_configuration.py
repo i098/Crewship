@@ -1173,7 +1173,7 @@ def test_herdr_restarts_only_for_a_unit_change_beyond_the_data_disk_environment(
     names = {
         "Read the installed Herdr user unit",
         "Render the Herdr user unit",
-        "Restart Herdr for a unit change beyond the data-disk environment",
+        "Restart Herdr for a unit change beyond its deferred environment",
     }
     tasks = [
         task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/herdr.yml").read_text())
@@ -1801,7 +1801,7 @@ def test_herdr_start_uses_reloaded_manager_and_unit_without_bulk_restart(
     before = service() if active else None
     herdr_names = {
         "Read the installed Herdr user unit", "Render the Herdr user unit",
-        "Restart Herdr for a unit change beyond the data-disk environment",
+        "Restart Herdr for a unit change beyond its deferred environment",
         "Check for the installed Herdr user service",
         "Enable and start the Herdr user service",
     }
