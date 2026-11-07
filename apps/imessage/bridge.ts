@@ -408,12 +408,13 @@ const startups = TRANSPORTS.map((name) => {
 // A slot bridge (rolling deploy, docs/imessage.md#rolling-deploys) waits here, connected but silent, until it owns the line.
 if (env.FM_IMESSAGE_SLOT) {
   await ownership({
-    state: STATE, slot: env.FM_IMESSAGE_SLOT, port: PORT, standbyPort: Number(env.FM_IMESSAGE_NEXT_PORT || 8766), line: Promise.all(startups).then((ready) => { if (ready.includes(undefined)) throw new Error("a transport did not start"); }),
+    state: STATE, slot: env.FM_IMESSAGE_SLOT, port: PORT, standbyPort: Number(env.FM_IMESSAGE_NEXT_PORT || 8766), line: startups[0],
+    every: () => Promise.all(startups).then((ready) => { if (ready.includes(undefined)) throw new Error("a transport did not start"); }),
     say: (line) => console.log(`fm-imessage: ${line}`),
-    checks: standbyChecks(env, () => readDesk(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env }))),
+    checks: standbyChecks(env, () => readDesk(track(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env })))),
   });
 } else await startups[0];
-for (const ready of startups) void ready.then((line) => line?.activate?.());
+for (const ready of startups) void ready.then((line) => line?.activate?.()).catch((e) => console.error(`fm-imessage: could not start a transport's inbound side: ${brief(e)}`));
 memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
 for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);

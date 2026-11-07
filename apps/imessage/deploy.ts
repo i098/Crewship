@@ -100,10 +100,12 @@ async function deploy() {
   const live = cur === "legacy" ? await legacyRunning() : cur ? await active(unit(cur)) : false;
   const target = cur === "blue" ? "green" : "blue";
   if (cur === "legacy") snapshotLegacy();
+  await sc("stop", unit(target));
   install(target);
   say(`staged ${target}; serving slot: ${live ? cur : "none"}`);
 
   if (!live) { // nothing to protect: start the new slot as the owner
+    if (cur) await sc("stop", unit(cur));
     setActive(STATE, target);
     await sc("start", unit(target));
     const up = await until(BACK_MS, () => get(PORT, "/health"), target);

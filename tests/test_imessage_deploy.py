@@ -192,6 +192,7 @@ def test_rolls_out_over_a_running_bridge_and_a_planted_broken_build_rolls_back(r
     bad = rig.deploy()
     assert bad.returncode == 1, bad.stdout + bad.stderr
     assert "natives do not load" in bad.stdout
+    assert "skipped: natives failed" in bad.stdout  # the paid desk call is not made for a build whose natives do not load
     assert rig.active() == "blue" and rig.alive("blue") and not rig.alive("green")
     (rig.fake / "send-hold").unlink()
     wait_for(lambda: len(rig.sent()) == 3, "the text queued during the failed deploy")

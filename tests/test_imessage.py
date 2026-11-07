@@ -112,7 +112,7 @@ def send(tmp_path, *args):
     calls = tmp_path / "curl-calls"
     (tmp_path / "curl").write_text(f'#!/bin/bash\necho "$*" >> {calls}\ncat >/dev/null\n')
     (tmp_path / "curl").chmod(0o755)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": "0"}
     result = subprocess.run(
         [str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=10
     )

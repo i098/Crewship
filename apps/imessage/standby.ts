@@ -19,11 +19,14 @@ export function standbyChecks(env: Record<string, string | undefined>, stub: () 
 
 export type Checks = Record<string, () => Promise<void>>;
 
-// Runs every check; the result names each one that failed. A check that throws fails with its message.
+// Runs the checks in order; the result names each one that failed. A check that throws fails with its message.
+// After the first failure the later checks are skipped, so a build with broken natives makes no paid desk call.
 export async function runChecks(checks: Checks): Promise<{ ok: boolean; failed: Record<string, string> }> {
   const failed: Record<string, string> = {};
+  let first: string | undefined;
   for (const [name, check] of Object.entries(checks)) {
-    try { await check(); } catch (e) { failed[name] = e instanceof Error ? e.message : String(e); }
+    if (first) { failed[name] = `skipped: ${first} failed`; continue; }
+    try { await check(); } catch (e) { failed[name] = e instanceof Error ? e.message : String(e); first = name; }
   }
   return { ok: !Object.keys(failed).length, failed };
 }
@@ -50,14 +53,16 @@ async function takeOver(o: { state: string; port: number }) {
   if (!lock) throw new Error("owner lock not acquired");
 }
 
-// Returns once this slot owns the line. `line` settles when the transports are connected; the standby gate reports it.
+// Returns once this slot owns the line. `line` settles when the first transport is connected. A slot that starts as standby
+// also needs `every` (all transports connected) before its gate reports ready; an owning slot degrades to the others.
 export async function ownership(o: {
-  state: string; slot: string; port: number; standbyPort: number; line: Promise<unknown>; checks: Checks; say: (line: string) => void;
+  state: string; slot: string; port: number; standbyPort: number; line: Promise<unknown>; every: () => Promise<unknown>; checks: Checks; say: (line: string) => void;
 }) {
   const standby = () => { const a = readActive(o.state); return a !== undefined && a !== o.slot; };
+  const starting = standby();
   let connected = false;
-  const connect = o.line.then(() => { connected = true; });
-  const server = standby() ? serveStandby({ ...o, connected: () => connected }) : undefined;
+  const connect = (starting ? o.every() : o.line).then(() => { connected = true; });
+  const server = starting ? serveStandby({ ...o, connected: () => connected }) : undefined;
   if (server) o.say(`standby slot ${o.slot} on 127.0.0.1:${o.standbyPort}, waiting for ownership`);
   try {
     await connect;

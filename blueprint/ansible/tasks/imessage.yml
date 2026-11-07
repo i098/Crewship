@@ -125,8 +125,7 @@
   register: crewship_imessage_needed
   changed_when: crewship_imessage_needed.rc == 3
   failed_when: crewship_imessage_needed.rc not in [0, 3]
-  check_mode: false
-  when: crewship_manage_services | bool
+  when: crewship_manage_services | bool and not ansible_check_mode
   notify: deploy fm-imessage
 
 - name: Render the iMessage self-heal unit
