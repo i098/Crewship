@@ -19,9 +19,6 @@ pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
   body * { min-width: 0; max-width: 100%; }
   * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }
   table { display: block; overflow-x: auto; }
-  small, sub, sup, pre, code, kbd, samp, figcaption, caption, th, td, label, li, p, dd, dt {
-    font-size: max(1em, 14px) !important;
-  }
 }
 """
 

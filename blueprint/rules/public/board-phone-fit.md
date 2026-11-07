@@ -14,5 +14,5 @@ The reader often opens a board link on a phone, 390 px wide.
 3. Fix each failure it prints, then run it again until it prints `fits 390x844`.
    - `overflow`: the element named is wider than the phone. Let it wrap or stack its columns.
      For a wide diagram (`diagram-design` and others), make it fit the phone width: use a narrower `viewBox` or stack its parts. Do not shrink its text under 14 px.
-   - `text`: the element named shows text under 14 px. Make it 14 px or larger.
+   - `text`: the element named shows text under 14 px. The shared CSS does not raise it: set it to 14 px or larger.
 4. Send the link only after the check passes.

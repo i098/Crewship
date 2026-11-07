@@ -45,5 +45,6 @@ def test_text_under_14px_fails_with_its_selector(tmp_path):
     assert fit.failures(board(tmp_path, SMALL)) == ['text: html > body > p.note is 12px: "fine print"']
 
 
-def test_shared_mobile_css_fixes_wrapping_and_small_text(tmp_path):
-    assert fit.failures(board(tmp_path, WIDE + SMALL.replace(' style="font-size:12px"', ""), "p{font-size:12px}" + fit.MOBILE_CSS)) == []
+def test_shared_mobile_css_wraps_but_leaves_small_text_failing(tmp_path):
+    found = fit.failures(board(tmp_path, WIDE + SMALL, "pre{font-size:16px}" + fit.MOBILE_CSS))
+    assert found == ['text: html > body > p.note is 12px: "fine print"']
