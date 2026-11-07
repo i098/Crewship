@@ -315,7 +315,7 @@ The brief includes the batching rule: a feature branch built from several slices
 It prints one line per failure with its CSS selector and exits 1 on horizontal overflow, visible text under 14 px (SVG text at its drawn size), or a missing `width=device-width` viewport meta.
 It prints `fits 390x844` and exits 0 when the board fits.
 `board-phone-fit --css` prints the shared mobile CSS: wrapped `pre` and `code`, media and tables at most 100% wide, one column under 600 px, and a 14 px floor for small text.
-Paste it at the end of the board's `<style>`, and wrap a wide diagram in `<div class="phone-scroll">` to scroll it at full size.
+Paste it at the end of the board's `<style>`, and make a wide diagram fit with a narrower `viewBox` or stacked parts.
 The `board-phone-fit` rule (it fires when an agent opens a board with `lavish-axi`), the `tooling-conventions` and `pr-preview` skills, and the brief include tell agents to run it before they send a link.
 
 ## Chat archive

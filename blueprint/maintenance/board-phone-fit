@@ -15,9 +15,6 @@ body { overflow-wrap: break-word; }
 img, svg, video, canvas, iframe, table { max-width: 100%; }
 img, video, canvas { height: auto; }
 pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Wrap a wide diagram in <div class="phone-scroll"> to scroll it at full size instead of shrinking its text. */
-.phone-scroll { overflow-x: auto; }
-.phone-scroll > * { max-width: none !important; }
 @media (max-width: 600px) {
   body * { min-width: 0; max-width: 100%; }
   * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }

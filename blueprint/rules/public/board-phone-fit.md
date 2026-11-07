@@ -12,7 +12,7 @@ The reader often opens a board link on a phone, 390 px wide.
    Give the board `<meta name="viewport" content="width=device-width, initial-scale=1">`.
 2. Run `board-phone-fit <board.html>`. It renders the board at 390x844 in headless Chrome.
 3. Fix each failure it prints, then run it again until it prints `fits 390x844`.
-   - `overflow`: the element named is wider than the phone. Let it wrap, stack its columns, or put it in a scroll box.
+   - `overflow`: the element named is wider than the phone. Let it wrap or stack its columns.
+     For a wide diagram (`diagram-design` and others), make it fit the phone width: use a narrower `viewBox` or stack its parts. Do not shrink its text under 14 px.
    - `text`: the element named shows text under 14 px. Make it 14 px or larger.
-     For a wide diagram (`diagram-design` and others), put the SVG in `<div class="phone-scroll">` with its full `width`, so it scrolls at full size and does not shrink its text.
 4. Send the link only after the check passes.
