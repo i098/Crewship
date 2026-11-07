@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readQuotaMe, quotaText, relReset, rtkRows, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readGithub, readQuotaMe, quotaText, relReset, rtkRows, type QuotaInput } from "./quota.ts"
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -210,4 +210,34 @@ test("rtk shows tokens saved from `rtk gain` only when detected, under the fixed
   expect(line.trimEnd()).toEndWith("1.2M tokens saved (61%)")
   expect(buildRows({ providers: [{ ...provider, id: "x", source: "none" }], rtk })).toHaveLength(1)
   expect(buildRows({ providers: [provider], rtkError: "rtk exited non-zero" })[0].note).toBe("rtk exited non-zero")
+})
+
+test("buildRows hides providers without use in the window, except the always-show list and rtk", () => {
+  const p = (id: string, label: string, source: "none" | "omp-usage" | "zai" | "rtk-gain", accounts = 1) => ({ id, label, accounts, source, found: ["omp"] })
+  const providers = [p("anthropic", "claude", "omp-usage"), p("zai", "glm", "zai"), p("rtk", "rtk", "rtk-gain"), p("openai", "openai", "none"), p("xiaomi", "xiaomi", "none"), p("cerebras", "cerebras", "none", 0)]
+  const accounts = (active?: string[]) => [...new Set(buildRows({ ...FIXTURE, providers, active }).map(r => r.account.split(" ")[0]))]
+  // Neither claude nor glm was used, and they still show; cerebras was used but has no key in use.
+  expect(accounts(["openai", "cerebras"])).toEqual(["claude", "codex", "glm", "rtk", "openai"])
+  expect(accounts([])).toEqual(["claude", "codex", "glm", "rtk"])
+  // Usage unknown (the stats store could not be read): nothing is hidden.
+  expect(accounts(undefined)).toEqual(["claude", "codex", "glm", "rtk", "openai", "xiaomi", "cerebras"])
+})
+
+test("readGithub turns a stubbed gh rate_limit into core and graphql rows, plus the top caller when its file exists", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "usage-tui-gh-"))
+  const top = join(dir, "top.txt")
+  const gh = async () => JSON.stringify({ resources: { core: { limit: 5000, remaining: 1000, reset: (NOW + 30 * MIN) / 1000 }, graphql: { limit: 5000, remaining: 5000, reset: NOW / 1000 + 3600 }, search: {} } })
+  try {
+    const absent = await readGithub(gh, top)
+    expect(buildRows({ ...absent, providers: [] }).map(r => [r.window, r.leftPct, r.resetsAt, r.note])).toEqual([
+      ["core", 20, NOW + 30 * MIN, "1000 / 5000"],
+      ["graphql", 100, NOW + 60 * MIN, "5000 / 5000"],
+    ])
+    writeFileSync(top, "fm-worker 412 calls\nignored\n")
+    const rows = buildRows({ ...(await readGithub(gh, top)), providers: [] })
+    expect(rows.at(-1)).toMatchObject({ account: "github", window: "top", leftPct: null, note: "fm-worker 412 calls" })
+    expect(buildRows({ githubError: "gh exited non-zero", providers: [] })).toEqual([{ account: "github", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "unavailable: gh exited non-zero" }])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
