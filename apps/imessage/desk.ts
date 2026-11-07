@@ -661,7 +661,8 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
       ));
       const killGroup = (signal: "SIGTERM" | "SIGKILL" = "SIGKILL") => { try { process.kill(-proc.pid, signal); } catch { /* group already gone */ } };
       // SIGTERM first (exit 143), SIGKILL for whatever ignores it.
-      const timer = setTimeout(() => { killGroup("SIGTERM"); setTimeout(killGroup, 2000).unref(); }, timeoutMs);
+      let hard: NodeJS.Timeout | undefined;
+      const timer = setTimeout(() => { killGroup("SIGTERM"); hard = setTimeout(killGroup, 2000); hard.unref(); }, timeoutMs);
       try {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -678,6 +679,7 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
         return line;
       } finally {
         clearTimeout(timer);
+        clearTimeout(hard);
         killGroup();
       }
     },
