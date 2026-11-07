@@ -31,14 +31,32 @@ export async function runChecks(checks: Checks): Promise<{ ok: boolean; failed: 
   return { ok: !Object.keys(failed).length, failed };
 }
 
+type Gate = { ok: boolean; failed: Record<string, string> };
+
+// One check run at a time, shared by every /ready poll. A pass is kept for the life of the slot and a failure for `failMs`,
+// so a gate that keeps failing makes a few paid desk calls, not one per poll.
+export function gate(checks: Checks, failMs = 30_000): () => Promise<Gate> {
+  let current: Promise<Gate> | undefined;
+  let passed = false;
+  let failedAt = 0;
+  return () => {
+    if (current && (passed || !failedAt || Date.now() - failedAt < failMs)) return current;
+    failedAt = 0;
+    const run = current = runChecks(checks);
+    void run.then((result) => { passed = result.ok; failedAt = result.ok ? 0 : Date.now(); });
+    return run;
+  };
+}
+
 // The standby control server and its watchdog beat; stop() closes both.
 function serveStandby(o: { slot: string; standbyPort: number; checks: Checks; connected: () => boolean }): { stop(): void } {
+  const ready = gate(o.checks);
   const server = Bun.serve({ hostname: "127.0.0.1", port: o.standbyPort, async fetch(req) {
     if (req.headers.get("x-firstmate") !== "1") return new Response("forbidden\n", { status: 403 });
     const path = new URL(req.url).pathname;
     if (path === "/health") return new Response("ok\n");
     if (path !== "/ready") return new Response("not found\n", { status: 404 });
-    const result = o.connected() ? await runChecks(o.checks) : { ok: false, failed: { line: "transports not connected yet" } };
+    const result = o.connected() ? await ready() : { ok: false, failed: { line: "transports not connected yet" } };
     return Response.json({ slot: o.slot, ...result }, { status: result.ok ? 200 : 503 });
   } });
   const usec = Number(process.env.WATCHDOG_USEC);

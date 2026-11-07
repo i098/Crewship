@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 
 // The send command turns --reply-id ID into the query the bridge reads, and keeps --reply N as before.
 const urls: string[] = [];
-const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { urls.push(req.url.slice(req.url.indexOf("/send"))); return new Response("queued 1 bubble(s)\n"); } });
+const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { if (new URL(req.url).pathname === "/health") return new Response("ok\n"); urls.push(req.url.slice(req.url.indexOf("/send"))); return new Response("queued 1 bubble(s)\n"); } });
 afterAll(() => server.stop(true));
 
 const run = async (...args: string[]) => {

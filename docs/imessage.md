@@ -793,7 +793,7 @@ Apply installs these items:
 - the slot unit `~/.config/systemd/user/fm-imessage@.service` and the front unit `fm-imessage.service`, mode `0600` because they hold the owner's number
 - the commands `fm-imessage` and `fm-location` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
 
-The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a unit drop-in (`systemctl --user edit fm-imessage`) and in the environment of the commands. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
+The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a drop-in of the slot unit (`systemctl --user edit fm-imessage@.service`) and in the environment of the commands, including `imessage-deploy.ts`, which reads the port only from its own environment. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
 
 The service is for the host's own commands (`fm-imessage`, `fm-location`) only.
 Except during shutdown, it checks the header `X-Firstmate: 1` and requires `Host` to be exactly `127.0.0.1:<port>` before looking at the path.

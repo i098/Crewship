@@ -3,6 +3,7 @@ import { afterAll, expect, test } from "bun:test";
 // A mate pushes a text with one command: fm-imessage sends the key and the mate's FM_HOME as sender.
 const seen: { key: string | null; sender: string | null; body: string }[] = [];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req) {
+  if (new URL(req.url).pathname === "/health") return new Response("ok\n");
   seen.push({ key: req.headers.get("x-fm-key"), sender: req.headers.get("x-fm-sender"), body: await req.text() });
   return new Response("queued 1 bubble(s)\n");
 } });
