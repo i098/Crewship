@@ -54,6 +54,7 @@ For each message from the owner, the service does these steps:
    It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, handed off, or discarded.
    The service stops refreshes before saving delivery progress, even if that save fails.
    A desk turn that runs past 150 seconds is aborted. If it is still current and no item has routed yet, it is handed off to Firstmate and the owner gets one short delay reply.
+   A front model timeout has its own one-line ack; see [V2 front desk](#v2-front-desk).
    Shutdown stops typing and allows two seconds for pending cleanup.
    Supervisor typing starts after desk cleanup.
    Command typing has an eight-second expiry timer; another typing command renews it.
@@ -299,7 +300,7 @@ Status answers a question about what the mates are doing. The desk reads the inb
 It hands the text to Firstmate when the request is a decision, approval, money, deploy, public post or write, when the status text does not answer it, or when the call fails.
 Dispatch runs a subagent, and its reply goes out as written, threaded to the message it answers.
 Relay hands the work to the owning mate or to Firstmate. An invalid front answer fails closed to a Firstmate relay.
-Before relay or dispatch work starts, the desk sends no reply: no fixed receipt. The typing indicator stays on until the real answer goes out.
+Before relay or dispatch work starts, the desk sends no fixed receipt. The one exception is a front model timeout: the desk then sends one short honest line at once, once for each burst of texts in a chat, and the next desk reply in that chat starts a new burst. The 150-second turn limit and the `desk-tasks/` sweep stay as backup. The typing indicator stays on until the real answer goes out.
 The typing indicator stops when a newer text replaces the running job.
 
 ### Token log
@@ -327,7 +328,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
   - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
-- The desk sends no fixed routing receipt bubble.
+- The desk sends no fixed routing receipt bubble, except the one-line ack after a front model timeout.
 - `message_mate` sends a listed mate a text of its own through `fm-send.sh` and does not end the turn; `mate_replies` reads that mate's newest status lines, where its marked replies arrive. `reply`, `handoff_main` and `delegate_task` take an optional `key`: a key already sent with the same content today is refused, so the desk does not repeat news the owner has.
 - `fleet_status` lists the second mates in `data/secondmates.md` with their scopes, so the session picks a real mate id for `relay_mate` and `delegate_task`.
 - A turn that ends with no action tool gets one reminder to use `reply`. If the model still completes in words, the bridge sends those words through the `reply` checks. Words that the checks refuse go to Firstmate. A turn that errors or aborts goes to Firstmate with no reminder. omp RPC cannot force a tool call, so the desk does not rely on one.
@@ -403,7 +404,7 @@ These modules do not enable a deployment or replace transport, memory, outbox re
 
 - **Front:** [`front.ts`](../apps/imessage/front.ts) calls Mercury-3 directly with low reasoning, no tools, at most two attempts, and one shared 15-second deadline.
   It returns work proposals, not an executed action or delivery receipt; a social turn returns no intents.
-  Other failures return a Firstmate relay proposal; caller cancellation throws instead of returning a stale result.
+  Other failures return a Firstmate relay proposal; a 15-second timeout fallback also sets `timedOut` so the desk can send that line. Caller cancellation throws instead of returning a stale result.
   `loadFrontRedactor` loads native masking before the front turn, including configured secrets and parent-known credentials.
   Each attempt masks all message data, including retry history, without changing protocol fields or the authorization header.
   Numeric references identify advertised models, reasoning levels, and mates even when masking makes their labels identical.

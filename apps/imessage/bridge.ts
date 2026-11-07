@@ -34,7 +34,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { authorizedWritePath, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
@@ -243,6 +243,7 @@ function quotedMate(c: LineMessage["content"]) {
   return quoted && mateOfSender(senderOfQuoted(quoted.text, quoted.id));
 }
 let routingRetry: NodeJS.Timeout | undefined;
+const ackBurst = createBurst(); // one honest line per burst of texts
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
 const staleNoted = new Set<string>(); // one stale note per request
 type Bubble = string | Picture;
@@ -990,6 +991,7 @@ function v2ResponseIds(ref: Ref, target?: Ref) {
 
 function recordResponse(o: Out) {
   if (o.front) return;
+  if (o.requests?.length) ackBurst.reset(chatKey(o));
   const legacy: string[] = [];
   const selected: string[] = [];
   for (const id of o.requests ?? []) {
@@ -1051,6 +1053,7 @@ function handoffV2(pending: Routing[]) {
 }
 
 function commitV2Answer(pending: Routing[], parts: string[], target = pending.at(-1)!, delegated?: true) {
+  ackBurst.reset(chatKey(pending.at(-1)!.ref));
   const ids = pending.map((r) => r.requestId);
   recordRoute({ ids, route: "desk", out: {
     ...target.ref, requestId: target.requestId, requests: ids, kind: "desk", loop: "v2",
@@ -1061,6 +1064,7 @@ function commitV2Answer(pending: Routing[], parts: string[], target = pending.at
 
 // A purely social turn ends with a tapback on his text, no words.
 function commitV2Reaction(pending: Routing[], emoji: string) {
+  ackBurst.reset(chatKey(pending.at(-1)!.ref));
   const target = pending.at(-1)!;
   const ids = pending.map((r) => r.requestId);
   recordRoute({ ids, route: "desk", social: true, out: {
@@ -1071,12 +1075,14 @@ function commitV2Reaction(pending: Routing[], emoji: string) {
 }
 
 // A turn past its limit: Firstmate gets the text and the owner gets one honest reply, unless an answer is already queued.
+function queueAck(pending: Routing[], bubble: string) {
+  if (!ackBurst.claim(chatKey(pending.at(-1)!.ref))) return;
+  const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+  outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), bubbles: [bubble], deskGeneration, deskSession, ste: true });
+}
 function timeOutV2(pending: Routing[], controller: AbortController, current: () => boolean) {
   log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
-  timeOutTurn(pending, controller, current, () => handoffV2(pending), (bubble) => {
-    const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
-    outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), bubbles: [bubble], deskGeneration, deskSession, ste: true });
-  });
+  timeOutTurn(pending, controller, current, () => handoffV2(pending), (bubble) => queueAck(pending, bubble));
 }
 
 async function runDeskV2() {
@@ -1170,6 +1176,7 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     const front = await draftV2Front(pending, controller.signal, mates);
     if (!current()) return;
     if (muted()) return handoffV2(pending);
+    if (front.timedOut) queueAck(pending, FRONT_TIMEOUT_REPLY);
     if (!front.intents.length) {
       return commitV2Reaction(pending, /\b(?:lol|ha(?:ha)+)\b|😂/iu.test(pending.at(-1)!.text) ? "😂" : "❤️");
     }

@@ -1,6 +1,16 @@
 // A desk turn never runs forever: past the limit it is aborted and the owner gets one honest reply.
 export const TURN_MAX_MS = 150_000;
 export const TIMEOUT_REPLY = "The answer is delayed. Firstmate has your text and will reply.";
+export const FRONT_TIMEOUT_REPLY = "I got your text. I am passing it to Firstmate now.";
+
+// One honest line per burst in each chat: the texts sent before the next desk reply there. `claim` is true only the first time per chat.
+export function createBurst() {
+  const acked = new Set<string>();
+  return {
+    claim: (chat: string) => !acked.has(chat) && !!acked.add(chat),
+    reset: (chat: string) => void acked.delete(chat),
+  };
+}
 
 // True when the turn finished in time. On a timeout `onTimeout` runs once and the late result of `turn` is ignored.
 export async function withDeadline(turn: Promise<void>, ms: number, onTimeout: () => void): Promise<boolean> {

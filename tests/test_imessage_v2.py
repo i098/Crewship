@@ -364,3 +364,22 @@ def test_status_question_gets_a_real_answer_from_the_desk(tmp_path):
         assert "Checks are running." in texts(rig)[0]
         assert "routing this request" not in texts(rig)[0]
         assert not any(e.get("route") == "handoff" for e in events(rig))
+
+
+def test_front_timeout_sends_one_honest_line_per_burst(tmp_path):
+    import socket
+
+    hang = socket.socket()
+    hang.bind(("127.0.0.1", 0))
+    hang.listen(8)  # accepts connections, never answers: the front hits its 15 s limit
+    url = f"http://127.0.0.1:{hang.getsockname()[1]}/v1/chat/completions"
+    try:
+        with v2_rig(tmp_path, None, inception=url) as rig:
+            deliver(rig, "m1", "please check the whole repo")
+            deliver(rig, "m2", "and the docs too")
+            wait_for(lambda: len(texts(rig)) >= 1, "the honest line", timeout=90)
+            time.sleep(20)  # a second front timeout must not add a second line
+            lines = texts(rig)
+            assert len(lines) == 1 and "Firstmate" in lines[0], lines
+    finally:
+        hang.close()
