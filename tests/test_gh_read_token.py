@@ -29,7 +29,7 @@ pool = load("ci_pool_app", "blueprint/maintenance/ci-pool.py")
 @pytest.fixture
 def app(monkeypatch, tmp_path):
     """Apps for the repositories o/my-repo and o/other, with a stubbed signer and stubbed GitHub; `calls` records token requests."""
-    for repo, number in (("MY_REPO", 1), ("OTHER", 2)):
+    for repo, number in (("MY_REPO", 1), ("OTHER", 2), ("FIRSTMATE", 3)):
         monkeypatch.setenv(f"GITHUB_APP_{repo}_ID", str(number))
         monkeypatch.setenv(f"GITHUB_APP_{repo}_INSTALLATION_ID", str(number * 100))
         monkeypatch.setenv(f"GITHUB_APP_{repo}_KEY_PATH", f"/{repo}.pem")
@@ -50,29 +50,35 @@ EXPIRY = 1767229200  # 2026-01-01T01:00:00Z
 
 
 def test_token_is_signed_for_the_repository_app_and_refreshed_five_minutes_before_expiry(app):
-    assert tok.token("o/my-repo", now=EXPIRY - 3600) == "ghs_1"
+    assert tok.token("i098/my-repo", now=EXPIRY - 3600) == "ghs_1"
     claims = json.loads(tok.base64.urlsafe_b64decode(app[0][0].split(".")[1] + "=="))
     assert claims == {"iat": EXPIRY - 3660, "exp": EXPIRY - 3060, "iss": "1"}
     assert app[0][1] == "100"
-    assert tok.token("o/my-repo", now=EXPIRY - 301) == "ghs_1"
-    assert tok.token("o/my-repo", now=EXPIRY - 300) == "ghs_2"
+    assert tok.token("i098/my-repo", now=EXPIRY - 301) == "ghs_1"
+    assert tok.token("i098/my-repo", now=EXPIRY - 300) == "ghs_2"
     assert len(app) == 2
 
 
 def test_each_repository_has_its_own_app_and_cache(app):
-    assert tok.token("o/my-repo", now=EXPIRY - 3600) == "ghs_1"
-    assert tok.token("other", now=EXPIRY - 3600) == "ghs_2"
+    assert tok.token("i098/my-repo", now=EXPIRY - 3600) == "ghs_1"
+    assert tok.token("i098/other", now=EXPIRY - 3600) == "ghs_2"
     assert [installation for _, installation in app] == ["100", "200"]
-    assert tok.token("o/my-repo", now=EXPIRY - 3600) == "ghs_1"
-    assert stat.S_IMODE(tok.cache_path("o/my-repo").stat().st_mode) == 0o600
+    assert tok.token("i098/my-repo", now=EXPIRY - 3600) == "ghs_1"
+    assert stat.S_IMODE(tok.cache_path("i098/my-repo").stat().st_mode) == 0o600
+
+
+def test_a_repository_of_another_owner_gets_no_token_and_no_app_is_called(app):
+    assert tok.token("someone-else/my-repo", now=EXPIRY - 3600) is None
+    assert app == []
+    assert tok.cache_path("someone-else/my-repo") != tok.cache_path("i098/my-repo")
 
 
 def test_a_repository_without_an_app_has_no_token_and_exits_3(app, monkeypatch, tmp_path, capsys):
-    assert tok.token("o/unknown") is None
+    assert tok.token("i098/unknown") is None
     (tmp_path / "super.env").write_text("GITHUB_APP_FILE_ONLY_ID=1\nGITHUB_APP_FILE_ONLY_INSTALLATION_ID='2'\nGITHUB_APP_FILE_ONLY_KEY_PATH=/k\nOTHER=x\n")
     monkeypatch.setenv("CREWSHIP_SUPER_ENV", str(tmp_path / "super.env"))
     assert tok.settings("o/file-only") == {"id": "1", "installation": "2", "key": "/k"}
-    monkeypatch.setattr(sys, "argv", ["gh-read-token", "o/unknown"])
+    monkeypatch.setattr(sys, "argv", ["gh-read-token", "i098/unknown"])
     assert tok.main() == 3
 
 
@@ -81,7 +87,7 @@ def test_a_refused_token_exits_1_without_a_token_on_stdout(app, monkeypatch, cap
         raise OSError("HTTP Error 401")
 
     monkeypatch.setattr(tok, "request_token", refuse)
-    monkeypatch.setattr(sys, "argv", ["gh-read-token", "o/my-repo"])
+    monkeypatch.setattr(sys, "argv", ["gh-read-token", "i098/my-repo"])
     assert tok.main() == 1
     assert capsys.readouterr().out == ""
 
@@ -99,7 +105,7 @@ def test_command_repository_comes_from_the_endpoint_or_the_directory(monkeypatch
     assert tok.command_repo(argv) == repo
 
 
-READ = [sys.executable, "-c", "import os,sys; t=os.environ.get('GH_TOKEN'); print(t); sys.exit(0 if t != 'ghs_1' else 1)", "repos/o/my-repo/pulls"]
+READ = [sys.executable, "-c", "import os,sys; t=os.environ.get('GH_TOKEN'); print(t); sys.exit(0 if t != 'ghs_1' else 1)", "repos/i098/my-repo/pulls"]
 
 
 def test_run_uses_the_app_token_and_replays_the_output(app, capfd, monkeypatch):
@@ -117,9 +123,29 @@ def test_run_repeats_a_failed_read_as_the_user(app, capfd, monkeypatch):
 
 def test_run_for_a_repository_without_an_app_runs_the_command_once_unchanged(app, monkeypatch, capfd):
     monkeypatch.setenv("GH_TOKEN", "user")
-    assert tok.run([*READ[:-1], "repos/o/unknown/pulls"]) == 0
+    assert tok.run([*READ[:-1], "repos/i098/unknown/pulls"]) == 0
     assert capfd.readouterr().out == "user\n"
     assert app == []
+
+
+def test_run_for_another_owners_repository_uses_the_user_token_and_mints_none(app, monkeypatch, capfd):
+    monkeypatch.setenv("GH_TOKEN", "user")
+    assert tok.run([*READ[:-1], "repos/someone-else/firstmate/pulls"]) == 0
+    assert capfd.readouterr().out == "user\n"
+    assert app == []
+
+
+def test_run_does_not_replay_a_304_as_the_user(app, capfd):
+    not_modified = [sys.executable, "-c", "import os,sys; print('HTTP/2.0 304 Not Modified', os.environ.get('GH_TOKEN')); sys.exit(1)", "repos/i098/my-repo/pulls"]
+    assert tok.run(not_modified) == 1
+    assert capfd.readouterr().out == "HTTP/2.0 304 Not Modified ghs_1\n"
+    assert len(app) == 1
+
+
+def test_run_marks_the_command_environment_so_a_nested_wrapper_skips_the_helper(app, capfd):
+    show = [sys.executable, "-c", "import os; print(os.environ.get('GH_READ_TOKEN_ACTIVE'))", "repos/someone-else/x/pulls"]
+    assert tok.run(show) == 0
+    assert capfd.readouterr().out == "1\n"
 
 
 @pytest.mark.parametrize(

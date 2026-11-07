@@ -5,13 +5,14 @@ Each repository has its own GitHub App, installed on that repository only, so ea
 rate limit. Fleet readers (runner dispatch, PR lookups, runner watch, `gh api repos/...`) send their
 reads with this token and leave the user token's budget for what an app cannot do.
 
-  gh-read-token [REPO]     print the token for REPO (owner/name or name); default: the repository of
-                           the current directory's `origin` remote
+  gh-read-token [REPO]     print the token for REPO (owner/name; only i098 repositories have apps); default:
+                           the repository of the current directory's `origin` remote
   gh-read-token run CMD... run a read-only command (stdin closed) with GH_TOKEN set to the token of the
                            repository named in CMD (`repos/owner/name`) or of the current directory;
                            when that repository has no app, or the command fails with the token, run
                            it again unchanged and use that result, so a call the app cannot answer
-                           still works.
+                           still works. A 304 answer counts as success. The command's environment has
+                           GH_READ_TOKEN_ACTIVE=1 so a nested `gh` wrapper does not run the helper again.
 
 The settings are GITHUB_APP_<REPO>_ID, GITHUB_APP_<REPO>_INSTALLATION_ID and GITHUB_APP_<REPO>_KEY_PATH,
 with <REPO> in upper case and every other character as `_`. They come from the environment or, for a
@@ -34,6 +35,8 @@ import urllib.request
 from pathlib import Path
 
 REFRESH_BEFORE = 300
+APP_OWNER = "i098"
+NESTED = "GH_READ_TOKEN_ACTIVE"
 API = "https://api.github.com"
 
 
@@ -84,12 +87,14 @@ def mint(config, now):
 
 
 def cache_path(repo):
-    name = re.sub(r"[^A-Za-z0-9._-]", "_", repo.rpartition("/")[2])
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", repo.replace("/", "-"))
     return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "crewship" / "gh-read-token" / f"{name}.json"
 
 
 def token(repo, now=None):
     """A valid installation token for the repository, or None when it has no app."""
+    if repo.partition("/")[0] != APP_OWNER:
+        return None
     config = settings(repo)
     if not config:
         return None
@@ -134,9 +139,10 @@ def run(argv):
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         print(f"gh-read-token: {type(error).__name__}: {error}", file=sys.stderr)
         value = None
-    for env in ([{**os.environ, "GH_TOKEN": value}] if value else []) + [os.environ]:
+    base = {**os.environ, NESTED: "1"}
+    for env in ([{**base, "GH_TOKEN": value}] if value else []) + [base]:
         done = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True)
-        if not done.returncode:
+        if not done.returncode or re.match(rb"HTTP/\S+ 304", done.stdout):
             break
     sys.stdout.buffer.write(done.stdout)
     sys.stderr.buffer.write(done.stderr)

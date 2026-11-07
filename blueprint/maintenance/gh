@@ -327,7 +327,7 @@ def main():
     # gh-read-token runs the read with the repository's app token and, if that fails, again as the user.
     # The wrapper lives in .local/share/crewship/gh-guard; the helper is installed in .local/bin.
     helper = wrapper.parent.parent.parent.parent / "bin/gh-read-token"
-    if helper.exists() and app_read(argv, cli):
+    if helper.exists() and not os.environ.get("GH_READ_TOKEN_ACTIVE") and app_read(argv, cli):
         os.execv(helper, [str(helper), "run", str(real), *argv])
     os.execv(real, [str(real), *argv])
 
