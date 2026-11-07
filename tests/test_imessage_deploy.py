@@ -319,3 +319,24 @@ def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
     out = tmp_path / "out"
     subprocess.run(shlex.split(start.replace("$$", "$")), env={**os.environ, "STATE_DIRECTORY": str(state), "OUT": str(out)}, check=True)
     assert out.read_text().strip() == f"{dir_ / 'green'} selfheal.ts failed"
+
+
+@pytest.mark.parametrize("mainpid, stops", [("", False), ("4242", True)])
+def test_the_front_unit_stops_the_slots_only_when_it_is_stopped_on_purpose(tmp_path, mainpid, stops):
+    """ExecStop as rendered, with systemd's ${MAINPID} substitution applied (it is empty when the process exited on its own)."""
+    import shlex
+    from jinja2 import Environment
+    jinja = Environment()
+    jinja.filters["comment"] = lambda text: "# " + text
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "bun").write_text('#!/bin/bash\necho "$*" >> "$OUT"\n')
+    (bin_dir / "bun").chmod(0o755)
+    unit = jinja.from_string((ROOT / "blueprint/ansible/templates/fm-imessage.service.j2").read_text()).render(
+        ansible_managed="test", crewship_imessage_dir=str(tmp_path), crewship_local_bin=str(bin_dir))
+    stop = next(line.removeprefix("ExecStop=") for line in unit.splitlines() if line.startswith("ExecStop="))
+    out = tmp_path / "out"
+    subprocess.run(shlex.split(stop.replace("${MAINPID}", mainpid)), env={**os.environ, "OUT": str(out)}, check=True)
+    assert out.exists() == stops
+    if stops:
+        assert out.read_text().strip().endswith("imessage-deploy.ts stop-all")
