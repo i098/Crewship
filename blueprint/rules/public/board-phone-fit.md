@@ -15,5 +15,6 @@ The reader often opens a board link on a phone, 390 px wide.
    - `overflow`: the element named is wider than the phone. Let it wrap or stack its columns.
      For a wide diagram (`diagram-design` and others), make it fit the phone width: use a narrower `viewBox` or stack its parts. Do not shrink its text under 14 px.
    - `text`: the element named shows text under 14 px. The shared CSS does not raise it: set it to 14 px or larger.
-   - `columns not stacked`: the element named shows block columns side by side on the phone. Stack them, for example with `flex-direction: column` under 600 px.
+   - `columns not stacked`: the element named shows columns side by side on the phone. Stack them, for example with `flex-direction: column` under 600 px.
+     The shared CSS stacks flex rows of block children, but CSS cannot tell an `inline-flex` row from a `flex` row. Give a row that must stay side by side the class `no-stack`.
 4. Send the link only after the check passes.

@@ -20,8 +20,8 @@ pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
   body * { min-width: 0; max-width: 100%; }
   * { grid-template-columns: minmax(0, 1fr) !important; flex-wrap: wrap; }
   table { display: block; overflow-x: auto; }
-  :not(nav):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)) { flex-direction: column !important; }
-  :not(nav):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)) > * { flex-basis: auto !important; }
+  :not(nav, nav *, .no-stack):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)):not(:has(> .pill, > button, > a, > .chip, > .tag)) { flex-direction: column !important; }
+  :not(nav, nav *, .no-stack):has(> :is(div,section,article,aside,ul,ol,table,pre,figure) ~ :is(div,section,article,aside,ul,ol,table,pre,figure)):not(:has(> .pill, > button, > a, > .chip, > .tag)) > * { flex-basis: auto !important; }
 }
 """
 
@@ -45,10 +45,10 @@ PROBE = """<script>addEventListener('load', () => {
       if (past(e) && !past(e.parentElement)) out.push(`overflow: ${sel(e)} ends at ${Math.round(e.getBoundingClientRect().right)}px`);
   }
   for (const e of document.querySelectorAll('body, body *')) {
-    if (e.closest('nav')) continue;
-    const cols = [...e.children].filter(c => c.matches('div,section,article,aside,ul,ol,table,pre,figure'))
-      .map(c => c.getBoundingClientRect()).filter(b => b.width && b.height && b.width < vw / 2);
-    if (cols.some((a, i) => cols.slice(i + 1).some(b => Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) >= 1)))
+    if (e.closest('nav') || e.matches('.no-stack') || getComputedStyle(e).display === 'inline-flex') continue;
+    const cols = [...e.children].filter(c => !c.matches('.pill, .chip, .tag, button, a') && !getComputedStyle(c).display.startsWith('inline'))
+      .map(c => c.getBoundingClientRect()).filter(b => b.width >= 120 && b.height && b.width < vw / 2);
+    if (cols.some((a, i) => cols.slice(i + 1).some(b => a.top < b.bottom - 1 && b.top < a.bottom - 1 && Math.abs(a.left - b.left) >= 1)))
       out.push(`columns not stacked: ${sel(e)}`);
   }
   const seen = new Set(), walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

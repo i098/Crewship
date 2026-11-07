@@ -55,3 +55,18 @@ def test_flex_columns_fail_until_shared_css_stacks_them(tmp_path):
     css = ".cols{display:flex;gap:16px} .cols>div{flex:1}"
     assert fit.failures(board(tmp_path, cols, css)) == ["columns not stacked: html > body > div.cols"]
     assert fit.failures(board(tmp_path, cols, css + fit.MOBILE_CSS)) == []
+
+
+def test_columns_with_centered_unequal_heights_fail(tmp_path):
+    cols = '<div class="cols"><div>One<br>two<br>three</div><div>Right</div></div>'
+    css = ".cols{display:flex;align-items:center;gap:16px} .cols>div{flex:1}"
+    assert fit.failures(board(tmp_path, cols, css)) == ["columns not stacked: html > body > div.cols"]
+
+
+@pytest.mark.parametrize("row", [
+    '<div style="display:inline-flex;gap:8px"><div style="width:150px">alpha</div><div style="width:150px">beta</div></div>',
+    '<div class="no-stack" style="display:flex;gap:8px"><div style="width:150px">alpha</div><div style="width:150px">beta</div></div>',
+    '<div style="display:flex;gap:8px"><div class="pill" style="width:150px">alpha</div><div class="pill" style="width:150px">beta</div></div>',
+])
+def test_pill_rows_are_not_columns(tmp_path, row):
+    assert fit.failures(board(tmp_path, row, fit.MOBILE_CSS)) == []
