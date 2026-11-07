@@ -34,7 +34,9 @@ def run(home: Path, idle: bool = True, kind: str = "main", again: bool = False) 
         idle="true" if idle else "false",
         again="true" if again else "false",
     )
-    out = subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60)
+    out = subprocess.run(
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60
+    )
     return json.loads(out.stdout)
 
 
