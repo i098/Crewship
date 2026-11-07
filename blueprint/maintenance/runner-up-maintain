@@ -4,7 +4,9 @@
 #                                         runner image; with --ensure, only when it is missing
 #   runner-up-maintain clean              remove what the jobs left on the disk
 #   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
-#                                         start them again below the resume level
+#                                         start them again below the resume level; also start the units
+#                                         recorded by io-pause, one per run, after 10 min of calm IO
+#   runner-up-maintain io-pause <unit...> stop units for IO pressure and record them for that resume
 # Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
 set -eu
 image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
@@ -54,9 +56,63 @@ guard)
     while read -r i; do systemctl --user start "runner-up@$i.service"; done < "$state"
     rm -f "$state"
   fi
+  # IO resume: /proc/pressure/io "full avg60" below the level for the whole window, then one unit per run.
+  # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
+  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
+  io_calm=$io_state.calm
+  io_hot=$io_state.hot
+  now=${RUNNER_UP_NOW:-$(date +%s)}
+  avg=$(awk '$1 == "full" { sub("avg60=", "", $3); print $3 }' "${RUNNER_UP_PRESSURE_FILE:-/proc/pressure/io}" 2>/dev/null) || avg=
+  io_above() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a > m) }'; }
+  io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
+  # IO resume: below the level for the whole window, then one unit per run.
+  # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
+  if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
+    if io_below; then
+      [ -s "$io_calm" ] || echo "$now" > "$io_calm"
+      if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-600}" ]; then
+        read -r unit < "$io_state"
+        if systemctl --user start "$unit"; then
+          grep -vxF "$unit" "$io_state" > "$io_state.new" || true
+          mv "$io_state.new" "$io_state"
+          [ -s "$io_state" ] || rm -f "$io_calm"
+        fi
+      fi
+    else
+      rm -f "$io_calm"
+    fi
+  fi
+  # IO pause: above the level for the whole window, then the newest running heavy coordinator, one per window.
+  # Jobs that run keep running; the unit comes back through the IO resume above.
+  if io_above; then
+    [ -s "$io_hot" ] || echo "$now" > "$io_hot"
+    if [ $((now - $(cat "$io_hot"))) -ge "${RUNNER_UP_IO_HOT_SECS:-180}" ]; then
+      newest=
+      newest_at=-1
+      for i in ${RUNNER_UP_IO_HEAVY-}; do
+        u=runner-up@$i.service
+        systemctl --user is-active --quiet "$u" || continue
+        at=$(systemctl --user show -p ActiveEnterTimestampMonotonic --value "$u" | tr -dc 0-9)
+        if [ "${at:-0}" -gt "$newest_at" ]; then newest=$u; newest_at=${at:-0}; fi
+      done
+      [ -z "$newest" ] || "$0" io-pause "$newest"
+      rm -f "$io_hot"
+    fi
+  else
+    rm -f "$io_hot"
+  fi
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
+io-pause)
+  shift
+  [ "$#" -gt 0 ] || { echo "usage: runner-up-maintain io-pause <unit...>" >&2; exit 2; }
+  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
+  for u in "$@"; do
+    systemctl --user stop "$u" || continue
+    grep -qxF "$u" "$io_state" 2>/dev/null || echo "$u" >> "$io_state"
+  done
+  rm -f "$io_state.calm" ;;
 *)
-  echo "usage: runner-up-maintain image [--ensure] | clean | guard" >&2
+  echo "usage: runner-up-maintain image [--ensure] | clean | guard | io-pause <unit...>" >&2
   exit 2 ;;
 esac
