@@ -26,6 +26,7 @@ CARD_DATA = {
         {"name": "swarms", "merged": 0, "open": 1, "today": 0, "states": ["waiting on you"], "note": "needs the screenshot OK"},
     ],
     "gauges": {"disk": 62},
+    "today_since": None,
     "notes": ["- plain bullet: fix CI, then ship", "# Next", "eta: 40 min"],
 }
 
@@ -60,6 +61,51 @@ def test_page_has_rows_chips_and_only_hsl_colors(card, theme):
 def test_heading_over_only_projects_is_dropped(card):
     page, _ = card.render(card.parse("T\n# Projects\n- a: open 1\ndisk: 5%"))
     assert "<h2>" not in page
+
+
+@pytest.mark.parametrize(
+    ("env", "now", "start", "name"),
+    [
+        # 03:00 UTC is still the evening before in Los Angeles, so "today" began the day before.
+        ({"STATUS_CARD_TZ": "America/Los_Angeles", "TZ": "UTC"}, "2026-11-07T03:00:00+00:00", "2026-11-06T00:00:00-08:00", "America/Los_Angeles"),
+        ({"TZ": ":Europe/Berlin"}, "2026-11-06T23:30:00+00:00", "2026-11-07T00:00:00+01:00", "Europe/Berlin"),
+        # A zone name that does not exist falls through to the next source.
+        ({"STATUS_CARD_TZ": "Not/AZone", "TZ": "Asia/Tokyo"}, "2026-11-06T16:00:00+00:00", "2026-11-07T00:00:00+09:00", "Asia/Tokyo"),
+    ],
+)
+def test_today_start_is_local_midnight(card, monkeypatch, env, now, start, name):
+    monkeypatch.delenv("STATUS_CARD_TZ", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert card.today_start(card.datetime.fromisoformat(now)).isoformat() == start
+    page, _ = card.render(card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5},
+                                                 "today_since": start})))
+    assert f"Today counts from 00:00, {name} time." in page
+
+
+def test_parser_keeps_today_since_from_json(card):
+    assert card.parse('{"title": "T", "today_since": "2026-11-07T00:00:00-08:00"}')["today_since"] == "2026-11-07T00:00:00-08:00"
+
+
+@pytest.mark.parametrize("bad", ["2026-11-07T00:00:00", "yesterday", 5, None])
+def test_unusable_today_since_prints_no_footer(card, bad):
+    c = card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5}, "today_since": bad}))
+    assert c["today_since"] is None and "Today counts" not in card.render(c)[0]
+
+
+@pytest.mark.parametrize(
+    ("tz", "since", "shown"),
+    [("America/Los_Angeles", "2026-11-06T08:00:00+00:00", "00:00"), ("Asia/Tokyo", "2026-11-06T15:30:00+00:00", "00:30")],
+)
+def test_footer_shows_the_cutoff_in_the_card_zone(card, monkeypatch, tz, since, shown):
+    monkeypatch.setenv("STATUS_CARD_TZ", tz)
+    c = card.parse(json.dumps({"title": "T", "projects": [{"name": "a", "open": 1}], "gauges": {"Disk": 5}, "today_since": since}))
+    assert f"Today counts from {shown}, {tz} time." in card.render(c)[0]
+
+
+def test_card_without_today_since_has_no_zone_footer(card):
+    page, _ = card.render(card.parse("T\n- a: open 1\ndisk: 5%"))
+    assert "Today counts" not in page
 
 
 def test_send_texts_the_png_and_deletes_it(card, monkeypatch):

@@ -6,8 +6,12 @@
 #   (counts "merged|open|today N" or "N merged|open|today", states live, running, waiting on you, blocked, other parts a note);
 #   "disk: 62%" = a gauge; other "- x", "k: v", "# x" and plain lines are notes.
 # Or JSON: {"title": "...", "projects": [{"name", "merged", "open", "today", "states": [...], "note"}],
-#           "gauges": {"Disk": 62}, "notes": ["text-format lines"]}
+#           "gauges": {"Disk": 62}, "notes": ["text-format lines"], "today_since": "2026-11-07T00:00:00-08:00"}
 # Without gauges in the input, the card shows this host's load, RAM and disks (fm-usage-brief, installed side by side).
+# "today_since" (ISO 8601 with UTC offset) is the cutoff the sender used for the today counts. With it the footer reads
+#   "Today counts from 00:00, <zone> time." (the cutoff in local time); without it the card prints no zone footer.
+# The zone is STATUS_CARD_TZ, else TZ, else the host zone.
+#        fm-status-card --today-start    prints local midnight in that zone as ISO 8601 (use it as today_since).
 import html
 import importlib.machinery
 import importlib.util
@@ -17,6 +21,8 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 WIDTH = 1170
 STATES = {"live": "live", "running": "running", "waiting on you": "waiting on you", "waiting": "waiting on you",
@@ -66,7 +72,7 @@ def project(name, parts):
 
 def parse_text(text):
     lines = text.strip().splitlines()
-    card = {"title": lines[0].strip() if lines else "", "projects": [], "gauges": {}, "notes": []}
+    card = {"title": lines[0].strip() if lines else "", "projects": [], "gauges": {}, "notes": [], "today_since": None}
     for line in lines[1:]:
         s = line.strip()
         bullet = s[2:] if s.startswith(("- ", "• ")) else None
@@ -80,13 +86,21 @@ def parse_text(text):
     return card
 
 
+def aware_time(value):
+    """The value when it is an ISO 8601 string with a UTC offset, else None."""
+    try:
+        return value if datetime.fromisoformat(value).utcoffset() is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_json(data):
     projects = [{"name": str(p["name"]), **{k: int(p.get(k) or 0) for k in COUNTS},
                  "states": [STATES[s.lower()] for s in p.get("states", []) if s.lower() in STATES], "note": str(p.get("note") or "")}
                 for p in data.get("projects", [])]
     return {"title": str(data.get("title", "")), "projects": projects,
             "gauges": {str(k): round(float(v)) for k, v in dict(data.get("gauges") or {}).items()},
-            "notes": [str(n) for n in data.get("notes", [])]}
+            "notes": [str(n) for n in data.get("notes", [])], "today_since": aware_time(data.get("today_since"))}
 
 
 def parse(text):
@@ -144,12 +158,33 @@ def note_line(s):
     return f'<div class="nl">{html.escape(s)}</div>', NOTE
 
 
+def zone():
+    """The owner's time zone: STATUS_CARD_TZ, else TZ, else the host zone behind /etc/localtime, else UTC."""
+    host = os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]
+    for name in (os.environ.get("STATUS_CARD_TZ"), os.environ.get("TZ", "").lstrip(":"), host):
+        try:
+            if name:
+                return ZoneInfo(name)
+        except (ValueError, ZoneInfoNotFoundError):  # a POSIX TZ string or a file path is not a zone name
+            pass
+    return ZoneInfo("UTC")
+
+
+def today_start(now=None):
+    """Local midnight that starts "today", the cutoff for the today counts."""
+    tz = zone()
+    return (now or datetime.now(tz)).astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def render(card, theme="dark"):
     t = THEME[theme]
     gauges = card["gauges"] or {k: p for k, p, _ in sibling("fm-usage-brief").server()}
     notes = [s for s in card["notes"] if s]
     # A heading with no note under it (it titled only project lines) carries nothing.
     notes = [s for i, s in enumerate(notes) if not s.startswith("# ") or (i + 1 < len(notes) and not notes[i + 1].startswith("# "))]
+    if card["projects"] and card["today_since"]:
+        tz = zone()
+        notes.append(f"Today counts from {datetime.fromisoformat(card['today_since']).astimezone(tz):%H:%M}, {tz.key} time.")
     lines = [note_line(s) for s in notes]
     height = (2 * PAD + TITLE + (GAUGES + GAP if gauges else 0)
               + sum(ROW + (ROW_NOTE if p["note"] else 0) + GAP for p in card["projects"]) + sum(h for _, h in lines))
@@ -192,9 +227,12 @@ def send(card, theme):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args == ["--today-start"]:
+        print(today_start().isoformat())
+        sys.exit()
     theme = "light" if "--light" in args else "dark"
     args = [a for a in args if a != "--light"]
     if len(args) != 1:
-        sys.exit("usage: fm-status-card [--light] OUT.png|--send < input")
+        sys.exit("usage: fm-status-card [--light] OUT.png|--send < input  |  fm-status-card --today-start")
     card = parse(sys.stdin.read())
     send(card, theme) if args == ["--send"] else shoot(card, theme, args[0])
