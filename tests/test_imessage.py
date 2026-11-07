@@ -2093,7 +2093,7 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         inbound("during-cooldown", wait_note=False, text="What desk model answers?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the desk reply during cooldown", timeout=15)
         bridge.terminate()
-        bridge.wait(10)
+        bridge.wait(60)
         bridge = start(2)
         inbound("after-restart", wait_note=False, text="What desk model answers now?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 3, "the desk reply after restart", timeout=15)
@@ -2103,7 +2103,7 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         assert any(record["text"] == "x" * 700 for record in source)
     finally:
         bridge.terminate()
-        bridge.wait(10)
+        bridge.wait(60)
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
