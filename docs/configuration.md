@@ -447,7 +447,7 @@ A changed file notifies the existing user-manager reload, which runs before serv
 Apply does not import shell values or restart a service for this file.
 Herdr and no-mistakes inherit these defaults from the user manager on their next start.
 Herdr reloads its rendered unit before starting an inactive service.
-A bulk-only Herdr unit change does not restart the running service.
+A bulk-only or watcher-timeout-only Herdr unit change does not restart the running service; Herdr and the sessions it spawns pick up the new values on its next start.
 Explicit service environment settings can override these defaults.
 Native package cache settings do not become service environment overrides.
 Global `XDG_CACHE_HOME`, `CARGO_HOME`, and `RUSTUP_HOME` do not change.

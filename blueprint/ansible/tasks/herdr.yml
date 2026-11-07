@@ -42,10 +42,10 @@
   register: crewship_herdr_unit
   notify: reload user systemd
 
-- name: Restart Herdr for a unit change beyond the data-disk environment
+- name: Restart Herdr for a unit change beyond its deferred environment
   when: crewship_herdr_unit is changed
   vars:
-    crewship_herdr_unit_deferred: '^(#|Environment="?(npm_config_cache|PIP_CACHE_DIR|DENO_DIR|BUN_RUNTIME_TRANSPILER_CACHE_PATH|TMPDIR|TMP|TEMP)=)'
+    crewship_herdr_unit_deferred: '^(#|Environment="?(npm_config_cache|PIP_CACHE_DIR|DENO_DIR|BUN_RUNTIME_TRANSPILER_CACHE_PATH|TMPDIR|TMP|TEMP|FM_OMP_ARM_READY_TIMEOUT_MS|FM_WATCH_ARM_RETIRE_TIMEOUT_MS)=)'
     crewship_herdr_unit_restart: >-
       {{ (crewship_herdr_unit_before.content | default('') | b64decode).splitlines()
          | reject('match', crewship_herdr_unit_deferred) | list
@@ -54,7 +54,7 @@
   block:
     - name: Request the Herdr restart for the unit change
       ansible.builtin.debug:
-        msg: herdr.service changed beyond its data-disk environment; Herdr restarts.
+        msg: herdr.service changed beyond its deferred environment; Herdr restarts.
       changed_when: true
       notify: restart herdr
       when: crewship_herdr_unit_restart | bool
@@ -62,7 +62,7 @@
     - name: Report the unit change deferred to the next Herdr start
       ansible.builtin.debug:
         msg: >-
-          herdr.service changed only in its data-disk environment, comments or
+          herdr.service changed only in its deferred environment (data-disk and watcher-timeout variables), comments or
           file attributes. The running Herdr and its agents keep going; Herdr
           applies the change when it next starts.
       when: not (crewship_herdr_unit_restart | bool)

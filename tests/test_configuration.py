@@ -1055,6 +1055,8 @@ def test_the_managed_environment_never_carries_a_process_wide_runtime_limit(tmp_
         "CHROME_DEVTOOLS_AXI_MCP_PATH",
         "API_ANYTHING_HOME",
         "API_ANYTHING_BROWSER_ROOTS",
+        "FM_OMP_ARM_READY_TIMEOUT_MS",
+        "FM_WATCH_ARM_RETIRE_TIMEOUT_MS",
     }
 
 
@@ -1130,6 +1132,16 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
             f"{tmp_path}/.local/share/crewship/chrome-devtools-mcp/current/"
             "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
         ]
+        for line in (
+            'Environment="FM_OMP_ARM_READY_TIMEOUT_MS=45000"',
+            'Environment="FM_WATCH_ARM_RETIRE_TIMEOUT_MS=10000"',
+        ):
+            assert line in unit.read_text()
+        for line in (
+            'export FM_OMP_ARM_READY_TIMEOUT_MS="45000"',
+            'export FM_WATCH_ARM_RETIRE_TIMEOUT_MS="10000"',
+        ):
+            assert line in profile.read_text()
 
 
 BULK_UNIT_LINES = (
@@ -1161,7 +1173,7 @@ def test_herdr_restarts_only_for_a_unit_change_beyond_the_data_disk_environment(
     names = {
         "Read the installed Herdr user unit",
         "Render the Herdr user unit",
-        "Restart Herdr for a unit change beyond the data-disk environment",
+        "Restart Herdr for a unit change beyond its deferred environment",
     }
     tasks = [
         task for task in yaml.safe_load((ROOT / "blueprint/ansible/tasks/herdr.yml").read_text())
@@ -1789,7 +1801,7 @@ def test_herdr_start_uses_reloaded_manager_and_unit_without_bulk_restart(
     before = service() if active else None
     herdr_names = {
         "Read the installed Herdr user unit", "Render the Herdr user unit",
-        "Restart Herdr for a unit change beyond the data-disk environment",
+        "Restart Herdr for a unit change beyond its deferred environment",
         "Check for the installed Herdr user service",
         "Enable and start the Herdr user service",
     }
