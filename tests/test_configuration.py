@@ -1132,11 +1132,15 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
             f"{tmp_path}/.local/share/crewship/chrome-devtools-mcp/current/"
             "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
         ]
-        for line in ('Environment="FM_OMP_ARM_READY_TIMEOUT_MS=45000"',
-                     'Environment="FM_WATCH_ARM_RETIRE_TIMEOUT_MS=10000"'):
+        for line in (
+            'Environment="FM_OMP_ARM_READY_TIMEOUT_MS=45000"',
+            'Environment="FM_WATCH_ARM_RETIRE_TIMEOUT_MS=10000"',
+        ):
             assert line in unit.read_text()
-        for line in ('export FM_OMP_ARM_READY_TIMEOUT_MS="45000"',
-                     'export FM_WATCH_ARM_RETIRE_TIMEOUT_MS="10000"'):
+        for line in (
+            'export FM_OMP_ARM_READY_TIMEOUT_MS="45000"',
+            'export FM_WATCH_ARM_RETIRE_TIMEOUT_MS="10000"',
+        ):
             assert line in profile.read_text()
 
 
