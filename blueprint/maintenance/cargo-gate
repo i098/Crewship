@@ -1,14 +1,18 @@
 #!/bin/sh
-# Installed as ~/.local/bin/cargo: heavy subcommands run behind build-gate, then the real cargo (docs/runner-up.md#build-gate).
+# Installed as ~/.local/bin/cargo: heavy subcommands run behind build-gate, then cargo.wrap beside it when it exists, else the real cargo (docs/runner-up.md#build-gate).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 real=
-old_ifs=$IFS
-IFS=:
-for d in $PATH; do
-  [ -n "$d" ] && [ "$(cd "$d" 2>/dev/null && pwd)" != "$here" ] && [ -x "$d/cargo" ] && { real=$d/cargo; break; }
-done
-IFS=$old_ifs
+if [ -x "$here/cargo.wrap" ]; then
+  real=$here/cargo.wrap
+else
+  old_ifs=$IFS
+  IFS=:
+  for d in $PATH; do
+    [ -n "$d" ] && [ "$(cd "$d" 2>/dev/null && pwd)" != "$here" ] && [ -x "$d/cargo" ] && { real=$d/cargo; break; }
+  done
+  IFS=$old_ifs
+fi
 [ -n "$real" ] || { echo "cargo-gate: no cargo on PATH besides $here" >&2; exit 127; }
 # A toolchain prefix such as +nightly comes first.
 sub=${1-}

@@ -95,7 +95,7 @@ One host-wide job pool keeps Cargo builds from piling up: `build-gate <command..
 Set `build_gate: true` under `runner_up` to install the pool on a host:
 
 - runner-up jobs: the service gets `RUNNER_UP_BUILD_GATE`, and the docker shim starts each `docker run` through the gate, so a job holds a slot for its whole run.
-- Host builds (workers, mates): `~/.local/bin/cargo` is a shim. It runs `build`, `test`, `check`, `clippy`, `nextest`, `doc`, `install` and `bench` through `build-gate`, then the next `cargo` on `PATH`. Rollout check: `command -v cargo` must print `~/.local/bin/cargo`; rustup's `~/.cargo/env` puts `~/.cargo/bin` first, so put `~/.local/bin` before it.
+- Host builds (workers, mates): `~/.local/bin/cargo` is a shim. It runs `build`, `test`, `check`, `clippy`, `nextest`, `doc`, `install` and `bench` through `build-gate`, then `cargo.wrap` beside the shim when that file is executable (it sets the shared target dir), else the next `cargo` on `PATH`; other subcommands skip the gate. Rollout check: `command -v cargo` must print `~/.local/bin/cargo`; rustup's `~/.cargo/env` puts `~/.cargo/bin` first, so put `~/.local/bin` before it.
 - Rollout is a host step, not code: set `build_gate: true` for the `codex-gpui` host or coordinator first, wait one full cycle, then set it fleet-wide.
 
 ## Disk

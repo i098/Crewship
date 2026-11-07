@@ -758,7 +758,7 @@ def test_build_gate_exits_zero_when_a_signalled_command_still_exits_zero(tmp_pat
     assert job.returncode == 0
 
 
-def cargo_shim(tmp_path, *args, io="99.00"):
+def cargo_shim(tmp_path, *args, io="99.00", wrap=False):
     bindir = tmp_path / "bin"
     realdir = tmp_path / "real"
     bindir.mkdir(exist_ok=True)
@@ -771,6 +771,9 @@ def cargo_shim(tmp_path, *args, io="99.00"):
     real = realdir / "cargo"
     real.write_text('#!/bin/sh\necho "real:$BUILD_GATE_HELD:$*"\n')
     real.chmod(0o755)
+    if wrap:
+        (bindir / "cargo.wrap").write_text('#!/bin/sh\necho "wrap:$BUILD_GATE_HELD:$*"\n')
+        (bindir / "cargo.wrap").chmod(0o755)
     pressure = tmp_path / "pressure"
     pressure.write_text(f"full avg10=0.00 avg60={io} avg300=0.00 total=0\n")
     environment = {
@@ -798,6 +801,13 @@ def test_the_cargo_shim_holds_heavy_subcommands_at_the_gate_and_runs_the_real_ca
 def test_the_cargo_shim_runs_a_heavy_subcommand_under_the_gate_when_the_host_is_quiet(tmp_path):
     job = cargo_shim(tmp_path, "+nightly", "test", io="1.00")
     assert job.communicate(timeout=20)[0] == "real:1:+nightly test\n"
+
+
+def test_the_cargo_shim_chains_the_gate_to_cargo_wrap_when_it_exists(tmp_path):
+    heavy = cargo_shim(tmp_path, "build", io="1.00", wrap=True)
+    assert heavy.communicate(timeout=20)[0] == "wrap:1:build\n"
+    light = cargo_shim(tmp_path, "--version", wrap=True)
+    assert light.communicate(timeout=20)[0] == "wrap::--version\n"
 
 
 def test_build_gate_skips_when_off_or_already_held(tmp_path):
