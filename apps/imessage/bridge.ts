@@ -1151,7 +1151,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   memoryIndex: (r) => memoryByRequest.get(r.requestId) ?? r.memoryId,
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
-  stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
+  stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)), held: (mate, id) => mateInboxHas(FM_HOME, mate.id, id),
   send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
     : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,

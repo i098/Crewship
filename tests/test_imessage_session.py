@@ -210,7 +210,7 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         script.chmod(0o755)
         deliver(rig, "m1", f"DELEGATE {target}")
         wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
-        assert texts(rig)[0].split(" ", 1)[1] == "On it."
+        assert texts(rig)[0].split(" ", 1)[1] == ("Your text is queued for the mate1 mate" if target == "mate1" else "Your text is queued for Firstmate")
         wait_for(message.exists, "the task delivery", timeout=120)
         assert not finished.exists()  # the reply was sent while the delivery was still open
         release.touch()
@@ -218,7 +218,7 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         sent = read_text(message)
         assert sent.startswith("[from captain via desk] DELEGATE ")
         assert "fm-imessage" not in sent  # the answer file is the only answer channel
-        answer = re.search(r"to (\S+\.answer)$", sent).group(1)
+        answer = re.search(r"to (\S+\.answer)(?:\n\[desk request [^\]]+\])?$", sent).group(1)
         Path(answer).write_text("The repo checks are green.")
         wait_for(lambda: len(texts(rig)) == 2, "the reported answer", timeout=120)
         assert texts(rig)[1].split(" ", 1)[1] == "The repo checks are green."
@@ -238,7 +238,7 @@ def test_task_report_survives_a_new_owner_text_during_delivery(tmp_path):
         wait_for(lambda: len(texts(rig)) == 2, "the first bubble of the report", timeout=120)
         deliver(rig, "m2", "how are you HANDOFF")  # a new owner text moves the desk generation before the second bubble
         wait_for(lambda: len(texts(rig)) == 3, "the second bubble of the report", timeout=120)
-        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "First bubble.", second]
+        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["Your text is queued for Firstmate", "First bubble.", second]
 
 
 def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(tmp_path):
@@ -255,7 +255,7 @@ def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(
         rig.start()
         wait_for(lambda: len(texts(rig)) == 2, "the answer after the restart", timeout=120)
         time.sleep(1.5)
-        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["On it.", "The repo checks are green."]
+        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["Your text is queued for Firstmate", "The repo checks are green."]
         assert not answer.exists()
 
 

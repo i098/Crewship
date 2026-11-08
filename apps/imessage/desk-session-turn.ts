@@ -53,6 +53,7 @@ export type SessionHost<R extends TurnRequest> = {
   inbox(): Promise<{ status: string; statusOk: boolean }>;
   stopping(): boolean;
   listed(mate: Secondmate): boolean; // the mate is still in the routing table
+  held(mate: Secondmate, id: string): boolean; // the mate's inbox holds the task marked with `id`
   send(target: Secondmate | "firstmate", id: string, text: string): Promise<boolean>; // true when the target's inbox took a background task
   message(mate: Secondmate, text: string): Promise<boolean>; // the desk's own text to a mate; true when the mate's inbox took it
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
@@ -133,7 +134,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     helper: helper.run,
     answerDir: `${host.stateDir}/desk-tasks`, waitMs: WAIT_MS, pollMs: 500,
     stopping: host.stopping, muted: host.muted, log: host.log("desk task"), safe: (text) => host.safe!(text), // a turn runs only with the filter
-    listed: host.listed, send: host.send, report: host.report,
+    listed: host.listed, held: host.held, send: host.send, report: host.report,
   });
   const session = () => (child ??= startSession(host));
 
@@ -180,8 +181,10 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       },
       handoff: (reason, ack) => handoffWithAck(host, pending, reason, ack),
       helperBusy: helper.busy,
-      delegate: (mate, parts, target) => {
-        host.answer(pending, parts, pending[target - 1], true);
+      delegate: (mate, target) => {
+        // The ack is the bridge's own text and claims only that the text is queued: whether the send worked is reported later.
+        const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : `Your text is queued for the ${mate.id} mate`;
+        host.answer(pending, [ack], pending[target - 1], true);
         delegate(mate, original.join("\n"), pending.at(-1)!);
       },
       status: async () => {
