@@ -223,11 +223,7 @@ def test_a_slot_that_fails_after_the_handover_rolls_back_to_the_old_slot(rig):
     rig.send("kept")
     wait_for(lambda: rig.sent() == ["send kept"], "the first text")
 
-    def plant(stage):  # the build passes the gate, then dies when it takes the line
-        bridge = stage / "bridge.ts"
-        bridge.write_text(bridge.read_text().replace('memory = new Memory(', 'if (process.env.FM_IMESSAGE_SLOT) throw new Error("planted failure after the handover");\nmemory = new Memory(', 1))
-
-    rig.stage(plant)
+    rig.stage(plant_after_handover)
     result = rig.deploy()
     assert result.returncode == 1, result.stdout + result.stderr
     assert "rolling back to blue" in result.stdout
@@ -273,10 +269,8 @@ def test_the_confirm_step_fails_when_there_is_no_text_to_read_back(rig):
     assert rig.active() == "legacy" and rig.alive("legacy") and rig.health()
 
 
-def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_once(rig):
-    rig.legacy()
-    rig.inbound("m1")
-    rig.stage()
+def deploy_while_sending(rig):
+    """Runs the deploy while a thread keeps sending texts; returns the deploy result and every send's exit code."""
     results, stop = [], threading.Event()
 
     def keep_sending():
@@ -294,10 +288,34 @@ def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_on
     finally:
         stop.set()
         sender.join()
-    assert deploy.returncode == 0, deploy.stdout + deploy.stderr
+    return deploy, results
+
+
+def assert_each_text_went_out_once(rig, results):
     assert results and set(results) == {0}  # no send was refused, whichever side of the handover it hit
     wait_for(lambda: len(rig.sent()) == len(results), "every text")
     assert rig.sent() == sorted(f"send text {n}" for n in range(len(results)))  # each exactly once
+
+
+def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_once(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    rig.stage()
+    deploy, results = deploy_while_sending(rig)
+    assert deploy.returncode == 0, deploy.stdout + deploy.stderr
+    assert_each_text_went_out_once(rig, results)
+
+
+def test_texts_sent_through_a_rollback_wait_for_the_old_slot_and_go_out_exactly_once(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    rig.stage()
+    assert rig.deploy().returncode == 0  # first rolling install: legacy to blue
+    rig.stage(plant_after_handover)  # green passes the gate, takes the line and dies: blue is stopped, then restarted
+    deploy, results = deploy_while_sending(rig)
+    assert deploy.returncode == 1 and "rolling back to blue" in deploy.stdout, deploy.stdout + deploy.stderr
+    assert rig.active() == "blue" and rig.health()
+    assert_each_text_went_out_once(rig, results)
 
 
 def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
