@@ -36,12 +36,12 @@ case $cmd in
     pid=$(cat "$pidf"); kill -TERM "$pid"
     for _ in $(seq 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
     kill -KILL "$pid" 2>/dev/null; rm -f "$pidf"; [ "$slot" = front ] && rm -f "$RUN/front.legacy"; exit 0 ;;
-  is-active) alive ;;
+  is-active) alive && ! [ -f "$RUN/$slot.activating" ] ;;
   reset-failed) ;;
   show)
     case "$*" in
       *MainPID*) if [ "$slot" = front ] && alive; then cat "$pidf"; else echo 0; fi ;;
-      *) if alive; then printf 'active\nrunning\n'; else printf 'inactive\ndead\n'; fi ;;
+      *) if [ -f "$RUN/$slot.activating" ]; then printf 'activating\nstart\n'; elif alive; then printf 'active\nrunning\n'; else printf 'inactive\ndead\n'; fi ;;
     esac ;;
 esac
 """
@@ -376,3 +376,27 @@ def test_stop_all_waits_out_a_short_lock_hold_and_still_stops_the_slots(rig):
         holder.wait()
     assert result.returncode == 0, result.stderr
     assert not rig.alive("blue")
+
+
+def test_a_slot_that_is_still_starting_is_waited_for_and_the_deploy_stays_gated(rig):
+    rig.stage()
+    assert rig.deploy().returncode == 0 and rig.active() == "blue"
+    rig.inbound("m1")
+    (rig.run / "blue.activating").touch()  # systemd says activating, as in the first minutes after a restart
+    threading.Timer(2, lambda: (rig.run / "blue.activating").unlink()).start()
+    result = rig.deploy()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "serving slot: blue" in result.stdout and "green passed the gate" in result.stdout
+    assert rig.active() == "green" and rig.health()
+
+
+def test_a_new_build_that_does_not_start_on_a_downed_line_puts_the_previous_slot_back(rig):
+    rig.stage()
+    assert rig.deploy().returncode == 0 and rig.active() == "blue"
+    subprocess.run(["systemctl", "--user", "stop", "fm-imessage@blue.service"], env=rig.env, check=True)
+    assert not rig.health()
+    rig.stage(plant_after_handover)
+    failed = rig.deploy()
+    assert failed.returncode == 1 and "serving slot: none" in failed.stdout, failed.stdout + failed.stderr
+    assert rig.active() == "blue" and not rig.alive("green")
+    wait_for(rig.health, "the previous slot serving again")

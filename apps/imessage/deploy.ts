@@ -22,6 +22,7 @@ const FRONT = "fm-imessage.service";
 const GATE_MS = Number(env.FM_DEPLOY_GATE_MS || 420_000);
 const OWN_MS = Number(env.FM_DEPLOY_OWN_MS || 120_000);
 const BACK_MS = Number(env.FM_DEPLOY_BACK_MS || 420_000);
+const SETTLE_MS = Number(env.FM_DEPLOY_SETTLE_MS || 120_000);
 
 const say = (line: string) => console.log(`imessage-deploy: ${line}`);
 const unit = (slot: string) => `fm-imessage@${slot}.service`;
@@ -40,6 +41,13 @@ const get = (port: number, path: string, method = "GET") =>
 
 // A unit that is still starting is not gone; one that failed, stopped, or waits to restart is.
 const gone = async (name: string) => /^(failed|inactive)$|auto-restart/m.test((await sc("show", name, "-p", "ActiveState", "-p", "SubState", "--value")).out);
+
+// A slot that is starting or waiting to restart is not down yet: wait for it to settle, then ask whether it serves.
+async function serving(slot: string) {
+  const end = Date.now() + SETTLE_MS;
+  while (Date.now() < end && (await sc("show", unit(slot), "-p", "ActiveState", "--value")).out.split("\n")[0] === "activating") await Bun.sleep(Number(env.FM_DEPLOY_POLL_MS || 3000));
+  return active(unit(slot));
+}
 
 // Polls `check` until it passes, the unit is gone, or the time is up. Returns the last answer.
 async function until(ms: number, check: () => Promise<{ ok: boolean; body: string }>, slot: string): Promise<{ ok: boolean; body: string }> {
@@ -99,28 +107,37 @@ async function rollback(cur: string, target: string, why: string): Promise<never
   process.exit(1);
 }
 
+// With no slot serving there is nothing to protect and no standby to gate: start the new slot as the owner. If it does not
+// come up, the previous slot is put back.
+async function startUngated(cur: string | undefined, prior: string | undefined, target: string) {
+  if (cur) await sc("stop", unit(cur));
+  if (!prior) await sc("stop", FRONT);
+  setActive(STATE, target);
+  await sc("start", unit(target));
+  const up = await until(BACK_MS, () => get(PORT, "/health"), target);
+  if (up.ok) return finish(target);
+  await sc("stop", unit(target));
+  if (cur) setActive(STATE, cur);
+  else rmSync(`${STATE}/active`, { force: true });
+  if (cur) { await sc("reset-failed", unit(cur)); await sc("start", unit(cur)); }
+  await sc("start", FRONT);
+  throw new Error(`${target} did not answer /health: ${up.body}`);
+}
+
 async function deploy() {
   mkdirSync(STATE, { recursive: true, mode: 0o700 });
   const lock = await holdLock(`${STATE}/deploy.lock`, 900_000);
   if (!lock) throw new Error("another imessage-deploy holds the lock");
   const prior = readActive(STATE);
   const cur = prior ?? ((await legacyRunning()) ? "legacy" : undefined);
-  const live = cur === "legacy" ? await legacyRunning() : cur ? await active(unit(cur)) : false;
+  const live = cur === "legacy" ? await legacyRunning() : cur ? await serving(cur) : false;
   const target = cur === "blue" ? "green" : "blue";
   if (cur === "legacy") snapshotLegacy();
   await sc("stop", unit(target));
   install(target);
   say(`staged ${target}; serving slot: ${live ? cur : "none"}`);
 
-  if (!live) { // nothing to protect: start the new slot as the owner
-    if (cur) await sc("stop", unit(cur));
-    if (!prior) await sc("stop", FRONT);
-    setActive(STATE, target);
-    await sc("start", unit(target));
-    const up = await until(BACK_MS, () => get(PORT, "/health"), target);
-    if (!up.ok) { await sc("stop", unit(target)); throw new Error(`${target} did not answer /health: ${up.body}`); }
-    return finish(target);
-  }
+  if (!live) return startUngated(cur, prior, target);
 
   setActive(STATE, cur!); // the new slot starts as standby
   await sc("start", unit(target));

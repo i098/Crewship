@@ -67,6 +67,7 @@ async function stop() {
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
   await Promise.race([Promise.all([deskTypingPending, ...running.map((proc) => proc.exited)]), Bun.sleep(2000)]);
+  await Bun.sleep(500); // senders that already connected read their 503 "stopping" before the process ends
   for (const proc of children) proc.kill("SIGKILL");
   // Reap killed children, but do not let a stuck child hold the bridge open.
   await Promise.race([Promise.all([...children].map((proc) => proc.exited)), Bun.sleep(500)]);
