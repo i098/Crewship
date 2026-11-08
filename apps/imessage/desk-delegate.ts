@@ -20,7 +20,7 @@ export type DelegateHost<O> = {
   safe(text: string): string;
   listed(mate: Secondmate): boolean; // the mate is still in the routing table
   helper(text: string, kind: HelperKind): Promise<string | undefined>; // the helper's answer; undefined when it failed or timed out. Sets its busy flag before its first await
-  send(target: DelegateTarget, id: string, text: string): Promise<boolean>; // true when the target's inbox took it
+  send(target: DelegateTarget, id: string, text: string, requests: string[]): Promise<boolean>; // true when the target's inbox took it; requests: the owner texts the task answers
   report(parts: string[], guid: string, origin: O): void; // the bridge's outbox, on the chat the text came from; guid starts with TASK_GUID_PREFIX
   log(error: unknown): void;
 };
@@ -28,13 +28,13 @@ export type DelegateHost<O> = {
 export const FOLLOW_UP = "Still with Firstmate; you will hear back";
 export const WAIT_MS = 600_000;
 
-type Job<O> = { id: string; text: string; origin: O; guid: string };
+type Job<O> = { id: string; text: string; origin: O; guid: string; requests: string[] };
 
 const sizeOf = (path: string) => statSync(path, { throwIfNoEntry: false })?.size ?? 0;
 
-async function attempt<O>(host: DelegateHost<O>, target: DelegateTarget, id: string, task: string): Promise<boolean> {
+async function attempt<O>(host: DelegateHost<O>, target: DelegateTarget, id: string, task: string, requests: string[]): Promise<boolean> {
   try {
-    return (typeof target === "string" || host.listed(target)) && await host.send(target, id, task);
+    return (typeof target === "string" || host.listed(target)) && await host.send(target, id, task, requests);
   } catch (error) {
     host.log(error);
     return false;
@@ -44,7 +44,7 @@ async function attempt<O>(host: DelegateHost<O>, target: DelegateTarget, id: str
 async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused = "") {
   const note = `${job.text}\nThe desk stopped waiting for this task (${why}). Answer the owner directly.${refused && `\nThe answer the desk refused to send:\n${refused}`}`;
   let held = false;
-  try { held = await host.send("firstmate", `${job.id}-lost`, note); } catch (error) { host.log(error); }
+  try { held = await host.send("firstmate", `${job.id}-lost`, note, job.requests); } catch (error) { host.log(error); }
   if (!held) return host.log(new Error(`desk task ${job.id} reached no inbox`));
   if (!host.muted()) try { host.report([FOLLOW_UP], `${job.guid}-followup`, job.origin); } catch (error) { host.log(error); }
 }
@@ -69,27 +69,27 @@ async function answerFrom<O>(host: DelegateHost<O>, path: string): Promise<strin
 }
 
 // The helper answers in its own run, with no answer file. A failure or an answer the checks refuse goes to Firstmate through `lost`.
-async function helped<O>(host: DelegateHost<O>, kind: HelperKind, text: string, origin: O) {
+async function helped<O>(host: DelegateHost<O>, kind: HelperKind, text: string, origin: O, requests: string[]) {
   const id = crypto.randomUUID();
-  const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}` };
+  const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}`, requests };
   let answer: string | undefined;
   try { answer = await host.helper(text, kind); } catch (error) { host.log(error); }
   if (answer === undefined) return host.stopping() ? undefined : await lost(host, job, "the helper failed");
   return await finish(host, job, answer);
 }
 
-async function run<O>(host: DelegateHost<O>, live: Set<string>, target: DelegateTarget, text: string, origin: O) {
+async function run<O>(host: DelegateHost<O>, live: Set<string>, target: DelegateTarget, text: string, origin: O, requests: string[]) {
   const kind = typeof target === "string" ? helperKind(target) : undefined;
-  if (kind) return helped(host, kind, text, origin); // no await first: the helper is busy before the tool call returns
+  if (kind) return helped(host, kind, text, origin, requests); // no await first: the helper is busy before the tool call returns
   mkdirSync(host.answerDir, { recursive: true, mode: 0o700 });
   const id = crypto.randomUUID();
   const base = `${host.answerDir}/${id}`;
-  const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}` };
+  const job = { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}`, requests };
   const task = `${text}\n${STE_STYLE}\nWhen you have the answer, write it for the owner to ${base}.answer.tmp, then rename it to ${base}.answer`;
   writeFileSync(`${base}.task`, JSON.stringify({ text, origin }), { mode: 0o600 });
   live.add(id);
   try {
-    if (!await attempt(host, target, id, task)) {
+    if (!await attempt(host, target, id, task, requests)) {
       rmSync(`${base}.task`, { force: true });
       host.log(new Error(`desk task for ${typeof target === "string" ? target : target.id} was not delivered`));
       return await lost(host, job, "not delivered");
@@ -116,7 +116,7 @@ function sweep<O>(host: DelegateHost<O>, live: Set<string>) {
       const answer = readFileSync(`${base}.answer`, "utf8");
       rmSync(`${base}.answer`, { force: true });
       rmSync(`${base}.task`, { force: true });
-      void finish(host, { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}` }, answer).catch(host.log);
+      void finish(host, { id, text, origin, guid: `${TASK_GUID_PREFIX}${id}`, requests: [] }, answer).catch(host.log);
     } catch (error) { host.log(error); }
   }
 }
@@ -124,5 +124,5 @@ function sweep<O>(host: DelegateHost<O>, live: Set<string>) {
 export function createDelegator<O>(host: DelegateHost<O>) {
   const live = new Set<string>();
   setInterval(() => sweep(host, live), host.pollMs).unref();
-  return (target: DelegateTarget, text: string, origin: O) => void run(host, live, target, text, origin).catch(host.log);
+  return (target: DelegateTarget, text: string, origin: O, requests: string[] = []) => void run(host, live, target, text, origin, requests).catch(host.log);
 }

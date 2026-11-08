@@ -45,6 +45,7 @@ import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
+import { createReadMarks } from "./read-marks.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -1148,8 +1149,15 @@ const runSessionTurn = createSessionTurn<Routing>({
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
-  send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
-    : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
+  send: async (target, id, text, requests) => {
+    const key = `desk-task-${id}`;
+    if (target === "firstmate") {
+      readMarks.noted(key, requests);
+      return await noteMain(key, text);
+    }
+    readMarks.delivered(key, target.id, requests);
+    return await spawnSender(target, `[from captain via desk] ${text}\n${deskRequestMarker(key)}`).exited === 0;
+  },
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
   ...deskLog(STATE),
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
@@ -1402,6 +1410,7 @@ function spawnSender(mate: Secondmate, text: string) {
 }
 
 async function deliverToMate(item: Routing, mate: Secondmate) {
+  readMarks.delivered(item.requestId, mate.id, [item.requestId]);
   const text = `[from captain via desk] ${item.authored ?? item.text}\n${deskRequestMarker(item.requestId)}`;
   const routed = `routed to ${mate.id}`;
   if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
@@ -1606,30 +1615,15 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
-// A text is marked read only once firstmate or a mate has taken its inbox note (the note is acknowledged), never on arrival or on a desk answer.
-// ponytail: the pending texts live in memory; a note acknowledged after a restart does not mark its text read. Persist them if that matters.
-const KEEP_UNREAD = 100;
-const unread = new Map<string, LineMessage>();
-let checkingAcks = false;
-async function markAcknowledgedRead() {
-  if (stopping || checkingAcks || !unread.size) return;
-  checkingAcks = true;
-  try {
+const readMarks = createReadMarks({
+  receipts: async () => {
     const proc = track(Bun.spawn([INBOX, "receipts"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
-    const { handled = [] } = JSON.parse(await new Response(proc.stdout).text()) as { handled?: { request_id?: string }[] };
-    for (const { request_id } of handled) {
-      const message = request_id ? unread.get(request_id) : undefined;
-      if (!message) continue;
-      unread.delete(request_id!);
-      await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
-    }
-  } catch (e) {
-    log("read receipts")(e);
-  } finally {
-    checkingAcks = false;
-  }
-}
-setInterval(markAcknowledgedRead, Number(env.FM_IMESSAGE_READ_POLL_MS || 5000)).unref();
+    return JSON.parse(await new Response(proc.stdout).text());
+  },
+  mateTook: (mate, marker) => mateInboxHas(FM_HOME, mate, marker, true),
+  log, trace: (message, event) => trace(message.id, event),
+});
+setInterval(() => { if (!stopping) void readMarks.poll(); }, Number(env.FM_IMESSAGE_READ_POLL_MS || 5000)).unref();
 
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
@@ -1659,8 +1653,7 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  unread.set(`${line.name}-${message.id}`, message);
-  if (unread.size > KEEP_UNREAD) unread.delete(unread.keys().next().value!);
+  readMarks.hold(`${line.name}-${message.id}`, message);
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();

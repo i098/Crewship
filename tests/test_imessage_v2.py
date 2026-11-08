@@ -449,8 +449,14 @@ def read_marks(rig):
     return read_text(rig.fake / "relay-read").splitlines()
 
 
-def ack(rig, *request_ids):
-    receipts = {"handled": [{"request_id": r, "acknowledged": True} for r in request_ids]}
+def ack(rig, *request_ids, acknowledged=True):
+    """What `fm-inbox.sh receipts` prints: the handled notes, each with its request id and acknowledgement."""
+    handled = [
+        {"id": f"n{n}", "at": "2026-11-08T00:00:00Z", "source": "fm-imessage", "request_id": r,
+         "body": "", "acknowledged": acknowledged, "announced": True, "reply": None}
+        for n, r in enumerate(request_ids)
+    ]
+    receipts = {"schema": "fm-inbox-receipts.v1", "pending": [], "handled": handled, "replies": [], "omitted": []}
     (rig.fake / "receipts").write_text(json.dumps(receipts))
 
 
@@ -460,6 +466,9 @@ def test_text_stays_unread_until_its_note_is_acknowledged(tmp_path):
         handed_off(rig, "m1")
         assert read_marks(rig) == []  # arrival does not mark it read
         ack(rig, "desk-m1")  # an acknowledgement of some other note is not a read of this text
+        time.sleep(1)
+        assert read_marks(rig) == []
+        ack(rig, "bluebubbles-m1", acknowledged=False)
         time.sleep(1)
         assert read_marks(rig) == []
         ack(rig, "bluebubbles-m1")

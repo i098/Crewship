@@ -182,7 +182,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       helperBusy: helper.busy,
       delegate: (mate, parts, target) => {
         host.answer(pending, parts, pending[target - 1], true);
-        delegate(mate, original.join("\n"), pending.at(-1)!);
+        delegate(mate, original.join("\n"), pending.at(-1)!, pending.map((r) => r.requestId));
       },
       status: async () => {
         const inbox = await host.inbox();
