@@ -535,6 +535,39 @@ console.log(JSON.stringify({{ max: Math.max(...sizes), drops, covered, VIEW_MAX,
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_inception_view_fits_whole_beside_large_system_and_status(tmp_path):
+    """On Inception a big system prompt and status leave the whole view in the prompt, under 100k serialized bytes."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput, INCEPTION_MAX, sizeView }} from {DESK};
+{FAKE}
+const system = 'You say "hi".\\n'.repeat(900); // 12.6 KB raw, 16.2 KB serialized
+const status = '"\\n'.repeat(8000); // 16 KB raw, 32 KB serialized: twice STATUS_MAX as JSON
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+sizeView(m, "inception", system);
+const escaped = (s) => Buffer.byteLength(JSON.stringify(s).slice(1, -1));
+let worst = 0, cut = false, drops = 0, peak = 0, last = 0;
+for (let n = 0; n < 1500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text "${{n}}"\\n`.padEnd(100, "."));
+  await idle(m);
+  const view = m.render();
+  const {{ prompt }} = deskInput(system, view, status, "HEAD latest TAIL", "inception", "");
+  cut ||= !prompt.includes(`<chat>\\n${{view}}\\n</chat>`) || !prompt.includes("HEAD latest TAIL");
+  worst = Math.max(worst, escaped(system + prompt));
+  if (escaped(view) < last) drops++;
+  last = escaped(view); peak = Math.max(peak, last);
+}}
+console.log(JSON.stringify({{ cut, worst, drops, peak, max: m.viewMax, INCEPTION_MAX, covered: m.view.reduce((s, [l]) => s + 2 ** l, 0) }}));
+""")
+    assert not result["cut"]
+    assert result["worst"] < result["INCEPTION_MAX"]
+    assert 0 < result["max"] < 96_000
+    assert result["drops"] >= 2
+    assert result["peak"] <= result["max"] + 4_000
+    assert result["covered"] == 1500
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_desk_context_keeps_a_fact_from_an_older_span(tmp_path):
     """500 short messages fill about 80 KB of view: the first one still reaches the desk prompt verbatim."""
     result = bun(f"""

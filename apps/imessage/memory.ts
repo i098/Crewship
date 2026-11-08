@@ -176,6 +176,8 @@ export class Memory {
   msgs: Msg[];
   nodes: Map<string, Node>;
   view: Line[];
+  viewMax = VIEW_MAX; // the view's sawtooth peak; the desk lowers it to its per-call budget
+  weigh = bytes; // a line's size in the desk provider's serialized bytes
   private queue: Line[] = [];
   private queued = new Set<string>();
   private retry = { failures: 0, nextAllowed: 0 };
@@ -252,8 +254,8 @@ export class Memory {
     this.pump();
     // Sized after pump(): a short message's node is built there at once when a worker is free. An unbuilt line
     // counts as its placeholder until its compaction ends, so the view can pass VIEW_MAX by that growth.
-    const size = (x: Line) => bytes(render(this.nodes, x)) + 1;
-    if (this.view.reduce((s, x) => s + size(x), 0) > VIEW_MAX) shrink(this.view, this.msgs.length, VIEW_MIN, size, (x) => this.nodes.has(key(x)));
+    const size = (x: Line) => this.weigh(render(this.nodes, x)) + 1;
+    if (this.view.reduce((s, x) => s + size(x), 0) > this.viewMax) shrink(this.view, this.msgs.length, Math.min(VIEW_MIN, Math.floor(this.viewMax * VIEW_MIN / VIEW_MAX)), size, (x) => this.nodes.has(key(x)));
     try {
       writeFileSync(`${this.dir}/view.json.tmp`, JSON.stringify(this.view), { mode: 0o600 });
       renameSync(`${this.dir}/view.json.tmp`, `${this.dir}/view.json`);
