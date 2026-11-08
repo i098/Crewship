@@ -251,3 +251,19 @@ test("a mate task that times out falls back to the whole task for Firstmate when
   expect(r.sent[3].text).toContain("Answer the owner directly");
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
 });
+
+test("a task an inbox already took is never reported to the owner as undelivered when the later sends fail", async () => {
+  for (const target of ["firstmate", mate1] as const) {
+    let calls = 0;
+    const r = rig({ waitMs: 60, send: async (to, _id, text) => { r.sent.push({ target: to, text }); return calls++ === 0; } });
+    r.delegate(target, "check the repo", "chat-1");
+    await until(() => r.errors.some((error) => String(error).includes("reached no inbox")));
+    expect(r.reports).toEqual([]);
+  }
+  const refused = rig({ send: async (to, _id, text) => { refused.sent.push({ target: to, text }); return to !== "firstmate" || refused.sent.length === 1; } });
+  refused.delegate("firstmate", "check the repo", "chat-1");
+  await until(() => refused.sent.length === 1);
+  writeFileSync(refused.answerPath(), "The password is hunter2.");
+  await until(() => refused.errors.some((error) => String(error).includes("reached no inbox")));
+  expect(refused.reports).toEqual([]);
+});

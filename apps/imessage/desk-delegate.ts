@@ -3,7 +3,7 @@
 // The target answers by writing a file, the only answer channel. A task file beside it keeps the chat and the text on disk,
 // so an answer that comes after a restart or after the wait limit is still sent, once, by the sweep.
 // A task that is lost (not delivered, no answer in time, answer refused) is put in Firstmate's inbox, and the owner gets one fixed follow-up.
-// A mate task with no answer in time goes to the mate once more first; Firstmate still gets a short note. A task that no inbox takes is reported to the owner as undelivered.
+// A mate task with no answer in time goes to the mate once more first; Firstmate still gets a short note. The owner is told "undelivered" only when the task never reached any inbox; a task that an inbox took earlier gets no such text.
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { STE_STYLE } from "./ste.ts";
 import { replyText, TASK_GUID_PREFIX } from "./desk-actions.ts";
@@ -55,6 +55,8 @@ async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused 
   const noted = await attempt(host, "firstmate", `${job.id}-lost`, held ? `The desk sent this task to the ${held.id} mate again: no answer in time. Make sure it is answered.\n${job.text}` : note);
   if (!held && !noted) host.log(new Error(`desk task ${job.id} reached no inbox`));
   if (host.muted()) return;
+  const never = why === "not delivered" || why === "the helper failed";
+  if (!held && !noted && !never) return;
   const text = held ? `Still with the ${held.id} mate; you will hear back` : noted ? FOLLOW_UP : UNDELIVERED;
   try { host.report([text], `${job.guid}-followup`, job.origin); } catch (error) { host.log(error); }
 }
