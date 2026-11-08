@@ -303,6 +303,7 @@ def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_on
 def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
     """The heal unit's ExecStart, rendered as the role renders it and run the way systemd runs it ($$ is one $)."""
     import shlex
+
     from jinja2 import Environment
     jinja = Environment()
     jinja.filters["comment"] = lambda text: "# " + text
@@ -325,6 +326,7 @@ def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
 def test_the_front_unit_stops_the_slots_only_when_it_is_stopped_on_purpose(tmp_path, mainpid, stops):
     """ExecStop as rendered, with systemd's ${MAINPID} substitution applied (it is empty when the process exited on its own)."""
     import shlex
+
     from jinja2 import Environment
     jinja = Environment()
     jinja.filters["comment"] = lambda text: "# " + text

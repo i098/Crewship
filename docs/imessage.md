@@ -1,6 +1,6 @@
 # iMessage bridge
 
-The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small Bun service, `fm-imessage.service`, that uses one or both of two transports for the iMessage line: a [Photon Spectrum](https://photon.codes/docs/spectrum-ts) project (the default), and [self-hosted BlueBubbles relays](#use-self-hosted-bluebubbles-relays) on Macs that you control. It is off by default.
+The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small Bun service, `fm-imessage@<slot>.service` (behind the front unit `fm-imessage.service`, see [Rolling deploys](#rolling-deploys)), that uses one or both of two transports for the iMessage line: a [Photon Spectrum](https://photon.codes/docs/spectrum-ts) project (the default), and [self-hosted BlueBubbles relays](#use-self-hosted-bluebubbles-relays) on Macs that you control. It is off by default.
 
 ## What it does
 
@@ -441,7 +441,7 @@ The line repairs itself without polling or periodic texts. The code is `apps/ime
 - **Watchdog.** The unit sets `WatchdogSec=300`. The bridge sends `WATCHDOG=1` through `systemd-notify` every 60 s, and only when `GET /health` on the bridge port answers, no desk turn has run longer than 15 minutes (`FM_IMESSAGE_TURN_DEADLINE_MS`), and the pi-natives `.node` loads. When a check fails, or the process is stopped or blocked, systemd stops the unit with SIGTERM (SIGKILL after `TimeoutStopSec`) and restarts it. The desk turn deadline is a backstop beyond the 10-minute delegate wait.
 - **Natives.** `ExecStartPre` runs `bun selfheal.ts start`, and each beat runs the same check. It loads every `~/.omp/natives/<omp version>/*.node` in a child process. If the file for this CPU is missing or does not load, it runs `omp --help` with a scratch `HOME`, which makes the omp binary unpack its own natives, and copies the result in with an atomic rename. It then imports `@oh-my-pi/pi-natives` the way the bridge resolves it (often the bun install cache) in a child process. If that fails, it copies the `.node` files from the sibling `pi-natives-<platform>-<arch>` package into the package's `native/` directory with an atomic rename, and probes again. When the repair cannot make it load, `ExecStartPre` exits non-zero, so systemd restarts the unit and the failure counts toward the alert.
 - **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
-- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the bridge again.
+- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the active slot again (`imessage-deploy.ts boot`).
 
 To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
 

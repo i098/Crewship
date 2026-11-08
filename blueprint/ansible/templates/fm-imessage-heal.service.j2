@@ -1,5 +1,5 @@
 {{ ansible_managed | comment }}
-# Runs when systemd gives up on fm-imessage.service (docs/imessage.md#self-healing): counts the failed heal, alerts on
+# Runs when systemd gives up on a slot unit, fm-imessage@<slot>.service (docs/imessage.md#self-healing): counts the failed heal, alerts on
 # the second one in a row, and starts the bridge again. Started only by OnFailure=; it has no [Install].
 
 [Unit]
