@@ -3,6 +3,7 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 // The line's reliability pieces live together: the self-heal heartbeat is exported here so the bridge keeps one import for them.
 export { heartbeat, Turns } from "./selfheal.ts";
+export { ownership, probeKit, standbyChecks } from "./standby.ts";
 import { routeRow, withTarget } from "./reply-target.ts";
 import { alreadySent, KEY_PATTERN, logSend, type Send } from "./sender-log.ts";
 

@@ -52,7 +52,7 @@ The health figures are counts, ages and latencies. Below them, the recent turns 
 
 - Bridge up or down: `systemctl --user is-active fm-imessage`, plus the age of the last `desk.log` line.
 - Pending bubbles: files in `outbox/`; the oldest pending age is the oldest file's modification time.
-- Retries: the highest `failed (try N)` for a pending item in the last 24 hours of the unit's journal. The queue keeps no retry count on disk.
+- Retries: the highest `failed (try N)` for a pending item in the last 24 hours of the journals of the front unit and the slot units (`fm-imessage@*`). The queue keeps no retry count on disk.
 - Sent, last 24 hours: `transport-accepted` and `history-reconciled` lines in `desk.log` (one per bubble or tapback the transport took, or found already delivered on retry). `outbox-done/` keeps only keyed items, so it is not used.
 - Failed, last 24 hours: files in `outbox-dead/`, by the burial time in the file name.
 - Recent turns: `routing.jsonl` in the state folder, one row pair per inbound message (newest first, as many as fit, text cut to the pane width). Route: `desk` (the desk answered), `main` (handed to main Firstmate), `mate <id>` (the plan names a secondmate), `dispatch <model>`, or `pending`. Out is the desk's own bubbles or tapback (by name, such as `love`); a reply that a mate or main sends later does not pass through this log, so it shows `–`.

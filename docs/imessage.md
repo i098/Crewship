@@ -1,6 +1,6 @@
 # iMessage bridge
 
-The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small Bun service, `fm-imessage.service`, that uses one or both of two transports for the iMessage line: a [Photon Spectrum](https://photon.codes/docs/spectrum-ts) project (the default), and [self-hosted BlueBubbles relays](#use-self-hosted-bluebubbles-relays) on Macs that you control. It is off by default.
+The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small Bun service, `fm-imessage@<slot>.service` (behind the front unit `fm-imessage.service`, see [Rolling deploys](#rolling-deploys)), that uses one or both of two transports for the iMessage line: a [Photon Spectrum](https://photon.codes/docs/spectrum-ts) project (the default), and [self-hosted BlueBubbles relays](#use-self-hosted-bluebubbles-relays) on Macs that you control. It is off by default.
 
 ## What it does
 
@@ -441,9 +441,24 @@ The line repairs itself without polling or periodic texts. The code is `apps/ime
 - **Watchdog.** The unit sets `WatchdogSec=300`. The bridge sends `WATCHDOG=1` through `systemd-notify` every 60 s, and only when `GET /health` on the bridge port answers, no desk turn has run longer than 15 minutes (`FM_IMESSAGE_TURN_DEADLINE_MS`), and the pi-natives `.node` loads. When a check fails, or the process is stopped or blocked, systemd stops the unit with SIGTERM (SIGKILL after `TimeoutStopSec`) and restarts it. The desk turn deadline is a backstop beyond the 10-minute delegate wait.
 - **Natives.** `ExecStartPre` runs `bun selfheal.ts start`, and each beat runs the same check. It loads every `~/.omp/natives/<omp version>/*.node` in a child process. If the file for this CPU is missing or does not load, it runs `omp --help` with a scratch `HOME`, which makes the omp binary unpack its own natives, and copies the result in with an atomic rename. It then imports `@oh-my-pi/pi-natives` the way the bridge resolves it (often the bun install cache) in a child process. If that fails, it copies the `.node` files from the sibling `pi-natives-<platform>-<arch>` package into the package's `native/` directory with an atomic rename, and probes again. When the repair cannot make it load, `ExecStartPre` exits non-zero, so systemd restarts the unit and the failure counts toward the alert.
 - **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
-- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the bridge again.
+- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the active slot again (`imessage-deploy.ts boot`).
 
 To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
+
+## Rolling deploys
+
+An install never restarts the bridge in place: a new process needs about 100 s before it listens, and a build with broken natives can start while systemd says `active`. `bun ~/.local/bin/imessage-deploy.ts` rolls the build in `<imessage dir>/stage/` out beside the running one. The Ansible role runs it as its only upgrade step; it is the only call workers and the heal unit make. The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
+
+- **Slots.** The bridge runs as `fm-imessage@blue`, `fm-imessage@green` or `fm-imessage@legacy` (the files from before slots, kept as the rollback target of the first rolling install). The slot named in `~/.local/state/fm-imessage/active` owns the line. `fm-imessage.service` is only the front: its process starts the active slot and exits while that slot is gone, so `systemctl --user is-active fm-imessage.service` is `active` only while a slot serves the line (it reads `activating` while the front waits to restart), and stopping it stops the slots. When the front process exits on its own because the slot is gone, the slots are not stopped, so the slot unit's own restart and start limit run.
+- **Standby.** A slot that is not active starts, connects the transports and serves only `GET /ready` and `/health` on `127.0.0.1:8766` (`FM_IMESSAGE_NEXT_PORT`). It builds no memory, outbox, routing replay or inbound loop, so it can send nothing.
+- **Gate.** The deploy passes only when `/ready` answers: the pi-natives load, one real desk model call with a stub prompt gives a reply (no text is sent), and every configured transport (Photon) is connected. The checks run in order: after the first failure the later ones are skipped, so a build with broken natives makes no paid desk call. A standby slot binds no webhook port and starts no BlueBubbles polling. A failure or a dead unit stops the new slot. A slot that already owns the line (a reboot) needs only the first transport and degrades to the others. The deploy stops a target slot left running before it installs the new build. The serving slot is never touched.
+- **Handover.** The deploy writes `active`, then stops the old slot. The new slot takes the exclusive lock `owner.lock`, waits for the main port, replays routing and the durable outbox, and listens. Two outbox senders cannot run: the lock and the port each allow one owner. Outbox items keep their ids, and keyed dedupe stops a repeat. While the old slot stops, the main port answers `503 stopping` for 0.5 s, then drops or refuses connections (curl exit 52, 56 or 7). All of these mean nothing was queued, so `fm-imessage` sends the request again every second for up to 150 s (`FM_IMESSAGE_WAIT_S`). A handover or a rollback costs no text, and a retry cannot repeat one. Any other failure ends the command at once.
+- **Confirm.** `POST /probe` queues one item in its own outbox lane, so a retrying text never holds it; its delivery reads the owner's latest text back from the transport and sends no text. With no latest text known the probe fails. If the new slot does not answer `/health` or the probe in time, the deploy stops it, sets `active` back and starts the old slot again (about 100 s). The old slot is stopped during the handover, not kept running: both cannot hold the port and the outbox.
+- **Retry after a failure.** A deploy records a hash of the staged files and the rendered units in `~/.local/state/fm-imessage/deployed` only when it succeeds. The Ansible role runs `imessage-deploy.ts needed` on every apply (exit 3: not deployed) and deploys whenever it answers 3, so a failed deploy runs again at the next apply.
+- **No slot serving.** A deploy first waits up to 120 s (`FM_DEPLOY_SETTLE_MS`) for a slot that is starting or waiting to restart. A slot that settles `active` is gated as above. If the old slot is already down (`failed` or `inactive`), there is no health gate: the new slot starts as the owner and must answer `/health` in time. If it does not, the deploy stops it, puts the previous slot back as `active`, starts it, and exits 1.
+- **One deploy at a time.** `deploy.lock` serializes deploys.
+
+Run `imessage-deploy.ts` with `FM_IMESSAGE_DIR` set; exit 0 means the new slot serves the line, 1 means the new build was rolled back or failed. After exit 1 the old slot serves only if it was serving before the deploy.
 
 ## Upstream outages
 
@@ -664,7 +679,7 @@ First [enable the bridge](#enable-it). Then add `transports` and the `bluebubble
       webhook_listen: <agent host address>:8766   # where the relays post their webhooks
 ```
 
-`webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. To use Photon alone again, remove `transports` and the `bluebubbles` block.
+`webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. Its port must not be the standby port (`FM_IMESSAGE_NEXT_PORT`, 8766 by default) on a wildcard or loopback address: the standby slot would fail to bind it while the live slot holds the webhook, and every deploy would fail. To use Photon alone again, remove `transports` and the `bluebubbles` block.
 
 The bridge uses these routing rules with one or both transports:
 
@@ -775,11 +790,11 @@ See [What it does](#what-it-does) for model-identity evidence and handoff rules.
 
 Apply installs these items:
 
-- the service in `~/.local/share/crewship/imessage/`, with the latest spectrum-ts
-- the unit `~/.config/systemd/user/fm-imessage.service`, mode `0600` because it holds the owner's number
-- the commands `fm-imessage` and `fm-location` in `~/.local/bin`
+- the build in `~/.local/share/crewship/imessage/stage/`, with the latest spectrum-ts in `~/.local/share/crewship/imessage/node_modules`, rolled out into a slot by `imessage-deploy.ts`, which gives each slot its own copy of `node_modules`, so a rollback keeps the SDK that the old slot ran with. The one exception is the first rolling install: it snapshots the pre-slot files into `legacy` after the SDK upgrade has already rewritten `node_modules`, so a rollback to `legacy` on that install runs on the new SDK
+- the slot unit `~/.config/systemd/user/fm-imessage@.service` and the front unit `fm-imessage.service`, mode `0600` because they hold the owner's number
+- the commands `fm-imessage` and `fm-location` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
 
-The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a unit drop-in (`systemctl --user edit fm-imessage`) and in the environment of the commands. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
+The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a drop-in of the slot unit (`systemctl --user edit fm-imessage@.service`) and in the environment of the commands, including `imessage-deploy.ts`, which reads the port only from its own environment. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
 
 The service is for the host's own commands (`fm-imessage`, `fm-location`) only.
 Except during shutdown, it checks the header `X-Firstmate: 1` and requires `Host` to be exactly `127.0.0.1:<port>` before looking at the path.
@@ -796,39 +811,10 @@ It waits up to another 500 ms for those children to exit, then exits with status
 The unit sets `KillMode=mixed` and `TimeoutStopSec=10` so systemd kills remaining service processes if shutdown stalls.
 See [Desk memory](#desk-memory) for compaction recovery after a restart.
 
-For this desk update, main must apply the reviewed source after merge and verify the installed bridge files.
-Pre-merge fixture checks do not complete this step.
-Run the following commands from the reviewed checkout as the bridge account, during an approved service window.
-First run the desk smoke test; it fails if the desk sends the routing receipt or an empty status answer, or if the front secret masker cannot load:
+Install and upgrade only through [Rolling deploys](#rolling-deploys): `imessage-deploy.ts` is the one install path, so a bare `systemctl --user restart fm-imessage` is not an upgrade.
+After an update, check the installed slot with `GET /health` and one `fm-imessage` text to a test chat; use isolated transport fixtures and synthetic owner messages, never a real recipient.
 
-```bash
-FM_DESK_SMOKE_STRICT=1 uv run pytest -q tests/test_imessage_smoke.py
-```
-
-Do not stop the service until it passes.
-Keep the existing unit, credentials, model settings, dependencies, and private state unchanged.
-Do not run a full host apply or restart another service.
-
-```bash
-runtime=$(systemctl --user show fm-imessage.service --property=WorkingDirectory --value)
-test -n "$runtime" && test -f "$runtime/bridge.ts" &&
-systemctl --user stop fm-imessage.service &&
-install -m 0644 apps/imessage/{bridge,bluebubbles,desk,inception-desk,transcribe,zoom}.ts apps/imessage/desk-tools.yml "$runtime/" &&
-install -m 0755 apps/imessage/fm-imessage "$HOME/.local/bin/fm-imessage" &&
-systemctl --user start fm-imessage.service &&
-systemctl --user is-active fm-imessage.service
-```
-
-If installation fails, keep the bridge stopped until every listed file is in place.
-Compare each installed file with its checkout source before verification.
-Use isolated transport fixtures and synthetic owner messages to verify the installed entrypoint without contacting a real recipient.
-Confirm real file reads, searches, system reads, and an immediate board-link reply.
-Confirm direct answers and successful mate deliveries create no main inbox note.
-Confirm untrusted retrieved instructions cannot authorize deletion or an external send.
-Confirm ambiguity, cross-domain work, delivery failures, and out-of-authority decisions still escalate.
-Keep installation pending until these checks pass against the installed files.
-
-To turn it off, remove the block, then run `systemctl --user disable --now fm-imessage` and delete the unit.
+To turn it off, remove the block, then run `systemctl --user disable --now fm-imessage` (the front unit stops the slots) and delete the units.
 
 ## Commands
 

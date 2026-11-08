@@ -23,6 +23,15 @@ test("the owner is alerted once, on the second failed heal in a row", () => with
   expect(lines[0]).toMatch(/^failed \[at=\d+\]: iMessage self-heal failed 2 times/);
 }));
 
+test("the alert through the real fm-imessage falls back to the status line at once while the bridge refuses connections", () => withHome(async (env, dir) => {
+  const down = { ...env, FM_IMESSAGE_SEND: `${import.meta.dir}/fm-imessage` };
+  const started = Date.now();
+  await expect(onStart(down)).rejects.toThrow();
+  await expect(onStart(down)).rejects.toThrow();
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(readFileSync(`${dir}/alerts.status`, "utf8")).toMatch(/^failed \[at=\d+\]: iMessage self-heal failed 2 times/);
+}));
+
 test("a healthy beat clears the failure count so the next failure alerts again", () => withHome(async (env, dir) => {
   await expect(onStart(env)).rejects.toThrow();
   markHealthy(env);

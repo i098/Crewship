@@ -119,7 +119,7 @@ export class Turns {
 
 // One alert per failure run: a text through the line when it answers, else one status line for Firstmate.
 export async function alert(env: Env, message: string) {
-  const sent = await run([env.FM_IMESSAGE_SEND || "fm-imessage", "--key", "selfheal-failed", "--", message], env, 30_000).catch(() => undefined);
+  const sent = await run([env.FM_IMESSAGE_SEND || "fm-imessage", "--key", "selfheal-failed", "--", message], { ...env, FM_IMESSAGE_WAIT_S: "0" }, 30_000).catch(() => undefined);
   if (sent?.code === 0) return "text";
   const file = env.FM_IMESSAGE_ALERT_STATUS || `${env.FM_HOME || home(env)}/state/imessage-selfheal.status`;
   mkdirSync(join(file, ".."), { recursive: true });

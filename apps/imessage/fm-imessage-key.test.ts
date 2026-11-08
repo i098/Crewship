@@ -10,7 +10,7 @@ afterAll(() => server.stop(true));
 
 test("fm-imessage --key sends the topic key and the sender to the bridge", async () => {
   const run = Bun.spawn([`${import.meta.dir}/fm-imessage`, "--key", "nums", "Up 4 percent."], {
-    env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port), FM_HOME: "/fleet/mate1" }, stdout: "pipe", stderr: "pipe" });
+    env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port), FM_IMESSAGE_WAIT_S: "0", FM_HOME: "/fleet/mate1" }, stdout: "pipe", stderr: "pipe" });
   expect(await run.exited).toBe(0);
   expect(seen).toEqual([{ key: "nums", sender: "/fleet/mate1", body: "Up 4 percent." }]);
 });

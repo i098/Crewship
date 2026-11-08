@@ -5,6 +5,8 @@
 #
 #   * the service runs from a copy of apps/imessage/ under the account's home, with
 #     the latest spectrum-ts, so it keeps working without the checkout
+#   * the copy lands in <dir>/stage/; imessage-deploy starts it as a standby slot beside the running bridge and hands
+#     the line over only after a health gate (docs/imessage.md#rolling-deploys). Nothing here restarts the bridge
 #   * the Photon project id and secret, or the relay passwords, are read from
 #     ~/super.env when the unit starts; they are never written by this playbook
 #   * the unit holds the owner's phone number, so it is mode 0600
@@ -16,17 +18,38 @@
     mode: "0755"
   loop:
     - "{{ crewship_imessage_dir }}"
+    - "{{ crewship_imessage_dir }}/stage"
     - "{{ crewship_local_bin }}"
     - "{{ crewship_user_units }}/default.target.wants"
 
 - name: Install the iMessage bridge service
   ansible.builtin.copy:
     src: "{{ crewship_repo }}/apps/imessage/{{ item }}"
-    dest: "{{ crewship_imessage_dir }}/{{ item }}"
+    dest: "{{ crewship_imessage_dir }}/stage/{{ item }}"
     mode: "0644"
     remote_src: true
-  loop: [bridge.ts, bluebubbles.ts, cards.ts, clean.ts, desk.ts, desk-actions.ts, desk-deadline.ts, desk-delegate.ts, desk-helper.ts, desk-session.ts, desk-session-turn.ts, desk-tools.yml, dispatch-policy.ts, front.ts, herdr-watch.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, relay.ts, reply-target.ts, selfheal.ts, sender-log.ts, ste.ts, subagent.ts, tokenlog.ts, transcribe.ts, zoom.ts]
-  notify: restart fm-imessage
+  loop: [bridge.ts, bluebubbles.ts, cards.ts, clean.ts, desk.ts, desk-actions.ts, desk-deadline.ts, desk-delegate.ts, desk-helper.ts, desk-session.ts, desk-session-turn.ts, desk-tools.yml, dispatch-policy.ts, front.ts, herdr-watch.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, ownership.ts, relay.ts, standby.ts, reply-target.ts, selfheal.ts, sender-log.ts, ste.ts, subagent.ts, tokenlog.ts, transcribe.ts, zoom.ts]
+  notify: deploy fm-imessage
+
+- name: Install the STE style files for the bridge
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/imessage/ste-vale/"
+    dest: "{{ crewship_imessage_dir }}/stage/ste-vale/"
+    mode: "0644"
+    directory_mode: "0755"
+    remote_src: true
+  notify: deploy fm-imessage
+
+- name: Install the iMessage rolling deploy command
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/imessage/{{ item.src }}"
+    dest: "{{ crewship_local_bin }}/{{ item.dest }}"
+    mode: "0755"
+    remote_src: true
+  loop:
+    - { src: deploy.ts, dest: imessage-deploy.ts }
+    - { src: ownership.ts, dest: ownership.ts }
+  notify: deploy fm-imessage
 
 - name: Install the iMessage commands
   ansible.builtin.copy:
@@ -69,16 +92,41 @@
   when:
     - not ansible_check_mode
     - crewship_imessage_sdk_stale | bool
-  notify: restart fm-imessage
+  notify: deploy fm-imessage
 
-- name: Render the iMessage bridge unit
+- name: Render the iMessage bridge slot unit
+  ansible.builtin.template:
+    src: fm-imessage@.service.j2
+    dest: "{{ crewship_user_units }}/fm-imessage@.service"
+    mode: "0600"
+  notify:
+    - reload user systemd
+    - deploy fm-imessage
+
+- name: Render the iMessage bridge front unit
   ansible.builtin.template:
     src: fm-imessage.service.j2
     dest: "{{ crewship_user_units }}/fm-imessage.service"
     mode: "0600"
   notify:
     - reload user systemd
-    - restart fm-imessage
+    - deploy fm-imessage
+
+# A deploy that failed leaves its record unchanged, so this task asks again on every apply until the staged build and units are deployed.
+- name: Check whether the staged iMessage bridge is deployed
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_local_bin }}/bun"
+      - "{{ crewship_local_bin }}/imessage-deploy.ts"
+      - needed
+  environment: "{{ crewship_user_systemd_env | combine({'HOME': crewship_cfg.home, 'FM_IMESSAGE_DIR': crewship_imessage_dir}) }}"
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  register: crewship_imessage_needed
+  changed_when: crewship_imessage_needed.rc == 3
+  failed_when: crewship_imessage_needed.rc not in [0, 3]
+  when: crewship_manage_services | bool and not ansible_check_mode
+  notify: deploy fm-imessage
 
 - name: Render the iMessage self-heal unit
   ansible.builtin.template:

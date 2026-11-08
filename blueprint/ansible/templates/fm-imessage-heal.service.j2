@@ -1,5 +1,5 @@
 {{ ansible_managed | comment }}
-# Runs when systemd gives up on fm-imessage.service (docs/imessage.md#self-healing): counts the failed heal, alerts on
+# Runs when systemd gives up on a slot unit, fm-imessage@<slot>.service (docs/imessage.md#self-healing): counts the failed heal, alerts on
 # the second one in a row, and starts the bridge again. Started only by OnFailure=; it has no [Install].
 
 [Unit]
@@ -13,4 +13,7 @@ Environment="FM_HOME={{ crewship_firstmate_dir }}"
 StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" selfheal.ts failed'
+# selfheal.ts is run from the active slot's directory (the deploy installs each slot with its own copy).
+ExecStart=/bin/sh -c 'slot=$$(cat "$$STATE_DIRECTORY/active") && cd "{{ crewship_imessage_dir }}/$$slot" && exec "{{ crewship_local_bin }}/bun" selfheal.ts failed'
+# The front unit may be waiting out its restart delay: start the active slot itself.
+ExecStartPost=-/bin/sh -c 'FM_IMESSAGE_DIR="{{ crewship_imessage_dir }}" exec "{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-deploy.ts" boot'

@@ -34,7 +34,7 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 @pytest.mark.parametrize("desk_session", [None, False, True])
 @pytest.mark.parametrize("herdr_alerts", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
-    ("fm-imessage", "bun", ["bridge.ts"]),
+    ("fm-imessage@", "bun", ["bridge.ts"]),
     ("fm-cards-tunnel", "cloudflared", [
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
@@ -87,7 +87,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     assert all(path.name != "super.env" for path in environment_files)
     assert environment_files == (
         [Path("/example/instagram/dm.env")]
-        if unit == "fm-imessage" and backend == "graph" else []
+        if unit == "fm-imessage@" and backend == "graph" else []
     )
     command = next(line.removeprefix("ExecStart=") for line in rendered.splitlines()
                    if line.startswith("ExecStart="))
@@ -100,7 +100,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
         "fake token value" if binary == "cloudflared" else None, args,
     ]
     assert result.stderr == ""
-    if unit == "fm-imessage":
+    if unit == "fm-imessage@":
         assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
         expected_session = "true" if desk_session is None else str(desk_session).lower()
         assert f'Environment="FM_IMESSAGE_DESK_SESSION={expected_session}"' in rendered
@@ -112,7 +112,7 @@ def send(tmp_path, *args):
     calls = tmp_path / "curl-calls"
     (tmp_path / "curl").write_text(f'#!/bin/bash\necho "$*" >> {calls}\ncat >/dev/null\n')
     (tmp_path / "curl").chmod(0o755)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": "0"}
     result = subprocess.run(
         [str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=10
     )
@@ -123,6 +123,41 @@ def test_text_goes_to_send(tmp_path):
     result, calls = send(tmp_path, "hello")
     assert result.returncode == 0
     assert len(calls) == 1 and calls[0].endswith("http://127.0.0.1:8765/send")
+
+
+def retrying_send(tmp_path, answers, *args, wait="20"):
+    """Run fm-imessage against a curl stand-in that answers each call as listed: "refused" (exit 7), "stopping" (503 body, exit 22), "muted" (503 other body, exit 22), "broken" (500 body, exit 22), "ok"."""
+    (tmp_path / "answers").write_text("\n".join(answers))
+    (tmp_path / "curl").write_text(
+        f'#!/bin/bash\nn=$(($(cat {tmp_path}/n 2>/dev/null || echo 0) + 1)); echo $n > {tmp_path}/n\n'
+        f'cat >> {tmp_path}/bodies; echo >> {tmp_path}/bodies\n'
+        f'case $(sed -n "${{n}}p" {tmp_path}/answers) in refused) exit 7 ;; stopping) printf stopping; exit 22 ;; muted) printf "nothing queued: muted"; exit 22 ;; broken) printf "internal error"; exit 22 ;; *) echo queued; exit 0 ;; esac\n')
+    (tmp_path / "curl").chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": wait}
+    result = subprocess.run([str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=60)
+    return result, int((tmp_path / "n").read_text()), (tmp_path / "bodies").read_text().splitlines()
+
+
+@pytest.mark.parametrize("args", [("--", "hello"), ("--react", "x"), ("--typing",)])
+def test_a_send_during_a_handover_is_retried_and_queued_once(tmp_path, args):
+    result, calls, bodies = retrying_send(tmp_path, ["refused", "stopping", "ok"], *args)
+    assert result.returncode == 0 and "queued" in result.stdout
+    assert calls == 3 and len(set(bodies)) == 1  # the same bytes each time, and the third answer ended it
+
+
+def test_a_real_refusal_is_not_retried_and_a_handover_that_outlasts_the_wait_fails(tmp_path):
+    (tmp_path / "bad").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "bad", ["stopping"] * 5, "--", "hello", wait="0")
+    assert result.returncode != 0 and calls == 1
+    (tmp_path / "other").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "other", ["refused"] * 3 + ["ok"], "--", "hello", wait="2")
+    assert result.returncode != 0 and 1 < calls < 4
+
+
+@pytest.mark.parametrize("answer", ["muted", "broken"])
+def test_a_refusal_that_is_not_a_handover_returns_at_once(tmp_path, answer):
+    result, calls, _ = retrying_send(tmp_path, [answer, "ok"], "--", "hello", wait="20")
+    assert result.returncode != 0 and calls == 1
 
 
 @pytest.mark.parametrize("option", ["--bogus", "-x", "--typo=1"])

@@ -1,0 +1,74 @@
+{{ ansible_managed | comment }}
+# One slot (blue, green or legacy) of the iMessage bridge. imessage-deploy starts a new slot beside the old one and hands
+# the line over once it is healthy (docs/imessage.md#rolling-deploys); the slot named in the state dir's `active` file
+# owns the line, any other one stays standby. Two-way iMessage between the owner and Firstmate over a Photon Spectrum line or
+# self-hosted BlueBubbles relays (docs/imessage.md). The Photon project id and
+# secret, or each relay's password, come from the host's secret store,
+# ~/super.env, at start; no credential is in this unit.
+
+[Unit]
+Description=iMessage bridge slot %i between the owner and Firstmate (Crewship managed)
+After=network-online.target
+# Self-healing (docs/imessage.md#self-healing): when systemd gives up on the bridge, the heal unit counts it, alerts on the second
+# failure in a row, and starts the bridge again.
+OnFailure=fm-imessage-heal.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory={{ crewship_imessage_dir }}/%i
+Environment=FM_IMESSAGE_SLOT=%i
+# omp (the front desk) starts with "#!/usr/bin/env bun", and bun lives in ~/.local/bin; ~/.bun/bin holds `bun add -g` tools.
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment="FM_HOME={{ crewship_firstmate_dir }}"
+Environment="FM_IMESSAGE_OWNER={{ crewship_cfg.imessage.owner }}"
+Environment="FM_IMESSAGE_DESK_V2={{ crewship_cfg.imessage.desk_v2 | default(false) | ternary('true', 'false') }}"
+Environment="FM_IMESSAGE_DESK_SESSION={{ crewship_cfg.imessage.desk_session | default(true) | ternary('true', 'false') }}"
+Environment="FM_IMESSAGE_HERDR_ALERTS={{ crewship_cfg.imessage.herdr_alerts | default(false) | ternary('true', 'false') }}"
+Environment="FM_IMESSAGE_DESK_PROVIDER={{ crewship_imessage_desk_provider }}"
+Environment="FM_IMESSAGE_DESK_MODEL={{ crewship_imessage_desk_model }}"
+Environment="FM_IMESSAGE_DESK_REASONING={{ crewship_imessage_desk_reasoning }}"
+Environment="FM_IMESSAGE_SUPERVISOR_MODEL={{ crewship_imessage_supervisor_model }}"
+Environment="FM_IMESSAGE_OWNER_NAME={{ crewship_imessage_owner_name }}"
+{% set imessage_transports = crewship_cfg.imessage.transports | default(['photon']) %}
+# The transports in order: the first one sends, the next ones are fallbacks.
+Environment="FM_IMESSAGE_TRANSPORTS={{ imessage_transports | join(' ') }}"
+{% if 'bluebubbles' in imessage_transports %}
+# Each relay is "url,VARIABLE": VARIABLE names its password in ~/super.env.
+Environment="FM_BLUEBUBBLES_RELAYS={% for relay in crewship_cfg.imessage.bluebubbles.relays %}{{ relay.url }},{{ relay.password_env | default('BLUEBUBBLES_PASSWORD') }}{{ '' if loop.last else ' ' }}{% endfor %}"
+Environment="FM_BLUEBUBBLES_WEBHOOK={{ crewship_cfg.imessage.bluebubbles.webhook_listen }}"
+{% endif %}
+{% if crewship_cfg.imessage.cards is defined %}
+# App cards (docs/imessage.md#cards): fm-cards-tunnel.service carries this public address to the card-only port.
+Environment="FM_IMESSAGE_CARD_URL={{ crewship_cfg.imessage.cards.url }}"
+Environment="FM_IMESSAGE_CARD_PORT={{ crewship_imessage_card_port }}"
+{% endif %}
+{% if crewship_instagram_dm_backend == 'graph' %}
+# The Instagram DM webhook on the card-page listener (docs/architecture.md#official-instagram-api). The app secret
+# and the verify token come from dm.env.
+Environment=INSTAGRAM_DM_BACKEND=graph
+Environment=INSTAGRAM_DM_OPERATOR={{ crewship_instagram_dm_operator }}
+Environment=INSTAGRAM_DM_LOG={{ crewship_instagram_dm_log }}
+Environment="INSTAGRAM_DM_NOTIFY={{ crewship_instagram_dm_notify }}"
+EnvironmentFile=-{{ crewship_instagram_dm_session | dirname }}/dm.env
+{% endif %}
+# ~/.local/state/fm-imessage: the latest text, attachments, the outbox, the downloads to retry, the desk's memory
+# and its empty cwd.
+StateDirectory=fm-imessage
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/bin/sh -c 'set -a; . "$$HOME/super.env"; set +a; exec "{{ crewship_local_bin }}/bun" bridge.ts'
+# The bridge sends WATCHDOG=1 only while its port answers, no desk turn is stuck and the pi-natives .node loads.
+# systemd-notify runs as a child of the bridge, so any process of the unit may notify.
+WatchdogSec=300
+WatchdogSignal=SIGTERM
+NotifyAccess=all
+# Check the pi-natives .node files and repair them from the omp binary before the bridge starts.
+ExecStartPre=/bin/sh -c 'exec "{{ crewship_local_bin }}/bun" selfheal.ts start'
+KillMode=mixed
+TimeoutStopSec=10
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

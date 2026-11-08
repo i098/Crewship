@@ -85,7 +85,7 @@ def cli(*args, stdin=None, tmp_path=None, bun_ok=True):
     (stub / "curl").write_text('#!/bin/bash\ncat > "$STUB_OUT"\n')
     (stub / "curl").chmod(0o755)
     out = tmp_path / "sent"
-    env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", "STUB_OUT": str(out)}
+    env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", "STUB_OUT": str(out), "FM_IMESSAGE_WAIT_S": "0"}
     if not bun_ok:
         (stub / "bun").write_text("#!/bin/bash\ncat >/dev/null; echo partial; exit 1\n")
         (stub / "bun").chmod(0o755)
