@@ -78,12 +78,15 @@ function copyModules(slotDir: string) {
 // The files from before slots live in <dir> itself; keep a copy as the rollback target of the first rolling install.
 function snapshotLegacy() {
   if (existsSync(`${DIR}/legacy/bridge.ts`)) return;
-  mkdirSync(`${DIR}/legacy`, { recursive: true });
+  rmSync(`${DIR}/legacy.tmp`, { recursive: true, force: true });
+  mkdirSync(`${DIR}/legacy.tmp`, { recursive: true });
   for (const e of readdirSync(DIR, { withFileTypes: true })) {
-    if (e.isFile() && /\.(ts|yml)$/.test(e.name)) cpSync(`${DIR}/${e.name}`, `${DIR}/legacy/${e.name}`);
-    if (e.isDirectory() && e.name === "ste-vale") cpSync(`${DIR}/${e.name}`, `${DIR}/legacy/${e.name}`, { recursive: true });
+    if (e.isFile() && /\.(ts|yml)$/.test(e.name)) cpSync(`${DIR}/${e.name}`, `${DIR}/legacy.tmp/${e.name}`);
+    if (e.isDirectory() && e.name === "ste-vale") cpSync(`${DIR}/${e.name}`, `${DIR}/legacy.tmp/${e.name}`, { recursive: true });
   }
-  copyModules(`${DIR}/legacy`);
+  copyModules(`${DIR}/legacy.tmp`);
+  rmSync(`${DIR}/legacy`, { recursive: true, force: true });
+  renameSync(`${DIR}/legacy.tmp`, `${DIR}/legacy`);
 }
 
 // Probe items a failed deploy left in the outbox would only confuse the next bridge.

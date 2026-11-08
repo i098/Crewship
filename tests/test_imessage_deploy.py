@@ -270,14 +270,15 @@ def test_the_confirm_step_fails_when_there_is_no_text_to_read_back(rig):
 
 
 def deploy_while_sending(rig):
-    """Runs the deploy while a thread keeps sending texts; returns the deploy result and every send's exit code."""
+    """Runs the deploy while a thread keeps sending texts; returns the deploy result and each send's (exit code, seconds)."""
     results, stop = [], threading.Event()
 
     def keep_sending():
         n = 0
         while not stop.is_set():
+            began = time.monotonic()
             r = subprocess.run([str(SEND), "--", f"text {n}"], capture_output=True, text=True, env=rig.env, timeout=200)
-            results.append(r.returncode)
+            results.append((r.returncode, time.monotonic() - began))
             n += 1
             time.sleep(0.05)
 
@@ -292,7 +293,8 @@ def deploy_while_sending(rig):
 
 
 def assert_each_text_went_out_once(rig, results):
-    assert results and set(results) == {0}  # no send was refused, whichever side of the handover it hit
+    assert results and {code for code, _ in results} == {0}  # no send was refused, whichever side of the handover it hit
+    assert max(took for _, took in results) > 1.0, results  # at least one send met the gap and was retried after the 1 s sleep
     wait_for(lambda: len(rig.sent()) == len(results), "every text")
     assert rig.sent() == sorted(f"send text {n}" for n in range(len(results)))  # each exactly once
 
