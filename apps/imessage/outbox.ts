@@ -260,26 +260,82 @@ export function sendReply<T extends Spot>(o: {
   });
 }
 
+// An owner text is marked read only once firstmate or a mate has taken it, never on arrival or on a desk answer.
+// Firstmate takes it when its inbox note is acknowledged; a mate when the delivered message moves to its handled/ folder.
+// ponytail: the pending texts live in memory; a text taken after a restart is not marked read. Persist them if that matters.
+const KEEP_UNREAD = 100;
 
-// Holds each owner text's read mark until the text is answered. A text that never gets an answer stays unread on his phone.
-// ponytail: the holds live in memory; a text answered after a restart is not marked read. Persist them if that matters.
-const KEEP_HELD = 100;
+export type Unread = { id: string; read(): Promise<unknown> };
+export type Receipts = { handled?: { request_id?: string; acknowledged?: boolean }[] };
 
-export function createReadAfter(onError: (what: string) => (e: unknown) => void) {
-  const held = new Map<string, () => Promise<unknown>>();
-  return {
-    hold(requestId: string, read: () => Promise<unknown>) {
-      held.set(requestId, read);
-      if (held.size > KEEP_HELD) held.delete(held.keys().next().value!);
-    },
-    // Marks each held text read once; an id with no hold, or already released, does nothing.
-    answered(requestIds: string[]) {
-      for (const id of requestIds) {
-        const read = held.get(id);
-        if (!read) continue;
-        held.delete(id);
-        void read().catch(onError("mark read"));
+export type ReadMarksHost = {
+  receipts(): Promise<Receipts>; // `fm-inbox.sh receipts`
+  mateTook(mate: string, marker: string): boolean; // the mate's handled/ folder holds the delivered message
+  log(what: string): (error: unknown) => void;
+  trace(message: Unread, event: string): void;
+};
+
+export class ReadMarks {
+  private unread = new Map<string, Unread>(); // request id -> the text
+  private noteOf = new Map<string, string[]>(); // a desk task note id -> the request ids it answers
+  private mateOf = new Map<string, { mate: string; ids: string[] }>(); // the marker id of a delivery -> the mate and request ids
+  private polling = false;
+
+  constructor(private host: ReadMarksHost) {}
+
+  hold(requestId: string, message: Unread) {
+    this.unread.set(requestId, message);
+    if (this.unread.size > KEEP_UNREAD) this.unread.delete(this.unread.keys().next().value!);
+  }
+
+  // The note `noteId` answers these owner texts.
+  noted(noteId: string, requests: string[]) { this.noteOf.set(noteId, requests); }
+
+  // The message marked `marker` went to `mate` for these owner texts.
+  delivered(marker: string, mate: string, requests: string[]) { this.mateOf.set(marker, { mate, ids: requests }); }
+
+  async poll() {
+    if (this.polling || !this.unread.size) return;
+    this.polling = true;
+    try {
+      await this.markDelivered();
+      await this.markNoted();
+    } catch (e) {
+      this.host.log("read receipts")(e);
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async markDelivered() {
+    for (const [marker, { mate, ids }] of this.mateOf) {
+      if (!ids.some((id) => this.unread.has(id))) this.mateOf.delete(marker);
+      else if (this.host.mateTook(mate, marker) && await this.markRead(ids)) this.mateOf.delete(marker);
+    }
+  }
+
+  private async markNoted() {
+    const { handled = [] } = await this.host.receipts();
+    for (const { request_id, acknowledged } of handled) {
+      if (request_id && acknowledged === true && await this.markRead(this.noteOf.get(request_id) ?? [request_id])) this.noteOf.delete(request_id);
+    }
+  }
+
+  // True when no read failed, so a failed read is retried on the next poll.
+  private async markRead(ids: string[]) {
+    let ok = true;
+    for (const id of ids) {
+      const message = this.unread.get(id);
+      if (!message) continue;
+      try {
+        await message.read();
+        this.unread.delete(id);
+        this.host.trace(message, "read");
+      } catch (e) {
+        ok = false;
+        this.host.log("mark read")(e);
       }
-    },
-  };
+    }
+    return ok;
+  }
 }

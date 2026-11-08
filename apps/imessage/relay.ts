@@ -34,10 +34,11 @@ export const deskRequestMarker = (requestId: string) => `[desk request ${request
 // True when a record in the mate's steering inbox (open or handled) holds the marker line of `requestId`. The sender
 // may report a failure after it wrote the record, so this decides whether a delivery needs a retry or an "incomplete" note.
 // It looks at the newest 200 records of each folder. A mate with no local inbox gives false.
-export function mateInboxHas(fmHome: string, mateId: string, requestId: string): boolean {
+// handledOnly: the mate has taken the message (its file moved to handled/), not merely received it.
+export function mateInboxHas(fmHome: string, mateId: string, requestId: string, handledOnly = false): boolean {
   const marker = deskRequestMarker(requestId);
   const base = `${fmHome}/state/${mateId}.inbox`;
-  for (const dir of [base, `${base}/handled`]) {
+  for (const dir of handledOnly ? [`${base}/handled`] : [base, `${base}/handled`]) {
     let names: string[];
     try { names = readdirSync(dir).filter((name) => name.endsWith(".msg")).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(-200); }
     catch { continue; }

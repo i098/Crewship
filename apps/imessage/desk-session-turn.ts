@@ -54,7 +54,7 @@ export type SessionHost<R extends TurnRequest> = {
   stopping(): boolean;
   listed(mate: Secondmate): boolean; // the mate is still in the routing table
   held(mate: Secondmate, id: string): boolean; // the mate's inbox holds the task marked with `id`
-  send(target: Secondmate | "firstmate", id: string, text: string): Promise<boolean>; // true when the target's inbox took a background task
+  send(target: Secondmate | "firstmate", id: string, text: string, requests: string[]): Promise<boolean>; // true when the target's inbox took a background task; requests: the owner texts it answers
   message(mate: Secondmate, text: string): Promise<boolean>; // the desk's own text to a mate; true when the mate's inbox took it
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
   record(key: string | undefined, text: string): void;
@@ -185,7 +185,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
         // The ack is the bridge's own text and claims only that the text is queued: whether the send worked is reported later.
         const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : `Your text is queued for the ${mate.id} mate`;
         host.answer(pending, [ack], pending[target - 1], true);
-        delegate(mate, original.join("\n"), pending.at(-1)!);
+        delegate(mate, original.join("\n"), pending.at(-1)!, pending.map((r) => r.requestId));
       },
       status: async () => {
         const inbox = await host.inbox();

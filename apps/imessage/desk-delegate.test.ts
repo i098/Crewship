@@ -42,6 +42,14 @@ test("the delegator returns before the send finishes, and the answer is reported
   expect(existsSync(r.answerPath())).toBe(false);
 });
 
+test("the target's send learns which owner texts the task answers, also for the lost-task note", async () => {
+  const seen: [string, string[]][] = [];
+  const r = rig({ send: async (target, _id, text, requests) => { r.sent.push({ target, text }); seen.push([String(typeof target === "string" ? target : target.id), requests]); return target === "firstmate"; } });
+  r.delegate(mate1, "check the repo", "chat-1", ["m1", "m2"]);
+  await until(() => r.reports.length === 1);
+  expect(seen).toEqual([["mate1", ["m1", "m2"]], ["firstmate", ["m1", "m2"]]]);
+});
+
 test("the task carries the owner's text and the answer path to the target", async () => {
   const r = rig();
   r.delegate("firstmate", "check the repo", "chat-1");

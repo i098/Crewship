@@ -45,7 +45,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, createReadAfter, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 
@@ -152,7 +152,6 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
-const readAfter = createReadAfter(log);
 const trace = (id: string, event: string) => {
   try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
   catch (e) { log("trace")(e); }
@@ -1019,7 +1018,6 @@ function recordResponse(o: Out) {
       selected.push(id);
     } else legacy.push(id);
   }
-  readAfter.answered([...legacy, ...selected]);
   if (legacy.length) recordRoute({ ids: legacy, responded: true });
   if (selected.length) {
     recordRoute({ ids: selected, responded: o.guid! });
@@ -1167,6 +1165,18 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
+// A desk task goes to Firstmate as an inbox note, or to a mate (the delegator adds the marker `id` its handling is traced by).
+async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
+  if (target === "firstmate") {
+    const key = `desk-task-${id}`;
+    readMarks.noted(key, requests);
+    return await noteMain(key, text);
+  }
+  if (typeof target === "string") return false; // a helper has no inbox
+  readMarks.delivered(id, target.id, requests);
+  return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
+}
+
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
@@ -1174,8 +1184,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)), held: (mate, id) => mateInboxHas(FM_HOME, mate.id, id),
-  send: async (target, id, text) => target === "firstmate" ? await noteMain(`desk-task-${id}`, text)
-    : await spawnSender(target, `[from captain via desk] ${text}`).exited === 0,
+  send: sendDeskTask,
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
   ...deskLog(STATE),
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
@@ -1428,6 +1437,7 @@ function spawnSender(mate: Secondmate, text: string) {
 }
 
 async function deliverToMate(item: Routing, mate: Secondmate) {
+  readMarks.delivered(item.requestId, mate.id, [item.requestId]);
   const text = `[from captain via desk] ${item.authored ?? item.text}\n${deskRequestMarker(item.requestId)}`;
   const routed = `routed to ${mate.id}`;
   if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
@@ -1632,6 +1642,16 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
+const readMarks = new ReadMarks({
+  receipts: async () => {
+    const proc = track(Bun.spawn([INBOX, "receipts"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
+    return JSON.parse(await new Response(proc.stdout).text());
+  },
+  mateTook: (mate, marker) => mateInboxHas(FM_HOME, mate, marker, true),
+  log, trace: (message, event) => trace(message.id, event),
+});
+setInterval(() => { if (!stopping) void readMarks.poll(); }, Number(env.FM_IMESSAGE_READ_POLL_MS || 5000)).unref();
+
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
   if (stopping) return;
@@ -1660,7 +1680,7 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  readAfter.hold(`${line.name}-${message.id}`, () => message.read().then(() => trace(message.id, "read")));
+  readMarks.hold(`${line.name}-${message.id}`, message);
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
