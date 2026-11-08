@@ -218,7 +218,7 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         sent = read_text(message)
         assert sent.startswith("[from captain via desk] DELEGATE ")
         assert "fm-imessage" not in sent  # the answer file is the only answer channel
-        answer = re.search(r"to (\S+\.answer)$", sent).group(1)
+        answer = re.search(r"to (\S+\.answer)(?:\n\[desk request [^\]]+\])?$", sent).group(1)  # a mate's copy ends with the marker line
         Path(answer).write_text("The repo checks are green.")
         wait_for(lambda: len(texts(rig)) == 2, "the reported answer", timeout=120)
         assert texts(rig)[1].split(" ", 1)[1] == "The repo checks are green."
