@@ -789,7 +789,7 @@ See [What it does](#what-it-does) for model-identity evidence and handoff rules.
 
 Apply installs these items:
 
-- the build in `~/.local/share/crewship/imessage/stage/`, with the latest spectrum-ts in `~/.local/share/crewship/imessage/node_modules`, rolled out into a slot by `imessage-deploy.ts`
+- the build in `~/.local/share/crewship/imessage/stage/`, with the latest spectrum-ts in `~/.local/share/crewship/imessage/node_modules`, rolled out into a slot by `imessage-deploy.ts`, which gives each slot its own copy of `node_modules`, so a rollback keeps the SDK that the old slot ran with. The one exception is the first rolling install: it snapshots the pre-slot files into `legacy` after the SDK upgrade has already rewritten `node_modules`, so a rollback to `legacy` on that install runs on the new SDK
 - the slot unit `~/.config/systemd/user/fm-imessage@.service` and the front unit `fm-imessage.service`, mode `0600` because they hold the owner's number
 - the commands `fm-imessage` and `fm-location` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
 

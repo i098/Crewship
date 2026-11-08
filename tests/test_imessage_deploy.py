@@ -342,3 +342,24 @@ def test_the_front_unit_stops_the_slots_only_when_it_is_stopped_on_purpose(tmp_p
     assert out.exists() == stops
     if stops:
         assert out.read_text().strip().endswith("imessage-deploy.ts stop-all")
+
+
+def test_an_sdk_upgrade_that_breaks_the_gate_leaves_the_old_slot_on_its_own_modules(rig):
+    rig.legacy()
+    rig.stage(plant_after_handover)
+    assert rig.deploy().returncode == 1  # the first install snapshots the legacy slot, then rolls back to it
+    legacy_sdk = rig.dir / "legacy/node_modules/spectrum-ts"
+    before = (legacy_sdk / "package.json").read_text(), (legacy_sdk / "index.js").read_text()
+
+    sdk = rig.dir / "node_modules/spectrum-ts"  # what `bun add spectrum-ts@<new>` leaves in <dir>
+    (sdk / "package.json").write_text(json.dumps({**json.loads((sdk / "package.json").read_text()), "version": "9.9.9"}))
+    (sdk / "index.js").write_text('throw new Error("the new SDK does not load");\n')
+    rig.stage()
+    failed = rig.deploy()
+    assert failed.returncode == 1 and "legacy was not touched" in failed.stdout, failed.stdout + failed.stderr
+    assert ((legacy_sdk / "package.json").read_text(), (legacy_sdk / "index.js").read_text()) == before
+    assert rig.active() == "legacy" and rig.alive("legacy") and rig.health()
+    for verb in ("stop", "start"):  # a restart of the old slot, as a rollback does, loads the modules it kept
+        subprocess.run(["systemctl", "--user", verb, "fm-imessage@legacy.service"], env=rig.env, check=True)
+    wait_for(rig.health, "legacy restarted on its own modules")
+    assert rig.needed() == 3  # the SDK is part of what a deploy records, so the failed upgrade is retried

@@ -3,13 +3,13 @@
 // standby slot beside the running one, gates the cutover on its health check, hands the line over, confirms one
 // outbox pass, and rolls back to the old slot on any failure.
 //   imessage-deploy            roll the build in <dir>/stage out
-//   imessage-deploy needed     exit 3 when the staged build and units differ from the last deployed ones, or no slot serves
+//   imessage-deploy needed     exit 3 when the staged build and units differ from the last deployed ones, or no slot is recorded
 //   imessage-deploy boot       start the active slot if it is down
 //   imessage-deploy follow     the front unit's process: boot, then exit while the active slot is gone, so is-active tells the truth
 //   imessage-deploy stop-all   stop every slot unless a deploy is running (the front unit's ExecStop)
 // Env: FM_IMESSAGE_DIR (required), STATE_DIRECTORY, FM_IMESSAGE_PORT (8765), FM_IMESSAGE_NEXT_PORT (8766),
 // FM_DEPLOY_SYSTEMCTL (systemctl).
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { holdLock, readActive, setActive } from "./ownership.ts";
 
 const env = process.env;
@@ -59,7 +59,12 @@ function install(slot: string) {
   if (!existsSync(`${stage}/bridge.ts`)) throw new Error(`no staged build in ${stage}`);
   rmSync(`${DIR}/${slot}`, { recursive: true, force: true });
   cpSync(stage, `${DIR}/${slot}`, { recursive: true });
-  symlinkSync("../node_modules", `${DIR}/${slot}/node_modules`);
+  copyModules(`${DIR}/${slot}`);
+}
+
+// Each slot owns its node_modules, so an SDK upgrade in <dir> reaches only the slot installed after it and a rollback keeps the old SDK.
+function copyModules(slotDir: string) {
+  cpSync(`${DIR}/node_modules`, `${slotDir}/node_modules`, { recursive: true, verbatimSymlinks: true });
 }
 
 // The files from before slots live in <dir> itself; keep a copy as the rollback target of the first rolling install.
@@ -70,7 +75,7 @@ function snapshotLegacy() {
     if (e.isFile() && /\.(ts|yml)$/.test(e.name)) cpSync(`${DIR}/${e.name}`, `${DIR}/legacy/${e.name}`);
     if (e.isDirectory() && e.name === "ste-vale") cpSync(`${DIR}/${e.name}`, `${DIR}/legacy/${e.name}`, { recursive: true });
   }
-  symlinkSync("../node_modules", `${DIR}/legacy/node_modules`);
+  copyModules(`${DIR}/legacy`);
 }
 
 // Probe items a failed deploy left in the outbox would only confuse the next bridge.
@@ -146,7 +151,7 @@ async function finish(target: string) {
   say(`${target} serves the line`);
 }
 
-// What a deploy rolls out: the staged files and the rendered units. A failed deploy leaves the record unchanged,
+// What a deploy rolls out: the staged files, the rendered units and the installed SDK version. A failed deploy leaves the record unchanged,
 // so the next apply sees the difference and tries again.
 async function buildHash() {
   const hash = new Bun.CryptoHasher("sha256");
@@ -159,6 +164,8 @@ async function buildHash() {
   add(`${DIR}/stage`);
   const units = env.FM_DEPLOY_UNIT_DIR || `${env.HOME}/.config/systemd/user`;
   for (const f of ["fm-imessage.service", "fm-imessage@.service"]) if (existsSync(`${units}/${f}`)) hash.update(readFileSync(`${units}/${f}`));
+  const sdk = `${DIR}/node_modules/spectrum-ts/package.json`;
+  if (existsSync(sdk)) hash.update(readFileSync(sdk));
   return hash.digest("hex");
 }
 

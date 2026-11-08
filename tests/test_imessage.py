@@ -126,12 +126,12 @@ def test_text_goes_to_send(tmp_path):
 
 
 def retrying_send(tmp_path, answers, *args, wait="20"):
-    """Run fm-imessage against a curl stand-in that answers each call as listed: "refused" (exit 7), "stopping" (503 body, exit 22), "ok"."""
+    """Run fm-imessage against a curl stand-in that answers each call as listed: "refused" (exit 7), "stopping" (503 body, exit 22), "muted" (503 other body, exit 22), "broken" (500 body, exit 22), "ok"."""
     (tmp_path / "answers").write_text("\n".join(answers))
     (tmp_path / "curl").write_text(
         f'#!/bin/bash\nn=$(($(cat {tmp_path}/n 2>/dev/null || echo 0) + 1)); echo $n > {tmp_path}/n\n'
         f'cat >> {tmp_path}/bodies; echo >> {tmp_path}/bodies\n'
-        f'case $(sed -n "${{n}}p" {tmp_path}/answers) in refused) exit 7 ;; stopping) printf stopping; exit 22 ;; *) echo queued; exit 0 ;; esac\n')
+        f'case $(sed -n "${{n}}p" {tmp_path}/answers) in refused) exit 7 ;; stopping) printf stopping; exit 22 ;; muted) printf "nothing queued: muted"; exit 22 ;; broken) printf "internal error"; exit 22 ;; *) echo queued; exit 0 ;; esac\n')
     (tmp_path / "curl").chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": wait}
     result = subprocess.run([str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=60)
@@ -152,6 +152,12 @@ def test_a_real_refusal_is_not_retried_and_a_handover_that_outlasts_the_wait_fai
     (tmp_path / "other").mkdir()
     result, calls, _ = retrying_send(tmp_path / "other", ["refused"] * 3 + ["ok"], "--", "hello", wait="2")
     assert result.returncode != 0 and 1 < calls < 4
+
+
+@pytest.mark.parametrize("answer", ["muted", "broken"])
+def test_a_refusal_that_is_not_a_handover_returns_at_once(tmp_path, answer):
+    result, calls, _ = retrying_send(tmp_path, [answer, "ok"], "--", "hello", wait="20")
+    assert result.returncode != 0 and calls == 1
 
 
 @pytest.mark.parametrize("option", ["--bogus", "-x", "--typo=1"])
