@@ -1,4 +1,4 @@
-// Background work for the desk session: the session replies at once, and one background job sends the owner's text
+// Background work for the desk session: the bridge acks the owner at once (the model writes no text), and one background job sends the owner's text
 // to Firstmate or a listed second mate, waits for the routed answer, and hands it back to the bridge's checked reply path.
 // The target answers by writing a file, the only answer channel. A task file beside it keeps the chat and the text on disk,
 // so an answer that comes after a restart or after the wait limit is still sent, once, by the sweep.
