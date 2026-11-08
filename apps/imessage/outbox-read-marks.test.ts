@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import { createReadMarks, type Receipts } from "./read-marks.ts";
+import { ReadMarks, type Receipts } from "./outbox.ts";
 
 function rig() {
   const state = { receipts: {} as Receipts, taken: new Set<string>(), failReads: 0 };
   const read: string[] = [];
   const text = (id: string) => ({ id, read: async () => { if (state.failReads-- > 0) throw new Error("down"); read.push(id); } });
-  const marks = createReadMarks({
+  const marks = new ReadMarks({
     receipts: async () => state.receipts,
     mateTook: (mate, marker) => state.taken.has(`${mate}/${marker}`),
     log: () => () => {}, trace: () => {},

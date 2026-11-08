@@ -44,8 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
-import { createReadMarks } from "./read-marks.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, ReadMarks, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -1142,6 +1141,18 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
+// A desk task goes to Firstmate as an inbox note, or to a mate with a marker its handling is traced by.
+async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
+  const key = `desk-task-${id}`;
+  if (target === "firstmate") {
+    readMarks.noted(key, requests);
+    return await noteMain(key, text);
+  }
+  if (typeof target === "string") return false; // a helper has no inbox
+  readMarks.delivered(key, target.id, requests);
+  return await spawnSender(target, `[from captain via desk] ${text}\n${deskRequestMarker(key)}`).exited === 0;
+}
+
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
@@ -1149,15 +1160,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
-  send: async (target, id, text, requests) => {
-    const key = `desk-task-${id}`;
-    if (target === "firstmate") {
-      readMarks.noted(key, requests);
-      return await noteMain(key, text);
-    }
-    readMarks.delivered(key, target.id, requests);
-    return await spawnSender(target, `[from captain via desk] ${text}\n${deskRequestMarker(key)}`).exited === 0;
-  },
+  send: sendDeskTask,
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
   ...deskLog(STATE),
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
@@ -1615,7 +1618,7 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
-const readMarks = createReadMarks({
+const readMarks = new ReadMarks({
   receipts: async () => {
     const proc = track(Bun.spawn([INBOX, "receipts"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
     return JSON.parse(await new Response(proc.stdout).text());
