@@ -5,7 +5,8 @@
 #   runner-up-maintain clean              remove what the jobs left on the disk
 #   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
 #                                         start them again below the resume level; also start the units
-#                                         recorded by io-pause, one per run, after 10 min of calm IO
+#                                         recorded by io-pause, one per run, after 2 min of calm IO
+#                                         and start a coordinator that is down and that no pause holds
 #   runner-up-maintain io-pause <unit...> stop units for IO pressure and record them for that resume
 # Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
 set -eu
@@ -41,7 +42,7 @@ clean)
   exit "$failed" ;;
 guard)
   # Stopping a coordinator only stops new pickup: KillMode=process leaves running jobs alone.
-  # Only the coordinators this guard stopped start again, so a unit stopped by hand stays stopped.
+  # Below the resume level the disk rule starts the coordinators it stopped; the heal below starts any other one that is down.
   path=${RUNNER_UP_GUARD_PATH:-/}
   pause=${RUNNER_UP_PAUSE_PCT:-88}
   resume=${RUNNER_UP_RESUME_PCT:-85}
@@ -70,7 +71,7 @@ guard)
   if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
     if io_below; then
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
-      if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-600}" ]; then
+      if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
         read -r unit < "$io_state"
         if systemctl --user start "$unit"; then
           grep -vxF "$unit" "$io_state" > "$io_state.new" || true
@@ -100,6 +101,18 @@ guard)
     fi
   else
     rm -f "$io_hot"
+  fi
+  # Heal: a coordinator that is down and that neither the disk rule nor the IO rule holds starts again.
+  # Nothing starts at the pause level of the disk, nor while the IO pressure is high for a unit the IO rule may pause.
+  if [ "$used" -lt "$pause" ]; then
+    for i in ${RUNNER_UP_INSTANCES-}; do
+      u=runner-up@$i.service
+      systemctl --user is-active --quiet "$u" && continue
+      grep -qxF "$i" "$state" 2>/dev/null && continue
+      grep -qxF "$u" "$io_state" 2>/dev/null && continue
+      case " ${RUNNER_UP_IO_HEAVY-} " in *" $i "*) ! io_above || continue ;; esac
+      systemctl --user start "$u" || true
+    done
   fi
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
