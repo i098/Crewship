@@ -363,3 +363,16 @@ def test_an_sdk_upgrade_that_breaks_the_gate_leaves_the_old_slot_on_its_own_modu
         subprocess.run(["systemctl", "--user", verb, "fm-imessage@legacy.service"], env=rig.env, check=True)
     wait_for(rig.health, "legacy restarted on its own modules")
     assert rig.needed() == 3  # the SDK is part of what a deploy records, so the failed upgrade is retried
+
+
+def test_stop_all_waits_out_a_short_lock_hold_and_still_stops_the_slots(rig):
+    rig.stage()
+    assert rig.deploy().returncode == 0 and rig.alive("blue")
+    holder = subprocess.Popen(["flock", str(rig.state / "deploy.lock"), "sleep", "1.5"])  # what follow's poll does for a moment
+    try:
+        time.sleep(0.3)
+        result = subprocess.run(["bun", str(ROOT / "apps/imessage/deploy.ts"), "stop-all"], capture_output=True, text=True, env=rig.env, timeout=60)
+    finally:
+        holder.wait()
+    assert result.returncode == 0, result.stderr
+    assert not rig.alive("blue")

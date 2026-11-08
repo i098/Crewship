@@ -678,7 +678,7 @@ First [enable the bridge](#enable-it). Then add `transports` and the `bluebubble
       webhook_listen: <agent host address>:8766   # where the relays post their webhooks
 ```
 
-`webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. To use Photon alone again, remove `transports` and the `bluebubbles` block.
+`webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. Its port must not be the standby port (`FM_IMESSAGE_NEXT_PORT`, 8766 by default) on a wildcard or loopback address: the standby slot would fail to bind it while the live slot holds the webhook, and every deploy would fail. To use Photon alone again, remove `transports` and the `bluebubbles` block.
 
 The bridge uses these routing rules with one or both transports:
 

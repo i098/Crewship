@@ -199,8 +199,8 @@ async function boot() {
 }
 
 async function stopAll() {
-  const lock = await holdLock(`${STATE}/deploy.lock`, 0);
-  if (!lock) return; // a deploy is running and owns the units
+  const lock = await holdLock(`${STATE}/deploy.lock`, 10_000);
+  if (!lock) return; // follow holds the lock for a few ms per poll; a deploy holds it for minutes and owns the units
   for (const slot of ["blue", "green", "legacy"]) await sc("stop", unit(slot));
   lock.release();
 }
