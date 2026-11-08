@@ -105,6 +105,7 @@ tui:
 # Compact every session at 200k context: turns above 400k carried most Claude
 # tokens in a week of usage data.
 compaction:
+  # omp skips snapcompact on text-only models, so native and /compact fall through.
   methodOrder: [snapcompact, remote, handoff, shake, soft]
   thresholdTokens: 200000
   v2RetainedMessageBudget: 32000
