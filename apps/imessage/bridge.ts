@@ -44,7 +44,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, createReadAfter, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, permanent, Queue, sendReply, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 let stopping = false;
@@ -149,7 +149,6 @@ const said = new Map<string, string>(); // his last 100 texts by message id, for
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
 const log = (what: string) => (e: unknown) =>
   transient(e) ? console.error(`fm-imessage: ${what}: ${brief(e)}`) : console.error(`fm-imessage: ${what}:`, e);
-const readAfter = createReadAfter(log);
 const trace = (id: string, event: string) => {
   try { appendFileSync(DESK_LOG, `${new Date().toISOString()} ${id} ${event}\n`, { mode: 0o600 }); }
   catch (e) { log("trace")(e); }
@@ -995,7 +994,6 @@ function recordResponse(o: Out) {
       selected.push(id);
     } else legacy.push(id);
   }
-  readAfter.answered([...legacy, ...selected]);
   if (legacy.length) recordRoute({ ids: legacy, responded: true });
   if (selected.length) {
     recordRoute({ ids: selected, responded: o.guid! });
@@ -1608,6 +1606,31 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
+// A text is marked read only once firstmate or a mate has taken its inbox note (the note is acknowledged), never on arrival or on a desk answer.
+// ponytail: the pending texts live in memory; a note acknowledged after a restart does not mark its text read. Persist them if that matters.
+const KEEP_UNREAD = 100;
+const unread = new Map<string, LineMessage>();
+let checkingAcks = false;
+async function markAcknowledgedRead() {
+  if (stopping || checkingAcks || !unread.size) return;
+  checkingAcks = true;
+  try {
+    const proc = track(Bun.spawn([INBOX, "receipts"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
+    const { handled = [] } = JSON.parse(await new Response(proc.stdout).text()) as { handled?: { request_id?: string }[] };
+    for (const { request_id } of handled) {
+      const message = request_id ? unread.get(request_id) : undefined;
+      if (!message) continue;
+      unread.delete(request_id!);
+      await message.read().then(() => trace(message.id, "read")).catch(log("mark read"));
+    }
+  } catch (e) {
+    log("read receipts")(e);
+  } finally {
+    checkingAcks = false;
+  }
+}
+setInterval(markAcknowledgedRead, Number(env.FM_IMESSAGE_READ_POLL_MS || 5000)).unref();
+
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
   if (stopping) return;
@@ -1636,7 +1659,8 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  readAfter.hold(`${line.name}-${message.id}`, () => message.read().then(() => trace(message.id, "read")));
+  unread.set(`${line.name}-${message.id}`, message);
+  if (unread.size > KEEP_UNREAD) unread.delete(unread.keys().next().value!);
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();

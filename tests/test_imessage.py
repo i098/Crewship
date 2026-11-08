@@ -2627,7 +2627,7 @@ class FallbackRig:
                 """  echo '{"type":"desk_result","drafted":"SKIP","tools":{}}'\n"""
                 "else echo SKIP; fi\n"
             ),
-            "fm-inbox": f'printf "%s\\n" "$*" >> {self.notes}',
+            "fm-inbox": f'if [ "$1" = receipts ]; then cat {self.fake}/receipts 2>/dev/null; else printf "%s\\n" "$*" >> {self.notes}; fi',
         }.items():
             (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
             (bin_dir / name).chmod(0o755)
