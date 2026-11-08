@@ -535,6 +535,25 @@ console.log(JSON.stringify({{ max: Math.max(...sizes), drops, covered, VIEW_MAX,
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_desk_context_keeps_a_fact_from_an_older_span(tmp_path):
+    """500 short messages fill about 80 KB of view: the first one still reaches the desk prompt verbatim."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput }} from {DESK};
+{FAKE}
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+m.append("owner", "FACT-ZEBRA-7 ".padEnd(150, "."));
+for (let n = 1; n < 500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text ${{n}} `.padEnd(150, "."));
+  await idle(m);
+}}
+const {{ prompt }} = deskInput("system", m.render(), "status", "latest", "omp", m.recent());
+console.log(JSON.stringify({{ kept: prompt.includes("0+1|owner: FACT-ZEBRA-7") }}));
+""")
+    assert result["kept"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_memory_survives_a_restart(tmp_path):
     """The log, the tree and the view load back unchanged; nothing is rebuilt; zoom opens lines from disk."""
     result = bun(f"""

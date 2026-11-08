@@ -15,8 +15,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { STE_STYLE } from "./ste.ts";
 
 export const LIMIT = 512; // bytes per node
-export const VIEW_MIN = 32_000; // the view's sawtooth: past VIEW_MAX, one batch merges it down to VIEW_MIN
-export const VIEW_MAX = 64_000;
+export const VIEW_MIN = 64_000; // the view's sawtooth: past VIEW_MAX, one batch merges it down to VIEW_MIN
+export const VIEW_MAX = 96_000;
 export const CONTEXT_MAX = 2_048; // context for a small compaction, not the whole desk view
 export const INPUT_MAX = 4_096; // bytes per chunk; long messages are reduced without dropping their middle
 const COMPACT_MAX = 16_000; // includes the conversation's replies and retry turns
