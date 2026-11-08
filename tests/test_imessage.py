@@ -915,6 +915,41 @@ console.log(JSON.stringify({{ largest, CEILING }}));
     assert 0 < result["largest"] <= result["CEILING"]
 
 
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("mode", ["hang", "flood"])
+def test_compaction_child_failure_is_bounded_and_memory_keeps_serving(tmp_path, mode):
+    """A hung or flooding omp fails one call, leaves no orphan, and the memory still takes messages."""
+    pidfile = tmp_path / "grandchild.pid"
+    body = (
+        f"sleep 300 & echo $! > {pidfile}; sleep 300" if mode == "hang" else "head -c 5000000 /dev/zero | tr '\\0' x"
+    )
+    omp = tmp_path / "bin" / "omp"
+    omp.parent.mkdir()
+    omp.write_text(f"#!/bin/bash\n{body}\n")
+    omp.chmod(0o755)
+    env = {**os.environ, "PATH": f"{omp.parent}:{os.environ['PATH']}", "TMPDIR": str(tmp_path)}
+    out = subprocess.run(["bun", "-e", f"""
+import {{ compactChat }} from {DESK};
+import {{ Memory }} from {MEMORY};
+const errors = [];
+const m = new Memory({json.dumps(str(tmp_path / "mem"))}, (s) => compactChat(s, () => false, (p) => p, 500), (e) => errors.push(String(e)));
+const t0 = Date.now();
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+const id = m.append("owner", "still serving");
+console.log(JSON.stringify({{ ms: Date.now() - t0, errors, id }}));
+process.exit(0);
+"""], capture_output=True, text=True, check=True, timeout=30, env=env).stdout
+    result = json.loads(out)
+    assert result["id"] == 1 and result["ms"] < 5000
+    assert len(result["errors"]) == 1
+    assert ("exit" in result["errors"][0]) if mode == "hang" else ("too large" in result["errors"][0])
+    if mode == "hang":
+        time.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
+
+
 @pytest.mark.parametrize("args", [("hello",), ("--reply", "1", "hi"), ("--typing",), ("--react", "👍")])
 def test_send_commands_carry_the_local_header(tmp_path, args):
     result, calls = send(tmp_path, *args)

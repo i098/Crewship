@@ -637,10 +637,15 @@ export function compactReply(output: string): { text: string; input?: number; ou
   return { text: text ?? (streamed ? "" : output), model, ...spent };
 }
 
+export const COMPACT_TIMEOUT_MS = 60_000;
+export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per call
+
 // One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
 // Request Luna 6 with thinking off and the priority (Fast) service tier; keep the desk model unchanged.
 // `stopping` says the service is shutting down; `track` registers each child so a stop can kill it.
-export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T): Chat {
+// Each call runs in its own process group: a timeout, an output overflow or an exit kills the whole group, so a
+// grandchild that ignores SIGTERM or holds the pipe open cannot outlive the call and pile up memory.
+export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS): Chat {
   if (stopping()) throw new Error("bridge stopping");
   const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
   // --no-extensions does not disable omp's native memory backend or its teardown work.
@@ -652,15 +657,31 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
       const proc = track(Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
           "--mode=json", "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
-        { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", timeout: 60_000 },
+        { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", detached: true },
       ));
-      const output = await new Response(proc.stdout).text();
-      const exit = await proc.exited;
-      const reply = compactReply(output);
-      if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
-      const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
-      if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
-      return line;
+      const killGroup = (signal: "SIGTERM" | "SIGKILL" = "SIGKILL") => { try { process.kill(-proc.pid, signal); } catch { /* group already gone */ } };
+      // SIGTERM first (exit 143), SIGKILL for whatever ignores it.
+      let hard: NodeJS.Timeout | undefined;
+      const timer = setTimeout(() => { killGroup("SIGTERM"); hard = setTimeout(killGroup, 2000); hard.unref(); }, timeoutMs);
+      try {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of proc.stdout) {
+          size += chunk.length;
+          if (size > COMPACT_OUTPUT_MAX) { killGroup(); throw new Error("compaction output too large"); }
+          chunks.push(Buffer.from(chunk));
+        }
+        const exit = await proc.exited;
+        const reply = compactReply(Buffer.concat(chunks).toString());
+        if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
+        const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
+        if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
+        return line;
+      } finally {
+        clearTimeout(timer);
+        clearTimeout(hard);
+        killGroup();
+      }
     },
     end: () => rmSync(dir, { recursive: true, force: true }),
   };
