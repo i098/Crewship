@@ -172,7 +172,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
       if (!Number.isInteger(target) || target < 1 || target > host.requests.length) throw new Error(`to must be 1 to ${host.requests.length}`);
       done = true;
       host.delegate(mate, target);
-      return "sent, and the work started; your turn is over";
+      return "queued; whether it was delivered is reported later; your turn is over";
     },
     ...mateTools(host, live, may),
     fleet_status: async () => {
