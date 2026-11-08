@@ -42,7 +42,7 @@ clean)
   exit "$failed" ;;
 guard)
   # Stopping a coordinator only stops new pickup: KillMode=process leaves running jobs alone.
-  # Below the resume level the disk rule starts the coordinators it stopped; the heal below starts any other one that is down.
+  # Below the resume level the disk rule starts the coordinators it stopped; the heal below starts a failed one. A unit stopped by hand stays stopped.
   path=${RUNNER_UP_GUARD_PATH:-/}
   pause=${RUNNER_UP_PAUSE_PCT:-88}
   resume=${RUNNER_UP_RESUME_PCT:-85}
@@ -58,7 +58,7 @@ guard)
     rm -f "$state"
   fi
   # IO resume: /proc/pressure/io "full avg60" below the level for the whole window, then one unit per run.
-  # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
+  # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   io_calm=$io_state.calm
   io_hot=$io_state.hot
@@ -67,7 +67,7 @@ guard)
   io_above() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a > m) }'; }
   io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
   # IO resume: below the level for the whole window, then one unit per run.
-  # The disk rule owns a unit it stopped: nothing starts while the disk is at the resume level or above.
+  # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
   if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
     if io_below; then
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
@@ -102,12 +102,12 @@ guard)
   else
     rm -f "$io_hot"
   fi
-  # Heal: a coordinator that is down and that neither the disk rule nor the IO rule holds starts again.
+  # Heal: a coordinator in the failed state that neither the disk rule nor the IO rule holds starts again; an inactive one that a person stopped stays stopped.
   # Nothing starts at the pause level of the disk, nor while the IO pressure is high for a unit the IO rule may pause.
   if [ "$used" -lt "$pause" ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
       u=runner-up@$i.service
-      systemctl --user is-active --quiet "$u" && continue
+      systemctl --user is-failed --quiet "$u" || continue
       grep -qxF "$i" "$state" 2>/dev/null && continue
       grep -qxF "$u" "$io_state" 2>/dev/null && continue
       case " ${RUNNER_UP_IO_HEAVY-} " in *" $i "*) ! io_above || continue ;; esac

@@ -577,13 +577,14 @@ def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
     assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
-def guard(stubs, tmp_path, used, *, paused="", active=True, env=None):
+def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):
     """Run `guard` with a stub `df` that reports `used` percent and a `systemctl` that logs."""
     bin_dir, log = stubs
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
     (bin_dir / "systemctl").write_text(
         f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
         + ("" if active else '[ "$2" = is-active ] && exit 3\n')
+        + ("" if failed else '[ "$2" = is-failed ] && exit 1\n')
         + "exit 0\n"
     )
     for name in ("df", "systemctl"):
@@ -689,7 +690,7 @@ def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
     assert calls == [] and left == ["a", "b"]
 
 
-def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", env=None):
+def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, env=None):
     """Run `guard` with both coordinators down and return the `start` calls."""
     (tmp_path / "io.paused").write_text(io_paused)
     stubs[1].write_text("")
@@ -699,15 +700,19 @@ def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", env=None):
         "RUNNER_UP_NOW": "1000",
         **(env or {}),
     }
-    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, active=False, env=env)
+    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, active=False, failed=failed, env=env)
     return [c for c in calls if " start " in c]
 
 
-def test_guard_restarts_a_coordinator_that_is_down_and_held_by_no_pause(stubs, tmp_path):
+def test_guard_restarts_a_failed_coordinator_held_by_no_pause(stubs, tmp_path):
     assert heal(stubs, tmp_path, 10) == [
         "systemctl --user start runner-up@a-b.service",
         "systemctl --user start runner-up@c-d.service",
     ]
+
+
+def test_guard_leaves_a_coordinator_stopped_by_hand_alone(stubs, tmp_path):
+    assert heal(stubs, tmp_path, 10, failed=False) == []
 
 
 def test_guard_leaves_a_coordinator_alone_while_a_pause_holds_it(stubs, tmp_path):
