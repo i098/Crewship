@@ -35,6 +35,7 @@ import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
@@ -44,8 +45,9 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, permanent, Queue, ReadMarks, sendReply, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
+
 
 let stopping = false;
 const children = new Set<Bun.Subprocess>();
@@ -65,6 +67,7 @@ async function stop() {
   const running = [...children];
   for (const proc of running) proc.kill("SIGTERM");
   await Promise.race([Promise.all([deskTypingPending, ...running.map((proc) => proc.exited)]), Bun.sleep(2000)]);
+  await Bun.sleep(500); // senders that already connected read their 503 "stopping" before the process ends
   for (const proc of children) proc.kill("SIGKILL");
   // Reap killed children, but do not let a stuck child hold the bridge open.
   await Promise.race([Promise.all([...children].map((proc) => proc.exited)), Bun.sleep(500)]);
@@ -168,10 +171,9 @@ const typing = (space: LineMessage["space"] | undefined, on: boolean, id = lates
     }
   }).catch(log(on ? "start typing" : "stop typing"));
 };
-// This service is the memory's one writer: systemd runs one instance of the unit.
-const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
+// This service is the memory's one writer: only the slot that owns the line builds it, after the ownership gate.
+let memory!: Memory;
 const memoryByRequest = new Map<string, number>();
-for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 const desk = new DeskTiming(QUIET_MS, (current) => void (DESK_V2 ? runDeskV2() : runDesk(current)).catch((e) => {
   log("desk failed")(e);
   handoffPending();
@@ -200,12 +202,18 @@ type Ref = { line?: string; space: string; id: string };
 // `since` records when the text attempt started.
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
-type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true };
+type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true; probe?: true; lane?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
 type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { replyTarget: string; space: string; by: "id" | "position" };
+// Rolling deploy confirm (ownership.ts): one item through the outbox that reads from the transport and sends no text.
+// It has its own lane, so a retrying text never holds it, and it reads the owner's latest text back from the transport.
+const probe = probeKit<Ref, Out>(
+  (ref, id) => outbox.add({ ...ref, requestId: id, requests: [], guid: id, probe: true, lane: "probe" }),
+  (o) => lineOf(o)!.find(o).catch((e: unknown) => { if (!permanent(e)) throw e; }),
+);
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
@@ -264,6 +272,7 @@ type Line = {
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
   home?: string;
   latest?: Ref;
+  activate?(): void; // starts the transport's inbound side
 };
 let raw: AdvancedIMessage | undefined; // the Find My client (Photon only)
 const lines: Line[] = [];
@@ -278,11 +287,13 @@ async function startLine(name: string): Promise<Line> {
     const bb = new BlueBubbles(relays, STATE);
     // The relays post their webhooks to this address:port; bluebubbles.ts reads each message back with the password.
     const listen = new URL(`http://${need("FM_BLUEBUBBLES_WEBHOOK")}`);
-    Bun.serve({ hostname: listen.hostname, port: Number(listen.port), fetch: (req) =>
-      stopping ? new Response("stopping\n", { status: 503 }) : bb.webhook(req) });
-    bb.start();
     return {
       name,
+      activate: () => { // the webhook port and the polling wait until this bridge owns the line
+        Bun.serve({ hostname: listen.hostname, port: Number(listen.port), fetch: (req) =>
+          stopping ? new Response("stopping\n", { status: 503 }) : bb.webhook(req) });
+        bb.start();
+      },
       messages: bb,
       find: (ref) => bb.message(ref.id),
       separated: (space, id) => bb.separated(space, id),
@@ -394,7 +405,19 @@ const startups = TRANSPORTS.map((name) => {
   });
   return started;
 });
-await startups[0];
+// A slot bridge (rolling deploy, docs/imessage.md#rolling-deploys) waits here, connected but silent, until it owns the line.
+if (env.FM_IMESSAGE_SLOT) {
+  await ownership({
+    state: STATE, slot: env.FM_IMESSAGE_SLOT, port: PORT, standbyPort: Number(env.FM_IMESSAGE_NEXT_PORT || 8766), line: startups[0],
+    every: () => Promise.all(startups).then((ready) => { if (ready.includes(undefined)) throw new Error("a transport did not start"); }),
+    say: (line) => console.log(`fm-imessage: ${line}`),
+    checks: standbyChecks(env, () => readDesk(track(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env })))),
+  });
+} else await startups[0];
+for (const ready of startups) void ready.then((line) => line?.activate?.()).catch((e) => console.error(`fm-imessage: could not start a transport's inbound side: ${brief(e)}`));
+memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
+sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
+for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 // A configured transport, including one whose startup has not completed.
 const lineOf = (ref: Ref) => lines.find((line) => line.name === (ref.line ?? "photon"));
 // A Ref on a transport; a Photon one has no `line`, the same as the items queued before there were transports.
@@ -441,7 +464,7 @@ if (existsSync(ROUTING_LOG)) {
   if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
   else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
 }
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", deliver, RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", (o, save) => (o.probe ? probe.confirm(o) : deliver(o, save)), RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
@@ -485,6 +508,7 @@ Bun.serve({
         return new Response(`no location: ${e instanceof Error ? e.message : String(e)}; he shares it with the line in Find My\n`, { status: 503 });
       }
     }
+    if (req.method === "POST" && url.pathname === "/probe") return latestRef ? probe.start(latestRef) : new Response("no latest text to read back from the transport\n", { status: 503 });
     if (req.method !== "POST" || !["/send", "/image", "/typing", "/react", "/card"].includes(url.pathname)) return new Response("not found", { status: 404 });
     if (muted()) return new Response("nothing queued: muted\n", { status: 503 });
     const ref = latestRef;
@@ -840,7 +864,7 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
 // Each chat has one lane for its answers, so their bubbles stay in order, and one for the front desk's ack, so a slow
 // send never holds the ack of a new text. Other chats never wait on this chat.
 function outLane(o: Out): string {
-  return `${o.line ?? "photon"}|${o.space}|${o.front ? "front" : ""}`;
+  return o.lane ?? `${o.line ?? "photon"}|${o.space}|${o.front ? "front" : ""}`;
 }
 
 // Desk responses stay on their queued chat's transport, even during retries.
@@ -1141,16 +1165,16 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
   });
 }
 
-// A desk task goes to Firstmate as an inbox note, or to a mate with a marker its handling is traced by.
+// A desk task goes to Firstmate as an inbox note, or to a mate (the delegator adds the marker `id` its handling is traced by).
 async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
-  const key = `desk-task-${id}`;
   if (target === "firstmate") {
+    const key = `desk-task-${id}`;
     readMarks.noted(key, requests);
     return await noteMain(key, text);
   }
   if (typeof target === "string") return false; // a helper has no inbox
-  readMarks.delivered(key, target.id, requests);
-  return await spawnSender(target, `[from captain via desk] ${text}\n${deskRequestMarker(key)}`).exited === 0;
+  readMarks.delivered(id, target.id, requests);
+  return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
 }
 
 const runSessionTurn = createSessionTurn<Routing>({
@@ -1159,7 +1183,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   memoryIndex: (r) => memoryByRequest.get(r.requestId) ?? r.memoryId,
   safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
-  stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)),
+  stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)), held: (mate, id) => mateInboxHas(FM_HOME, mate.id, id),
   send: sendDeskTask,
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
   ...deskLog(STATE),

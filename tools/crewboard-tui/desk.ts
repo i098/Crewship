@@ -69,7 +69,7 @@ export type Probe = { unit: string; journal: string | null }
 export function probe(): Probe {
   const run = (args: string[]) => spawnSync(args[0], args.slice(1), { encoding: "utf8", timeout: 15000, maxBuffer: 256 << 20 })
   const unit = run(["systemctl", "--user", "is-active", UNIT]).stdout?.trim() || "unknown"
-  const j = run(["journalctl", "--user", "-u", UNIT, "--since", "-24h", "-o", "cat", "--no-pager"])
+  const j = run(["journalctl", "--user", "-u", UNIT, "-u", `${UNIT}@*`, "--since", "-24h", "-o", "cat", "--no-pager"])
   return { unit, journal: j.status === 0 ? j.stdout : null }
 }
 

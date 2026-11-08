@@ -462,17 +462,6 @@
       when: crewship_manage_services | bool
       listen: restart docker
 
-    - name: Restart the iMessage bridge
-      ansible.builtin.systemd_service:
-        scope: user
-        name: fm-imessage.service
-        state: restarted
-      become: "{{ crewship_become_target | bool }}"
-      become_user: "{{ crewship_cfg.user }}"
-      environment: "{{ crewship_user_systemd_env }}"
-      when: crewship_manage_services | bool
-      listen: restart fm-imessage
-
     - name: Restart the iMessage card tunnel
       ansible.builtin.systemd_service:
         scope: user
@@ -642,3 +631,16 @@
           no pipeline run is active, so new runs load them:
           no-mistakes daemon restart
       listen: no-mistakes daemon restart required
+
+    # The only upgrade path for the bridge: a standby slot, a health gate, a handover, a confirm and a rollback (docs/imessage.md#rolling-deploys).
+    - name: Roll out the iMessage bridge
+      ansible.builtin.command:
+        argv:
+          - "{{ crewship_local_bin }}/bun"
+          - "{{ crewship_local_bin }}/imessage-deploy.ts"
+      environment: "{{ crewship_user_systemd_env | combine({'HOME': crewship_cfg.home, 'FM_IMESSAGE_DIR': crewship_imessage_dir}) }}"
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      changed_when: true
+      when: crewship_manage_services | bool
+      listen: deploy fm-imessage

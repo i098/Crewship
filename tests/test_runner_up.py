@@ -577,13 +577,14 @@ def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
     assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
 
 
-def guard(stubs, tmp_path, used, *, paused="", active=True, env=None):
+def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):
     """Run `guard` with a stub `df` that reports `used` percent and a `systemctl` that logs."""
     bin_dir, log = stubs
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
     (bin_dir / "systemctl").write_text(
         f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
         + ("" if active else '[ "$2" = is-active ] && exit 3\n')
+        + ("" if failed else '[ "$2" = is-failed ] && exit 1\n')
         + "exit 0\n"
     )
     for name in ("df", "systemctl"):
@@ -600,7 +601,7 @@ def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_
     stubs, tmp_path
 ):
     guard(stubs, tmp_path, 10)
-    calls = stubs[1].read_text().splitlines()
+    calls = [c for c in stubs[1].read_text().splitlines() if c.startswith("docker")]
     assert calls[0] == "docker container prune --force --filter label=runner-up.place"
     assert not any(c.startswith("docker rm") or " stop " in c for c in calls)
 
@@ -627,20 +628,20 @@ def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tm
 
 
 def test_guard_does_not_stop_at_87_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
-    assert guard(stubs, tmp_path, 87)[0] == []
+    assert not any(" stop " in c for c in guard(stubs, tmp_path, 87)[0])
     calls, state = guard(stubs, tmp_path, 95, active=False)
     assert not any(" stop " in c for c in calls) and not state.exists()
 
 
 def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, tmp_path):
     calls, state = guard(stubs, tmp_path, 84, paused="a-b\n")
-    assert calls == ["systemctl --user start runner-up@a-b.service"]
+    assert [c for c in calls if " start " in c] == ["systemctl --user start runner-up@a-b.service"]
     assert not state.exists()
 
 
 def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
     calls, state = guard(stubs, tmp_path, 86, paused="a-b\n")
-    assert calls == [] and state.exists()
+    assert not any(" start " in c or " stop " in c for c in calls) and state.exists()
 
 
 def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None):
@@ -666,26 +667,72 @@ def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="
     return [c for c in calls if " start " in c], left
 
 
-def test_io_resume_waits_for_the_ten_minute_window_then_starts_one_unit_per_run(stubs, tmp_path):
+def test_io_resume_waits_for_the_two_minute_window_then_starts_one_unit_per_run(stubs, tmp_path):
     assert io_guard(stubs, tmp_path, "12.50", now=1000) == ([], ["a", "b"])
-    assert io_guard(stubs, tmp_path, "39.99", now=1599, io="")[0] == []
-    calls, left = io_guard(stubs, tmp_path, "5.00", now=1600, io="")
+    assert io_guard(stubs, tmp_path, "39.99", now=1119, io="")[0] == []
+    calls, left = io_guard(stubs, tmp_path, "5.00", now=1120, io="")
     assert calls == ["systemctl --user start a"] and left == ["b"]
-    calls, left = io_guard(stubs, tmp_path, "5.00", now=1720, io="")
+    calls, left = io_guard(stubs, tmp_path, "5.00", now=1240, io="")
     assert calls == ["systemctl --user start b"] and left == []
     assert not (tmp_path / "io.paused.calm").exists()
 
 
-def test_an_io_spike_resets_the_ten_minute_window(stubs, tmp_path):
+def test_an_io_spike_resets_the_calm_window(stubs, tmp_path):
     io_guard(stubs, tmp_path, "5.00", now=1000)
     assert io_guard(stubs, tmp_path, "40.00", now=1300, io="")[0] == []
     assert io_guard(stubs, tmp_path, "5.00", now=1700, io="")[0] == []
-    assert io_guard(stubs, tmp_path, "5.00", now=2300, io="")[0] == ["systemctl --user start a"]
+    assert io_guard(stubs, tmp_path, "5.00", now=1819, io="")[0] == []
+    assert io_guard(stubs, tmp_path, "5.00", now=1820, io="")[0] == ["systemctl --user start a"]
 
 
 def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
     calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=86, disk_paused="a\n")
     assert calls == [] and left == ["a", "b"]
+
+
+def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, env=None):
+    """Run `guard` with both coordinators down and return the `start` calls."""
+    (tmp_path / "io.paused").write_text(io_paused)
+    stubs[1].write_text("")
+    env = {
+        "RUNNER_UP_IO_STATE": str(tmp_path / "io.paused"),
+        "RUNNER_UP_PRESSURE_FILE": str(tmp_path / "none"),
+        "RUNNER_UP_NOW": "1000",
+        **(env or {}),
+    }
+    calls, _ = guard(
+        stubs, tmp_path, used, paused=disk_paused, active=False, failed=failed, env=env
+    )
+    return [c for c in calls if " start " in c]
+
+
+def test_guard_restarts_a_failed_coordinator_held_by_no_pause(stubs, tmp_path):
+    assert heal(stubs, tmp_path, 10) == [
+        "systemctl --user start runner-up@a-b.service",
+        "systemctl --user start runner-up@c-d.service",
+    ]
+
+
+def test_guard_leaves_a_coordinator_stopped_by_hand_alone(stubs, tmp_path):
+    assert heal(stubs, tmp_path, 10, failed=False) == []
+
+
+def test_guard_leaves_a_coordinator_alone_while_a_pause_holds_it(stubs, tmp_path):
+    assert heal(stubs, tmp_path, 95) == []
+    assert heal(stubs, tmp_path, 86, disk_paused="a-b\n") == [
+        "systemctl --user start runner-up@c-d.service"
+    ]
+    (tmp_path / "paused").unlink()
+    assert heal(stubs, tmp_path, 10, io_paused="runner-up@a-b.service\n") == [
+        "systemctl --user start runner-up@c-d.service"
+    ]
+
+
+def test_guard_keeps_a_heavy_coordinator_down_while_the_io_pressure_is_high(stubs, tmp_path):
+    pressure = tmp_path / "hot"
+    pressure.write_text("full avg10=1.00 avg60=64.00 avg300=0.00 total=1\n")
+    env = {"RUNNER_UP_PRESSURE_FILE": str(pressure), "RUNNER_UP_IO_HEAVY": "a-b"}
+    assert heal(stubs, tmp_path, 10, env=env) == ["systemctl --user start runner-up@c-d.service"]
 
 
 def io_hot_guard(stubs, tmp_path, avg60, now, heavy="h1 h2 h3"):

@@ -34,7 +34,7 @@ SEND = ROOT / "apps/imessage/fm-imessage"
 @pytest.mark.parametrize("desk_session", [None, False, True])
 @pytest.mark.parametrize("herdr_alerts", [None, False, True])
 @pytest.mark.parametrize("unit,binary,args", [
-    ("fm-imessage", "bun", ["bridge.ts"]),
+    ("fm-imessage@", "bun", ["bridge.ts"]),
     ("fm-cards-tunnel", "cloudflared", [
         "tunnel", "--config", "/dev/null", "--no-autoupdate", "--metrics", "127.0.0.1:20242", "run",
     ]),
@@ -87,7 +87,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
     assert all(path.name != "super.env" for path in environment_files)
     assert environment_files == (
         [Path("/example/instagram/dm.env")]
-        if unit == "fm-imessage" and backend == "graph" else []
+        if unit == "fm-imessage@" and backend == "graph" else []
     )
     command = next(line.removeprefix("ExecStart=") for line in rendered.splitlines()
                    if line.startswith("ExecStart="))
@@ -100,7 +100,7 @@ def test_service_loads_shell_secrets_without_systemd_parsing(tmp_path, unit, bin
         "fake token value" if binary == "cloudflared" else None, args,
     ]
     assert result.stderr == ""
-    if unit == "fm-imessage":
+    if unit == "fm-imessage@":
         assert f'Environment="FM_IMESSAGE_DESK_V2={str(bool(desk_v2)).lower()}"' in rendered
         expected_session = "true" if desk_session is None else str(desk_session).lower()
         assert f'Environment="FM_IMESSAGE_DESK_SESSION={expected_session}"' in rendered
@@ -112,7 +112,7 @@ def send(tmp_path, *args):
     calls = tmp_path / "curl-calls"
     (tmp_path / "curl").write_text(f'#!/bin/bash\necho "$*" >> {calls}\ncat >/dev/null\n')
     (tmp_path / "curl").chmod(0o755)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": "0"}
     result = subprocess.run(
         [str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=10
     )
@@ -123,6 +123,41 @@ def test_text_goes_to_send(tmp_path):
     result, calls = send(tmp_path, "hello")
     assert result.returncode == 0
     assert len(calls) == 1 and calls[0].endswith("http://127.0.0.1:8765/send")
+
+
+def retrying_send(tmp_path, answers, *args, wait="20"):
+    """Run fm-imessage against a curl stand-in that answers each call as listed: "refused" (exit 7), "stopping" (503 body, exit 22), "muted" (503 other body, exit 22), "broken" (500 body, exit 22), "ok"."""
+    (tmp_path / "answers").write_text("\n".join(answers))
+    (tmp_path / "curl").write_text(
+        f'#!/bin/bash\nn=$(($(cat {tmp_path}/n 2>/dev/null || echo 0) + 1)); echo $n > {tmp_path}/n\n'
+        f'cat >> {tmp_path}/bodies; echo >> {tmp_path}/bodies\n'
+        f'case $(sed -n "${{n}}p" {tmp_path}/answers) in refused) exit 7 ;; stopping) printf stopping; exit 22 ;; muted) printf "nothing queued: muted"; exit 22 ;; broken) printf "internal error"; exit 22 ;; *) echo queued; exit 0 ;; esac\n')
+    (tmp_path / "curl").chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FM_IMESSAGE_WAIT_S": wait}
+    result = subprocess.run([str(SEND), *args], input="", capture_output=True, text=True, env=env, timeout=60)
+    return result, int((tmp_path / "n").read_text()), (tmp_path / "bodies").read_text().splitlines()
+
+
+@pytest.mark.parametrize("args", [("--", "hello"), ("--react", "x"), ("--typing",)])
+def test_a_send_during_a_handover_is_retried_and_queued_once(tmp_path, args):
+    result, calls, bodies = retrying_send(tmp_path, ["refused", "stopping", "ok"], *args)
+    assert result.returncode == 0 and "queued" in result.stdout
+    assert calls == 3 and len(set(bodies)) == 1  # the same bytes each time, and the third answer ended it
+
+
+def test_a_real_refusal_is_not_retried_and_a_handover_that_outlasts_the_wait_fails(tmp_path):
+    (tmp_path / "bad").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "bad", ["stopping"] * 5, "--", "hello", wait="0")
+    assert result.returncode != 0 and calls == 1
+    (tmp_path / "other").mkdir()
+    result, calls, _ = retrying_send(tmp_path / "other", ["refused"] * 3 + ["ok"], "--", "hello", wait="2")
+    assert result.returncode != 0 and 1 < calls < 4
+
+
+@pytest.mark.parametrize("answer", ["muted", "broken"])
+def test_a_refusal_that_is_not_a_handover_returns_at_once(tmp_path, answer):
+    result, calls, _ = retrying_send(tmp_path, [answer, "ok"], "--", "hello", wait="20")
+    assert result.returncode != 0 and calls == 1
 
 
 @pytest.mark.parametrize("option", ["--bogus", "-x", "--typo=1"])
@@ -535,6 +570,85 @@ console.log(JSON.stringify({{ max: Math.max(...sizes), drops, covered, VIEW_MAX,
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_inception_view_fits_whole_beside_large_system_and_status(tmp_path):
+    """On Inception a big system prompt and status leave the whole view in the prompt, under 100k serialized bytes."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput, INCEPTION_MAX, sizeView }} from {DESK};
+{FAKE}
+const system = 'You say "hi".\\n'.repeat(900); // 12.6 KB raw, 16.2 KB serialized
+const status = '"\\n'.repeat(8000); // 16 KB raw, 32 KB serialized: twice STATUS_MAX as JSON
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+sizeView(m, "inception", system);
+const escaped = (s) => Buffer.byteLength(JSON.stringify(s).slice(1, -1));
+let worst = 0, cut = false, drops = 0, peak = 0, last = 0;
+for (let n = 0; n < 1500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text "${{n}}"\\n`.padEnd(100, "."));
+  await idle(m);
+  const view = m.render();
+  const {{ prompt }} = deskInput(system, view, status, "HEAD latest TAIL", "inception", "");
+  cut ||= !prompt.includes(`<chat>\\n${{view}}\\n</chat>`) || !prompt.includes("HEAD latest TAIL");
+  worst = Math.max(worst, escaped(system + prompt));
+  if (escaped(view) < last) drops++;
+  last = escaped(view); peak = Math.max(peak, last);
+}}
+console.log(JSON.stringify({{ cut, worst, drops, peak, max: m.viewMax, INCEPTION_MAX, covered: m.view.reduce((s, [l]) => s + 2 ** l, 0) }}));
+""")
+    assert not result["cut"]
+    assert result["worst"] < result["INCEPTION_MAX"]
+    assert 0 < result["max"] < 96_000
+    assert result["drops"] >= 2
+    assert result["peak"] <= result["max"] + 4_000
+    assert result["covered"] == 1500
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_view_sized_on_omp_is_resized_whole_lines_for_inception_dispatch(tmp_path):
+    """A view sized for omp, sent to Inception with a larger system prompt, drops whole oldest lines: no middle cut."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput, INCEPTION_MAX, sizeView }} from {DESK};
+{FAKE}
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+sizeView(m, "omp", "short desk prompt");
+for (let n = 0; n < 1500; n++) m.append(["owner", "supervisor", "desk"][n % 3], `line ${{n}} "q"`.padEnd(100, "."));
+await idle(m);
+const view = m.render();
+const system = 'You say "hi".\\n'.repeat(2000);
+const {{ prompt }} = deskInput(system, view, "status", "HEAD latest TAIL", "inception", "");
+const chat = prompt.slice(prompt.indexOf("<chat>\\n") + 7, prompt.indexOf("\\n</chat>"));
+const kept = chat.split("\\n"), all = view.split("\\n");
+const escaped = (s) => Buffer.byteLength(JSON.stringify(s).slice(1, -1));
+console.log(JSON.stringify({{ suffix: kept.length < all.length && kept.every((l, i) => l === all[all.length - kept.length + i]),
+  dropped: all.length - kept.length, marker: chat.includes("clipped to the head and tail"), worst: escaped(system + prompt), INCEPTION_MAX,
+  latest: prompt.includes("HEAD latest TAIL") }}));
+""")
+    assert result["suffix"] and result["dropped"] > 0
+    assert not result["marker"]
+    assert result["latest"]
+    assert result["worst"] < result["INCEPTION_MAX"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_desk_context_keeps_a_fact_from_an_older_span(tmp_path):
+    """500 short messages fill about 80 KB of view: the first one still reaches the desk prompt verbatim."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput }} from {DESK};
+{FAKE}
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+m.append("owner", "FACT-ZEBRA-7 ".padEnd(150, "."));
+for (let n = 1; n < 500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text ${{n}} `.padEnd(150, "."));
+  await idle(m);
+}}
+const {{ prompt }} = deskInput("system", m.render(), "status", "latest", "omp", m.recent());
+console.log(JSON.stringify({{ kept: prompt.includes("0+1|owner: FACT-ZEBRA-7") }}));
+""")
+    assert result["kept"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_memory_survives_a_restart(tmp_path):
     """The log, the tree and the view load back unchanged; nothing is rebuilt; zoom opens lines from disk."""
     result = bun(f"""
@@ -913,6 +1027,41 @@ while (m.pending) await Bun.sleep(0);
 console.log(JSON.stringify({{ largest, CEILING }}));
 """)
     assert 0 < result["largest"] <= result["CEILING"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+@pytest.mark.parametrize("mode", ["hang", "flood"])
+def test_compaction_child_failure_is_bounded_and_memory_keeps_serving(tmp_path, mode):
+    """A hung or flooding omp fails one call, leaves no orphan, and the memory still takes messages."""
+    pidfile = tmp_path / "grandchild.pid"
+    body = (
+        f"sleep 300 & echo $! > {pidfile}; sleep 300" if mode == "hang" else "head -c 5000000 /dev/zero | tr '\\0' x"
+    )
+    omp = tmp_path / "bin" / "omp"
+    omp.parent.mkdir()
+    omp.write_text(f"#!/bin/bash\n{body}\n")
+    omp.chmod(0o755)
+    env = {**os.environ, "PATH": f"{omp.parent}:{os.environ['PATH']}", "TMPDIR": str(tmp_path)}
+    out = subprocess.run(["bun", "-e", f"""
+import {{ compactChat }} from {DESK};
+import {{ Memory }} from {MEMORY};
+const errors = [];
+const m = new Memory({json.dumps(str(tmp_path / "mem"))}, (s) => compactChat(s, () => false, (p) => p, 500), (e) => errors.push(String(e)));
+const t0 = Date.now();
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+const id = m.append("owner", "still serving");
+console.log(JSON.stringify({{ ms: Date.now() - t0, errors, id }}));
+process.exit(0);
+"""], capture_output=True, text=True, check=True, timeout=30, env=env).stdout
+    result = json.loads(out)
+    assert result["id"] == 1 and result["ms"] < 5000
+    assert len(result["errors"]) == 1
+    assert ("exit" in result["errors"][0]) if mode == "hang" else ("too large" in result["errors"][0])
+    if mode == "hang":
+        time.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
 
 
 @pytest.mark.parametrize("args", [("hello",), ("--reply", "1", "hi"), ("--typing",), ("--react", "👍")])

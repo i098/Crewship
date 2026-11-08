@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseTurns } from "./traffic.ts"
-import { cut, deskSnapshot, latencyStats, loadDesk, parseLog, replyLatencies, retryCounts } from "./desk.ts"
+import { cut, deskSnapshot, latencyStats, loadDesk, parseLog, probe, replyLatencies, retryCounts } from "./desk.ts"
 
 const dirs: string[] = []
 afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })))
@@ -140,4 +140,13 @@ test("a turn row with wide characters stays within the pane width", () => {
   expect(rows).toHaveLength(4)
   // oracle: a terminal that does not join ZWJ sequences (tmux) draws every part
   for (const r of rows) expect(r.split("\u200d").reduce((n, p) => n + Bun.stringWidth(p), 0)).toBeLessThanOrEqual(40)
+})
+
+test("the probe reads the journal of the slot units as well as the front unit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "desk-probe-")); dirs.push(dir)
+  writeFileSync(join(dir, "systemctl"), "#!/bin/sh\necho active\n", { mode: 0o755 })
+  writeFileSync(join(dir, "journalctl"), `#!/bin/sh\ncase "$*" in *"-u fm-imessage@*"*) echo "outbox item 7 failed (try 3)" ;; esac\n`, { mode: 0o755 })
+  const saved = process.env.PATH
+  process.env.PATH = `${dir}:${saved}`
+  try { expect(retryCounts(probe().journal ?? "").get(7)).toBe(3) } finally { process.env.PATH = saved }
 })

@@ -27,6 +27,7 @@ import { getAgentDir, VERSION } from "@earendil-works/pi-coding-agent";
 // extension, not for a dynamic import(). Relative to ~/.omp/agent/extensions, where Crewship installs this file.
 import { installAdviser } from "../../../.local/share/crewship/compact-adviser/current/node_modules/compact-adviser/src/adviser.ts";
 import { parseDotenvKey } from "../../../.local/share/crewship/compact-adviser/current/node_modules/compact-adviser/src/env.ts";
+import { disabledByEnv } from "../../../.local/share/crewship/compact-adviser/current/node_modules/compact-adviser/src/disable.ts";
 
 const SETTINGS = { version: 1, mode: "auto", minContextTokens: 40000, contextBudgetTokens: 150000, autoAcknowledged: true, logRequests: false };
 // Directories a Firstmate-spawned session carries in its environment, besides its cwd.
@@ -36,6 +37,7 @@ export const COMPACT_MODES = ["snapcompact", "snapcompact", "snapcompact", "remo
 
 export interface Ctx {
 	cwd: string;
+	model?: { input?: readonly string[] };
 	isIdle(): boolean;
 	sessionManager: { getBranch(): unknown };
 	compact(options: CompactOptions): unknown;
@@ -89,11 +91,13 @@ function isContinuing(event: unknown): boolean {
 
 /** Runs ctx.compact with each mode in turn; the next mode starts when the last one failed. */
 export function compactWithFallback(ctx: Ctx, options: CompactOptions, modes: readonly string[] = COMPACT_MODES): void {
+	// A text-only model cannot run snapcompact; each doomed attempt only adds a failure and a busy compactor.
+	const usable = ctx.model?.input?.includes("image") === false ? modes.filter(m => m !== "snapcompact") : modes;
 	const attempt = (i: number): void => {
 		ctx.compact({
 			...options,
-			mode: modes[i],
-			onError: error => (i + 1 < modes.length ? attempt(i + 1) : options.onError?.(error)),
+			mode: usable[i],
+			onError: error => (i + 1 < usable.length ? attempt(i + 1) : options.onError?.(error)),
 		});
 	};
 	attempt(0);
@@ -153,7 +157,17 @@ export default function (pi: PiLike) {
 				};
 			}
 			if (prop === "registerCommand") {
-				return (name: string, def: { handler: Handler }) => target.registerCommand(name, { ...def, handler: guarded(def.handler) });
+				return (name: string, def: { handler: Handler }) =>
+					target.registerCommand(name, {
+						...def,
+						handler: async (args, ctx) => {
+							try {
+								return await guarded(def.handler)(args, ctx);
+							} finally {
+								show(args, ctx);
+							}
+						},
+					});
 			}
 			const value = Reflect.get(target, prop);
 			return typeof value === "function" ? value.bind(target) : value;
@@ -165,4 +179,21 @@ export default function (pi: PiLike) {
 		version: VERSION,
 		key: () => typesafeKey(process.env, join(homedir(), "super.env")),
 	});
+
+	// The package only ever clears its status key, so show the mode here. It goes last so it
+	// runs after the package's own handlers on the same event.
+	const show = (_event: unknown, ctx: Ctx & { mode?: string; hasUI?: boolean; ui?: { setStatus(key: string, text?: string): void } }) => {
+		if (ctx.mode !== "tui" || !ctx.hasUI || !ctx.ui) return;
+		let mode = "off";
+		try {
+			if (!excluded(ctx.cwd)) {
+				const saved = JSON.parse(readFileSync(join(agentDir, "compact-adviser.json"), "utf8")).mode;
+				if (saved === "hint" || saved === "auto") mode = saved;
+			}
+		} catch {
+			// An unreadable settings file means the package takes no action.
+		}
+		ctx.ui.setStatus("compact-adviser", disabledByEnv(process.env.COMPACT_ADVISER_DISABLE) ? undefined : `compact: ${mode}`);
+	};
+	for (const event of ["session_start", "session_switch", "agent_end"]) pi.on(event, show);
 }

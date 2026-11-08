@@ -6,7 +6,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { urls.pus
 afterAll(() => server.stop(true));
 
 const run = async (...args: string[]) => {
-  const p = Bun.spawn([`${import.meta.dir}/fm-imessage`, ...args], { env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port) }, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn([`${import.meta.dir}/fm-imessage`, ...args], { env: { PATH: process.env.PATH, FM_IMESSAGE_PORT: String(server.port), FM_IMESSAGE_WAIT_S: "0" }, stdout: "pipe", stderr: "pipe" });
   return { code: await p.exited, err: await new Response(p.stderr).text() };
 };
 
