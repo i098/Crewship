@@ -26,14 +26,16 @@ Bun.plugin({
       exports: { getAgentDir: () => dir, VERSION: "18.0.0" },
       loader: "object",
     }));
-    build.onResolve({ filter: /compact-adviser\\/src\\/(adviser|env)\\.ts$/ }, args => ({
-      path: args.path.endsWith("env.ts") ? "env" : "adviser",
+    build.onResolve({ filter: /compact-adviser\\/src\\/(adviser|env|disable)\\.ts$/ }, args => ({
+      path: args.path.match(/(adviser|env|disable)\\.ts$/)[1],
       namespace: "stub",
     }));
     build.onLoad({ filter: /.*/, namespace: "stub" }, args => ({
       loader: "js",
       contents: args.path === "env"
         ? 'export const parseDotenvKey = (t, n) => (t.match(new RegExp("^" + n + "=(.*)$", "m")) || [])[1];'
+        : args.path === "disable"
+        ? 'export const disabledByEnv = v => v !== undefined && ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());'
         : "export const installAdviser = (pi, o) => globalThis.__installed = { pi, o };",
     }));
   },
@@ -80,7 +82,8 @@ out.completed = completed;
 // Factory: maps agent_end, drops session_before_compact, skips excluded sessions, keeps existing settings.
 const events = {};
 const all = {};
-mod.default({ on: (e, h) => ((all[e] ||= []).push(h), events[e] = h), registerCommand() {} });
+const commands = {};
+mod.default({ on: (e, h) => ((all[e] ||= []).push(h), events[e] = h), registerCommand: (n, d) => commands[n] = d });
 const shim = globalThis.__installed.pi;
 shim.on("session_before_compact", () => {});
 let settled = 0;
@@ -96,18 +99,31 @@ events.turn_end({}, idle("/work/client-x/app"));
 await Bun.sleep(400);
 out.settled = settled;
 
-// Status segment: the mode, "off" for an excluded cwd, nothing when the kill switch is set.
-const status = cwd => {
+// Status segment: the mode, "off" for an excluded cwd, an unknown mode or a non-tui session, nothing when the kill switch is truthy.
+const status = (cwd, extra = {}) => {
   const calls = [];
-  all.session_start[0]({}, { ...idle(cwd), hasUI: true, ui: { setStatus: (k, t) => calls.push([k, t]) } });
+  all.session_start[0]({}, { ...idle(cwd), mode: "tui", hasUI: true, ui: { setStatus: (k, t) => calls.push([k, t]) }, ...extra });
   return calls[0];
 };
 out.statusOn = status("/work/app");
 out.statusExcluded = status("/work/client-x/app");
-process.env.COMPACT_ADVISER_DISABLE = "1";
-out.statusKill = status("/work/app");
+out.statusNoTui = status("/work/app", { mode: "print" }) ?? null;
+out.statusKill = [];
+for (const v of ["1", "true", " YES ", "on"]) {
+  process.env.COMPACT_ADVISER_DISABLE = v;
+  out.statusKill.push(status("/work/app")[1]);
+}
+process.env.COMPACT_ADVISER_DISABLE = "0";
+out.statusKillOff = status("/work/app");
 delete process.env.COMPACT_ADVISER_DISABLE;
 out.settings = JSON.parse(readFileSync(join(dir, "compact-adviser.json"), "utf8"));
+// A command that rewrites the settings refreshes the status; an unknown saved mode shows "off".
+shim.registerCommand("compact-adviser", { handler: () => writeFileSync(join(dir, "compact-adviser.json"), '{"mode":"off"}') });
+const cmdStatus = [];
+await commands["compact-adviser"].handler("off", { ...idle("/work/app"), mode: "tui", hasUI: true, ui: { setStatus: (k, t) => cmdStatus.push([k, t]) } });
+out.statusAfterCommand = cmdStatus[0];
+writeFileSync(join(dir, "compact-adviser.json"), '{"mode":"bogus"}');
+out.statusBogus = status("/work/app");
 writeFileSync(join(dir, "compact-adviser.json"), '{"version":1,"mode":"hint"}');
 mod.default({ on() {}, registerCommand() {} });
 out.settingsKept = readFileSync(join(dir, "compact-adviser.json"), "utf8");
@@ -117,8 +133,9 @@ console.log(JSON.stringify(out));
 
 def run():
     module = str(ROOT / "blueprint/config/omp-compact-adviser.ts")
+    env = {k: v for k, v in os.environ.items() if k != "COMPACT_ADVISER_DISABLE"}
     out = subprocess.run(["bun", "-e", SCRIPT], capture_output=True, text=True, check=True,
-                         env={**os.environ, "MODULE": module})
+                         env={**env, "MODULE": module})
     return json.loads(out.stdout.splitlines()[-1])
 
 
@@ -136,6 +153,10 @@ def test_compact_adviser_extension():
     assert out["settled"] == 1
     assert out["statusOn"] == ["compact-adviser", "compact: auto"]
     assert out["statusExcluded"] == ["compact-adviser", "compact: off"]
-    assert out["statusKill"] == ["compact-adviser", None]
+    assert out["statusNoTui"] is None
+    assert out["statusKill"] == [None] * 4
+    assert out["statusKillOff"] == ["compact-adviser", "compact: auto"]
+    assert out["statusAfterCommand"] == ["compact-adviser", "compact: off"]
+    assert out["statusBogus"] == ["compact-adviser", "compact: off"]
     assert out["settings"]["mode"] == "auto" and out["settings"]["autoAcknowledged"] is True
     assert '"mode":"hint"' in out["settingsKept"]
