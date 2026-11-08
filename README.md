@@ -14,6 +14,9 @@
 
 </div>
 
+Crewship helps you set up AI coding agents on a VPS.
+It turns one Ubuntu server into a self-hosted AI coding agent server: you run parallel coding agents there, and Firstmate, a coding agent orchestrator, supervises them while Herdr shows their work.
+
 ## Quick start
 
 For agent-assisted setup, give your coding agent this instruction:

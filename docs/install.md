@@ -3,6 +3,8 @@
 `install.sh` and the bare npm launchers install a Crewship release on the machine where you run them.
 They never clone the repository.
 
+Use them to set up AI coding agents on a VPS: the install gives you a self-hosted AI coding agent server where you can run parallel coding agents.
+
 ## Start on your laptop
 
 Do you already have a server for Crewship?

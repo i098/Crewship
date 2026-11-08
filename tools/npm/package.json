@@ -1,7 +1,15 @@
 {
   "name": "crewship",
   "version": "0.4.9",
-  "description": "This makes it super easy to start using agents in the cloud, enjoy!",
+  "description": "Set up AI coding agents on a VPS: a self-hosted AI coding agent server to run parallel coding agents, with Firstmate as the coding agent orchestrator.",
+  "keywords": [
+    "coding agents",
+    "ai coding agents",
+    "vps",
+    "self-hosted",
+    "agent orchestrator",
+    "parallel agents"
+  ],
   "license": "FSL-1.1-ALv2",
   "homepage": "https://crewship.si",
   "repository": {

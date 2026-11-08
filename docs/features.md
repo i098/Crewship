@@ -1,5 +1,8 @@
 # Features
 
+Crewship sets up AI coding agents on a VPS.
+These features turn one server into a self-hosted AI coding agent server where you run parallel coding agents under one coding agent orchestrator, Firstmate.
+
 - [omp agents](omp.md): sign-in, model roles, fallbacks, and the advisor
 - [Public skills and rules](omp.md#skills): the skills and rules that ship with Crewship, installed on request (opt-in)
 - [Global agent instructions](omp.md#global-instructions): the working rules for Claude Code, omp and Codex, installed on request and merged into a file you already have (opt-in)
