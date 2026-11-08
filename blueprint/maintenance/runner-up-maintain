@@ -6,7 +6,7 @@
 #   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
 #                                         start them again below the resume level; also start the units
 #                                         recorded by io-pause, one per run, after 2 min of calm IO
-#                                         and start a coordinator that is down and that no pause holds
+#                                         and start a failed coordinator that no pause holds
 #   runner-up-maintain io-pause <unit...> stop units for IO pressure and record them for that resume
 # Run with the docker shim first in PATH (runner-up-docker), which adds sudo and the slice.
 set -eu

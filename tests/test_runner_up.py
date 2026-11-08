@@ -700,7 +700,9 @@ def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, en
         "RUNNER_UP_NOW": "1000",
         **(env or {}),
     }
-    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, active=False, failed=failed, env=env)
+    calls, _ = guard(
+        stubs, tmp_path, used, paused=disk_paused, active=False, failed=failed, env=env
+    )
     return [c for c in calls if " start " in c]
 
 
