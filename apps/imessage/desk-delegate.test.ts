@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Queue } from "./outbox.ts";
 import { STE_STYLE } from "./ste.ts";
-import { createDelegator, type DelegateHost, type DelegateTarget, FOLLOW_UP } from "./desk-delegate.ts";
+import { createDelegator, type DelegateHost, type DelegateTarget, FOLLOW_UP, UNDELIVERED } from "./desk-delegate.ts";
 
 const mate1 = { id: "mate1", home: "/fleet/mate1", scope: "repo checks" };
 const dirs: string[] = [];
@@ -18,12 +18,12 @@ function rig(over: Partial<DelegateHost<string>> = {}) {
   const errors: unknown[] = [];
   const host: DelegateHost<string> = {
     answerDir: join(dir, "tasks"), waitMs: 3000, pollMs: 10, stopping: () => false, muted: () => false,
-    safe: (text) => text.replaceAll("hunter2", "[REDACTED]"), listed: () => true,
+    safe: (text) => text.replaceAll("hunter2", "[REDACTED]"), listed: () => true, held: () => false,
     helper: async () => "Installed it.",
     send: async (target, _id, text) => { sent.push({ target, text }); return true; },
     report: (parts, guid, origin) => void (reports.push({ parts, origin }), guids.push(guid)), log: (error) => void errors.push(error), ...over,
   };
-  const answerPath = (at = -1) => /to (\S+\.answer)$/.exec(sent.at(at)!.text)![1];
+  const answerPath = (at = -1) => /to (\S+\.answer)(?:\n\[desk request [^\]]+\])?$/.exec(sent.at(at)!.text)![1];
   return { delegate: createDelegator(host), host, sent, reports, guids, errors, answerPath };
 }
 const until = async (check: () => boolean) => { for (let i = 0; i < 300 && !check(); i++) await Bun.sleep(10); expect(check()).toBe(true); };
@@ -95,16 +95,16 @@ test("a mate send that fails goes to Firstmate and the owner gets the follow-up"
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
 });
 
-test("a task no inbox could take is logged and the owner is not told Firstmate has it", async () => {
+test("a task no inbox could take is logged and the owner is told it was not delivered", async () => {
   const r = rig({ send: async () => false });
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.errors.length === 2);
   expect(String(r.errors[1])).toContain("reached no inbox");
-  expect(r.reports).toEqual([]);
+  expect(r.reports).toEqual([{ parts: [UNDELIVERED], origin: "chat-1" }]);
   const first = rig({ send: async () => false });
   first.delegate("firstmate", "check the repo", "chat-1");
   await until(() => first.errors.length === 2);
-  expect(first.reports).toEqual([]);
+  expect(first.reports).toEqual([{ parts: [UNDELIVERED], origin: "chat-1" }]);
 });
 
 test("no answer by the wait limit gives Firstmate a fresh note and the owner the follow-up once; a late answer is then sent once", async () => {
@@ -207,45 +207,47 @@ test("a helper that fails or times out hands the ask to Firstmate and texts a sh
   }
 });
 
-test("a mate task's ack says sent only after the mate's inbox took it", async () => {
-  const acks: string[] = [];
-  const r = rig();
-  r.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
-  await until(() => acks.length === 1);
-  expect(acks).toEqual(["sent"]);
-});
-
-test("a mate task that cannot be sent is queued for Firstmate: the ack says queued, with no second follow-up", async () => {
-  const acks: string[] = [];
+test("a mate task that cannot be sent is put with Firstmate and the owner is told so", async () => {
   const r = rig({ send: async (target, _id, text) => { r.sent.push({ target, text }); return target === "firstmate"; } });
-  r.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
-  await until(() => acks.length === 1);
-  expect(acks).toEqual(["queued"]);
-  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
-  expect(r.reports).toEqual([]);
-  const none = rig({ send: async () => false });
-  none.delegate(mate1, "check the repo", "chat-1", (outcome) => acks.push(outcome));
-  await until(() => acks.length === 2);
-  expect(acks[1]).toBe("failed");
-});
-
-test("a mate task that times out is sent to the mate, retried once, and the follow-up names the mate", async () => {
-  let fails = 1;
-  const r = rig({ waitMs: 60, send: async (target, _id, text) => {
-    r.sent.push({ target, text });
-    return !(target === mate1 && r.sent.length > 1 && fails-- > 0);
-  } });
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
-  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, mate1]);
-  expect(r.sent[2].text).toContain("The desk stopped waiting for this task (no answer in time)");
-  expect(r.reports[0].parts[0]).toContain("mate1");
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
+  expect(r.sent[1].text).toContain("check the repo");
+  expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
 });
 
-test("a mate task that times out falls back to Firstmate when both sends to the mate fail", async () => {
+test("a mate send killed after the inbox write counts as delivered: the owner hears nothing and Firstmate gets no copy", async () => {
+  const inbox = new Set<string>();
+  const r = rig({
+    send: async (target, _id, text) => { r.sent.push({ target, text }); if (target !== "firstmate") inbox.add(/\[desk request ([^\]]+)\]/.exec(text)![1]); return false; },
+    held: (_mate, id) => inbox.has(id),
+  });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.sent.length === 1);
+  await Bun.sleep(50);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1]);
+  expect(r.reports).toEqual([]);
+  writeFileSync(r.answerPath(), "All green.");
+  await until(() => r.reports.length === 1);
+  expect(r.reports[0].parts).toEqual(["All green."]);
+});
+
+test("a mate task that times out is sent to the mate again, Firstmate gets a short note, and the follow-up names the mate", async () => {
+  const r = rig({ waitMs: 60 });
+  r.delegate(mate1, "check the repo", "chat-1");
+  await until(() => r.reports.length === 1);
+  expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, "firstmate"]);
+  expect(r.sent[1].text).toContain("The desk stopped waiting for this task (no answer in time)");
+  expect(r.sent[2].text).toContain("check the repo");
+  expect(r.sent[2].text).not.toContain(STE_STYLE);
+  expect(r.reports[0].parts[0]).toBe("Still with the mate1 mate; you will hear back");
+});
+
+test("a mate task that times out falls back to the whole task for Firstmate when both sends to the mate fail", async () => {
   const r = rig({ waitMs: 60, send: async (target, _id, text) => { r.sent.push({ target, text }); return target === "firstmate" || r.sent.length === 1; } });
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
   expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, mate1, "firstmate"]);
+  expect(r.sent[3].text).toContain("Answer the owner directly");
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
 });

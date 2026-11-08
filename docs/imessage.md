@@ -327,10 +327,10 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   - `tapback` reacts only when `deskMayAct` permits it.
   - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
   - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
-  - `delegate_task` sends a reply, starts background work, and ends the turn. See [Background tasks](#background-tasks).
+  - `delegate_task` starts background work, sends the owner the bridge's own queued text, and ends the turn. See [Background tasks](#background-tasks).
 - A text on a protected topic goes to Firstmate before any model call. A muted chat gets no action.
-- The desk sends no fixed routing receipt bubble, except the one-line ack after a front model timeout.
-- `message_mate` sends a listed mate a text of its own through `fm-send.sh` and does not end the turn; `mate_replies` reads that mate's newest status lines, where its marked replies arrive. `reply`, `handoff_main` and `delegate_task` take an optional `key`: a key already sent with the same content today is refused, so the desk does not repeat news the owner has.
+- The desk sends no fixed routing receipt bubble, except the one-line ack after a front model timeout and the "queued" line of `delegate_task`.
+- `message_mate` sends a listed mate a text of its own through `fm-send.sh` and does not end the turn; `mate_replies` reads that mate's newest status lines, where its marked replies arrive. `reply` and `handoff_main` take an optional `key`: a key already sent with the same content today is refused, so the desk does not repeat news the owner has.
 - `fleet_status` lists the second mates in `data/secondmates.md` with their scopes, so the session picks a real mate id for `relay_mate` and `delegate_task`.
 - A turn that ends with no action tool gets one reminder to use `reply`. If the model still completes in words, the bridge sends those words through the `reply` checks. Words that the checks refuse go to Firstmate. A turn that errors or aborts goes to Firstmate with no reminder. omp RPC cannot force a tool call, so the desk does not rely on one.
 - Each assistant message adds one `desk-session` line to the token log.
@@ -341,9 +341,8 @@ If the missed chat since the last session turn is longer than 8,000 characters, 
 #### Background tasks
 
 The desk can answer the owner at once while the work goes on in the background.
-The session calls `delegate_task` with the target `helper:install`, `helper:lookup`, `helper:read-link`, `firstmate` or the id of one mate in `data/secondmates.md`, and with the text of its reply.
-The tool works like `reply`: it ends the turn, and the same checks apply to the reply text.
-The bridge sends the reply first and then starts one background job.
+The session calls `delegate_task` with the target `helper:install`, `helper:lookup`, `helper:read-link`, `firstmate` or the id of one mate in `data/secondmates.md`, and with no text: the model writes none.
+The bridge records the owner's texts as answered at once, sends the owner "Your text is queued for Firstmate" or "Your text is queued for the <mate> mate", and then starts one background job. The ack never says that a send happened, and a new owner text during the send cannot start the same task again.
 
 - The bridge sends the owner's verbatim text to the target. The model never writes the task.
 - `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
@@ -355,15 +354,15 @@ The bridge sends the reply first and then starts one background job.
 - A sweep checks `desk-tasks/` when the bridge starts and then every half second. It sends each answer that has no waiting job, for example an answer that came while the bridge was down or after the 10 minutes. It sends each answer once to the chat in its task file, then removes both files.
 - The answer goes through the same checks as `reply`: `clean.ts`, the raw status line check, and the secret filter. A refused answer is logged and not sent.
 - A muted desk drops the answer. The answer goes to the chat of the request, in the same outbox as other desk texts.
-- For a second mate, the ack text goes out only after fm-send to that mate succeeded. If the send fails, the bridge files the task as a Firstmate inbox note and the owner gets "I could not reach the <mate> mate. Firstmate has your text queued" instead of the ack. If the note fails too, the owner gets a text that nobody has it.
-- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. For a mate task with no answer in 10 minutes, the bridge first sends the mate the owner's text with fm-send (one retry), then falls back to Firstmate. For every other lost task the bridge sends Firstmate a new inbox note with the owner's text. The note says the desk stopped waiting and that the target must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back", or "Still with the <mate> mate; you will hear back" when the mate took the note. If no inbox takes the note, the bridge only logs it. A muted desk sends no text.
+- A task to a mate carries the line `[desk request <id>]`. A send that `fm-send.sh` reports as failed, for example one killed after 5 seconds, still counts as delivered when the mate's inbox holds that line.
+- A task is lost when the target cannot receive it, when no answer comes in 10 minutes, or when the answer is refused. For a mate task with no answer in 10 minutes, the bridge first sends the mate the owner's text again (one retry); Firstmate then gets one short note that says so, so a dead mate cannot hold the text. For every other lost task, and when both sends to the mate fail, Firstmate gets a new inbox note with the owner's text. The note says the desk stopped waiting and that the target must answer the owner directly. For a refused answer, the note also holds that answer. After that the bridge sends the owner one fixed text: "Still with Firstmate; you will hear back", or "Still with the <mate> mate; you will hear back" when the mate took the text. If Firstmate's inbox does not take the note either, the owner gets "I could not deliver your text to anyone. Send it again". A muted desk sends no text.
 - A task report is a late answer, so a new owner text does not cancel it. Only a muted desk does.
 - If a new owner text cancels the reply before it is sent, the bridge does not hand the first text to Firstmate again. The task already holds it, so Firstmate or the mate gets it once.
 
 #### Helper
 
 The desk handles a simple, self-contained ask itself: install a skill or tool, look something up, read a link.
-The desk model classifies each work ask as install, lookup, read-link or other. Only those three kinds go to a helper; the session calls `delegate_task` with the target `helper:install`, `helper:lookup` or `helper:read-link` and a short reply. Any other ask, including one that sends, posts, emails, replies, pays or deploys, goes to Firstmate. The reply goes out at once.
+The desk model classifies each work ask as install, lookup, read-link or other. Only those three kinds go to a helper; the session calls `delegate_task` with the target `helper:install`, `helper:lookup` or `helper:read-link` and no text. Any other ask, including one that sends, posts, emails, replies, pays or deploys, goes to Firstmate. The bridge texts the owner at once that the text is queued.
 
 - The bridge starts one `omp -p` run with the desk model and no approval prompts. An install helper has `read`, `grep`, `glob` and `bash`. A lookup helper has `read`, `grep`, `glob` and `web_search`. A read-link helper has `read`, `grep` and `glob`. No helper has `write`. Lookup and read-link helpers read untrusted web content, so they have no `bash`. The run starts in a fresh scratch directory under `desk-helper/` in the state directory, with the same secret redaction as the desk session.
 - The helper environment is `PATH`, `HOME` and the desk model's own key only. It has no `FM_HOME`, no `super.env` and no other provider key.
