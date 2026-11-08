@@ -117,8 +117,9 @@ Each run also removes every stopped place container, with the job's target direc
 Below `resume_pct` (85) it starts again only the coordinators it stopped.
 `runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
 The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
-When `full avg60` stays below 40% for 10 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 10 minutes.
-The disk rule keeps its own units: no unit starts while the disk is at `resume_pct` or above.
+When `full avg60` stays below 40% for 2 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 2 minutes.
+The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
+Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
