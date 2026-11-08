@@ -281,7 +281,9 @@ export function deskInput(system: string, view: string, status: string, latest: 
   const { size, allowance } = deskFrame(provider);
   // The view takes what the allowance leaves after the system prompt, recent originals, status and room for the latest texts.
   const viewMax = Math.min(VIEW_MAX, allowance - OVERHEAD - size(system + rest + tail) - RECENT_MAX - LATEST_MIN);
-  const chat = `<chat>\n${clip(view, Math.max(0, viewMax))}\n</chat>\n\n<recent>\n`;
+  const lines = view.split("\n");
+  while (lines.length > 1 && size(lines.join("\n")) > viewMax) lines.shift();
+  const chat = `<chat>\n${clip(lines.join("\n"), Math.max(0, viewMax))}\n</chat>\n\n<recent>\n`;
   const rows = recent ? recent.split("\n") : [];
   const available = Math.max(0, allowance - OVERHEAD - size(system + chat + rest + tail));
   while (size(rows.join("\n")) > Math.min(RECENT_MAX, available)) rows.shift();
