@@ -535,6 +535,85 @@ console.log(JSON.stringify({{ max: Math.max(...sizes), drops, covered, VIEW_MAX,
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_inception_view_fits_whole_beside_large_system_and_status(tmp_path):
+    """On Inception a big system prompt and status leave the whole view in the prompt, under 100k serialized bytes."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput, INCEPTION_MAX, sizeView }} from {DESK};
+{FAKE}
+const system = 'You say "hi".\\n'.repeat(900); // 12.6 KB raw, 16.2 KB serialized
+const status = '"\\n'.repeat(8000); // 16 KB raw, 32 KB serialized: twice STATUS_MAX as JSON
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+sizeView(m, "inception", system);
+const escaped = (s) => Buffer.byteLength(JSON.stringify(s).slice(1, -1));
+let worst = 0, cut = false, drops = 0, peak = 0, last = 0;
+for (let n = 0; n < 1500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text "${{n}}"\\n`.padEnd(100, "."));
+  await idle(m);
+  const view = m.render();
+  const {{ prompt }} = deskInput(system, view, status, "HEAD latest TAIL", "inception", "");
+  cut ||= !prompt.includes(`<chat>\\n${{view}}\\n</chat>`) || !prompt.includes("HEAD latest TAIL");
+  worst = Math.max(worst, escaped(system + prompt));
+  if (escaped(view) < last) drops++;
+  last = escaped(view); peak = Math.max(peak, last);
+}}
+console.log(JSON.stringify({{ cut, worst, drops, peak, max: m.viewMax, INCEPTION_MAX, covered: m.view.reduce((s, [l]) => s + 2 ** l, 0) }}));
+""")
+    assert not result["cut"]
+    assert result["worst"] < result["INCEPTION_MAX"]
+    assert 0 < result["max"] < 96_000
+    assert result["drops"] >= 2
+    assert result["peak"] <= result["max"] + 4_000
+    assert result["covered"] == 1500
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_view_sized_on_omp_is_resized_whole_lines_for_inception_dispatch(tmp_path):
+    """A view sized for omp, sent to Inception with a larger system prompt, drops whole oldest lines: no middle cut."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput, INCEPTION_MAX, sizeView }} from {DESK};
+{FAKE}
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+sizeView(m, "omp", "short desk prompt");
+for (let n = 0; n < 1500; n++) m.append(["owner", "supervisor", "desk"][n % 3], `line ${{n}} "q"`.padEnd(100, "."));
+await idle(m);
+const view = m.render();
+const system = 'You say "hi".\\n'.repeat(2000);
+const {{ prompt }} = deskInput(system, view, "status", "HEAD latest TAIL", "inception", "");
+const chat = prompt.slice(prompt.indexOf("<chat>\\n") + 7, prompt.indexOf("\\n</chat>"));
+const kept = chat.split("\\n"), all = view.split("\\n");
+const escaped = (s) => Buffer.byteLength(JSON.stringify(s).slice(1, -1));
+console.log(JSON.stringify({{ suffix: kept.length < all.length && kept.every((l, i) => l === all[all.length - kept.length + i]),
+  dropped: all.length - kept.length, marker: chat.includes("clipped to the head and tail"), worst: escaped(system + prompt), INCEPTION_MAX,
+  latest: prompt.includes("HEAD latest TAIL") }}));
+""")
+    assert result["suffix"] and result["dropped"] > 0
+    assert not result["marker"]
+    assert result["latest"]
+    assert result["worst"] < result["INCEPTION_MAX"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_desk_context_keeps_a_fact_from_an_older_span(tmp_path):
+    """500 short messages fill about 80 KB of view: the first one still reaches the desk prompt verbatim."""
+    result = bun(f"""
+import {{ Memory }} from {MEMORY};
+import {{ deskInput }} from {DESK};
+{FAKE}
+const m = new Memory({json.dumps(str(tmp_path))}, fake([400]));
+m.append("owner", "FACT-ZEBRA-7 ".padEnd(150, "."));
+for (let n = 1; n < 500; n++) {{
+  m.append(["owner", "supervisor", "desk"][n % 3], `text ${{n}} `.padEnd(150, "."));
+  await idle(m);
+}}
+const {{ prompt }} = deskInput("system", m.render(), "status", "latest", "omp", m.recent());
+console.log(JSON.stringify({{ kept: prompt.includes("0+1|owner: FACT-ZEBRA-7") }}));
+""")
+    assert result["kept"]
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
 def test_memory_survives_a_restart(tmp_path):
     """The log, the tree and the view load back unchanged; nothing is rebuilt; zoom opens lines from disk."""
     result = bun(f"""

@@ -495,7 +495,7 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   The service never edits or deletes a record.
   Inbound records also keep their stable request id, so a repaired memory write does not repeat after another restart.
 - **The tree.** In the background, the service compresses the log into a binary tree of one-line summaries of at most 512 bytes. A text that fits in 512 bytes is its own line. Two adjacent lines merge into one line, again and again. The nodes are in `memory/tree/YYYY-MM-DD.jsonl`. At most 3 compaction calls run at the same time, and they never delay a desk turn.
-- **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 64 KB, one batch merges lines until it is 32 KB or less. The view is in `memory/view.json`, and the service loads it at start.
+- **The view.** Each desk turn gets a list of lines that covers the whole conversation: recent lines are fine, old lines are coarse. The view grows by one line for each message. When it is larger than 96 KB, one batch merges lines until it is 64 KB or less. The view is in `memory/view.json`, and the service loads it at start.
 - **Recent originals.** Each desk turn also gets up to 12 messages before the pending burst, oldest first, beside the summary view.
   JSON lines include only the message id, kind, and text for owner, supervisor, and desk messages.
   Text stays verbatim up to 500 UTF-8 bytes; longer text keeps its head and tail with a clipping marker.
@@ -506,6 +506,7 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   Owner text supplies context, not evidence for a direct answer.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
 - **The input cap.** The initial view keeps the existing 180,000-byte omp budget and the smaller Inception input budget.
+  The view gets what is left of that budget after the system prompt, status, 6,000 bytes of recent originals and 8,000 bytes for the latest texts, up to 96 KB.
   These byte limits estimate token use; they are not exact token counts.
   The native tool runtime owns later request framing and context limits.
   The desk clips fleet status, long texts, and each zoom result (16 KB) to their head and tail.

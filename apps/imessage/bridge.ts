@@ -35,6 +35,7 @@ import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
+import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
@@ -171,6 +172,7 @@ const typing = (space: LineMessage["space"] | undefined, on: boolean, id = lates
 };
 // This service is the memory's one writer: systemd runs one instance of the unit.
 const memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
+sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
 const memoryByRequest = new Map<string, number>();
 for (const message of memory.msgs) if (message.requestId) memoryByRequest.set(message.requestId, message.i);
 const desk = new DeskTiming(QUIET_MS, (current) => void (DESK_V2 ? runDeskV2() : runDesk(current)).catch((e) => {

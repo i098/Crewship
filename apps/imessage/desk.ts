@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
-import { CALL_OVERHEAD, CEILING, type Chat, clip, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CALL_OVERHEAD, CEILING, type Chat, clip, type Memory, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { logTokens, usageTokens } from "./tokenlog.ts";
 import { STE_STYLE } from "./ste.ts";
 export { steChecked } from "./ste.ts";
@@ -249,19 +249,44 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
 
 // The serialized input allowance used for Inception's initial view and tool-free voice call.
 export const INCEPTION_MAX = 100_000;
+const RECENT_MAX = 6_000; // bytes of recent originals, as memory.recent() caps them
+const LATEST_MIN = 8_000; // bytes the latest texts keep before the view takes the rest
+const VIEW_SLACK = 4_000; // growth an unbuilt line adds to the view once its compaction ends
+
+const DESK_TAIL = "\n\nDecide your response to his latest texts.";
+const deskRest = (status: string) => `\n</recent>\n\nFleet status (durable records, may lag):\n${clip(status, STATUS_MAX)}\n\nLatest messages, after the chat:\n`;
+
+function deskFrame(provider: string) {
+  const inception = provider === "inception";
+  const size = (s: string) => Buffer.byteLength(inception ? JSON.stringify(s).slice(1, -1) : s);
+  return { inception, size, allowance: inception ? INCEPTION_MAX - 2 * CALL_OVERHEAD : CEILING - ZOOM_RESERVE };
+}
+
+// The view's sawtooth must peak where the per-call budget still holds the whole view beside the system prompt,
+// the largest status, recent originals and the latest texts. Sizes use the provider's serialized bytes.
+export function sizeView(memory: Memory, provider: string, ...systems: string[]): void {
+  const { inception, size, allowance } = deskFrame(provider);
+  const statusMax = (inception ? 2 : 1) * STATUS_MAX;
+  const system = Math.max(...systems.map((s) => size(s)));
+  const fixed = OVERHEAD + system + size(deskRest("") + DESK_TAIL) + statusMax + RECENT_MAX + LATEST_MIN + VIEW_SLACK;
+  memory.weigh = size;
+  memory.viewMax = Math.max(0, Math.min(VIEW_MAX, allowance - fixed));
+}
 
 // The initial view reserves framing and zoom space; the native runtime owns later request sizes.
 // `spent` seeds zoom.ts's byte budget. See docs/imessage.md#desk-memory.
 export function deskInput(system: string, view: string, status: string, latest: string, provider = "omp", recent = ""): { prompt: string; spent: number } {
-  const chat = `<chat>\n${clip(view, VIEW_MAX)}\n</chat>\n\n<recent>\n`;
-  const rest = `\n</recent>\n\nFleet status (durable records, may lag):\n${clip(status, STATUS_MAX)}\n\nLatest messages, after the chat:\n`;
-  const tail = "\n\nDecide your response to his latest texts.";
-  const inception = provider === "inception";
-  const size = (s: string) => Buffer.byteLength(inception ? JSON.stringify(s).slice(1, -1) : s);
-  const allowance = inception ? INCEPTION_MAX - 2 * CALL_OVERHEAD : CEILING - ZOOM_RESERVE;
+  const rest = deskRest(status);
+  const tail = DESK_TAIL;
+  const { size, allowance } = deskFrame(provider);
+  // The view takes what the allowance leaves after the system prompt, recent originals, status and room for the latest texts.
+  const viewMax = Math.min(VIEW_MAX, allowance - OVERHEAD - size(system + rest + tail) - RECENT_MAX - LATEST_MIN);
+  const lines = view.split("\n");
+  while (lines.length > 1 && size(lines.join("\n")) > viewMax) lines.shift();
+  const chat = `<chat>\n${clip(lines.join("\n"), Math.max(0, viewMax))}\n</chat>\n\n<recent>\n`;
   const rows = recent ? recent.split("\n") : [];
   const available = Math.max(0, allowance - OVERHEAD - size(system + chat + rest + tail));
-  while (size(rows.join("\n")) > Math.min(6_000, available)) rows.shift();
+  while (size(rows.join("\n")) > Math.min(RECENT_MAX, available)) rows.shift();
   const head = chat + rows.join("\n") + rest;
   const room = Math.max(0, allowance - OVERHEAD - size(system + head + tail));
   let part = clip(latest, room);
