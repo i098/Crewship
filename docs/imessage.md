@@ -524,7 +524,8 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   The runner uses a private temporary cwd and explicitly sets `memory.backend: off` in an omp configuration overlay.
   The existing flags skip extensions, tools, skills, and rules; sessions preserve shortening turns.
   Inherited native memory work can delay exit after the model produces a valid summary.
-  A stalled exit still fails the call at 60 seconds; a partial response is not accepted.
+  Each call runs in its own process group. At 60 seconds the bridge sends SIGTERM to the group, and SIGKILL 2 seconds later. The group also gets SIGKILL when the call ends and when the output passes 1 MB, so no child outlives the call.
+  A stalled exit still fails the call; a partial response is not accepted.
   Each saved model summary logs `compacted summary`, its range, and its byte count.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.
   All model compactions share one cooldown: 5 minutes, then 10, 20, 40, and at most 60 minutes.
