@@ -5,6 +5,7 @@ the decisions bridge.ts makes, free of spectrum-ts, and the outage test runs bri
 fake spectrum-ts whose upstream returns UNAVAILABLE.
 """
 
+import atexit
 import functools
 import importlib.util
 import itertools
@@ -247,7 +248,12 @@ def natives_modules():
     (folder / "package.json").write_text(
         json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": "18.18.2"}})
     )
-    subprocess.run(["bun", "install"], cwd=folder, capture_output=True, timeout=120)
+    try:
+        subprocess.run(["bun", "install"], cwd=folder, capture_output=True, check=True, timeout=120)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    atexit.register(shutil.rmtree, folder, ignore_errors=True)
     return str(folder / "node_modules")
 
 
