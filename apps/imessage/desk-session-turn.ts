@@ -163,7 +163,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   // The session reads, then ends in one bridge-checked action. No action hands the burst to Firstmate.
   return async function runSessionTurn(pending: R[], controller: AbortController, current: () => boolean) {
     if (!current()) return;
-    const original = pending.map((r) => r.authored ?? r.text);
+    const original = pending.map((r) => r.text);
     if (refused(pending, original)) return host.handoff(pending);
     const safe = host.safe!;
     const mates = secondmates(host.fmHome);

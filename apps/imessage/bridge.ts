@@ -1145,7 +1145,7 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
     { kind: "relay", target: "firstmate", domains: [], category: "approval" },
   ] };
   if (pending.some((r) => r.firstmate)) return handoff;
-  const original = pending.map((r) => r.authored ?? r.text);
+  const original = pending.map((r) => r.text);
   const from = Math.min(...pending.map((r) => memoryByRequest.get(r.requestId) ?? r.memoryId));
   const history = memory.msgs.slice(Math.max(0, from - 12), from)
     .filter((message) => !message.requestId || !routing.get(message.requestId)?.social);
@@ -1228,7 +1228,7 @@ async function statusV2(pending: Routing[], mates: Secondmate[], signal: AbortSi
   if (!current()) return;
   if (muted() || !inbox.statusOk) return handoffV2(pending);
   const reply = await answerStatus({
-    original: pending.map((r) => r.authored ?? r.text), status: `${inbox.status}\n${mateStatusLines(FM_HOME, mates)}`.slice(0, 30_000),
+    original: pending.map((r) => r.text), status: `${inbox.status}\n${mateStatusLines(FM_HOME, mates)}`.slice(0, 30_000),
     apiKey: env.INCEPTION_API_KEY ?? "", signal, endpoint: env.FM_DESK_INCEPTION_URL, redact: v2Redact,
   });
   if (!current()) return;
@@ -1419,7 +1419,7 @@ async function draftHandoff(pending: Routing[], mates: Secondmate[], current: ()
   const status = await inboxStatus;
   if (!status?.statusOk || stopping || !current()) return;
   const from = pending.reduce((first, r) => Math.min(first, memoryByRequest.get(r.requestId) ?? r.memoryId), memory.msgs.length);
-  const latestText = JSON.stringify(pending.map((r) => r.authored ?? r.text));
+  const latestText = JSON.stringify(pending.map((r) => r.text));
   const system = handoffPrompt(mates);
   const { prompt, spent } = deskInput(system, memory.render(from), status.status, latestText, DESK_PROVIDER, memory.recent(from));
   if (!prompt.includes(latestText)) return;
@@ -1438,7 +1438,7 @@ function spawnSender(mate: Secondmate, text: string) {
 
 async function deliverToMate(item: Routing, mate: Secondmate) {
   readMarks.delivered(item.requestId, mate.id, [item.requestId]);
-  const text = `[from captain via desk] ${item.authored ?? item.text}\n${deskRequestMarker(item.requestId)}`;
+  const text = `[from captain via desk] ${item.text}\n${deskRequestMarker(item.requestId)}`;
   const routed = `routed to ${mate.id}`;
   if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
   // Save uncertainty before the send, once per request; a restart must not blindly repeat a delivery.

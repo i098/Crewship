@@ -97,6 +97,28 @@ test("delegate_task answers with a queued ack that names no send, then the task 
   expect(events).toEqual([["answer", ["Your text is queued for Firstmate"], true], ["send", "firstmate", "DELEGATE firstmate"]]);
 });
 
+test("a delegated thread reply sends the quoted parent bubble, not only the authored text", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  const wrapper = join(dir, "omp");
+  writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
+  chmodSync(wrapper, 0o755);
+  const events: unknown[][] = [];
+  const turn = createSessionTurn<TurnRequest>({ sent: () => false, record: () => {}, message: async () => true,
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+    stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
+    memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
+    log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts, _target, delegated) => events.push(["answer", parts, delegated]),
+    react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, held: () => false,
+    send: async (target, _id, text) => { events.push(["send", target, text]); return true; }, report: () => {},
+  });
+  const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate\n(this message is a thread reply to the earlier message: \"five graded cards\")", authored: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
+  await turn([request], new AbortController(), () => true);
+  for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
+  const sent = events.find((e) => e[0] === "send");
+  expect(sent?.[2]).toContain("five graded cards");
+});
+
 test("a mate delegation acks synchronously with its own text, before the send finishes, and the rows are answered once", async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
