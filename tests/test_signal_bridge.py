@@ -16,11 +16,12 @@ bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 
 ME = "+15550001111"
+TS = 1700000000123
 VALUE = "p@ss'w0rd $HOME `id` \"q\" \\ ünï"
 
 
 def envelope(text, source=ME, destination=ME, **sent):
-    body = {"destinationNumber": destination, "message": text, **sent}
+    body = {"destinationNumber": destination, "message": text, "timestamp": TS, **sent}
     return {"sourceNumber": source, "syncMessage": {"sentMessage": body}}
 
 
@@ -126,49 +127,63 @@ log = open({log!r}, "a")
 for env in json.load(open({script!r})):
     print(json.dumps({{"jsonrpc": "2.0", "method": "receive", "params": {{"envelope": env}}}}), flush=True)
 print("not json", flush=True)
-for _ in range({replies}):
-    log.write(sys.stdin.readline())
+for _ in range({requests}):
+    line = sys.stdin.readline()
+    log.write(line)
     log.flush()
+    request = json.loads(line)
+    if request["method"] == "remoteDelete":
+        answer = {{"error": {{"code": -1, "message": "failed"}}}} if {fail} else {{"result": {{"timestamp": 1}}}}
+        print(json.dumps({{"jsonrpc": "2.0", "id": request["id"], **answer}}), flush=True)
 """
 
 
-def run_bridge(tmp_path, envelopes, secrets, replies=1):
-    """The real bridge against a fake signal-cli that replays `envelopes` and records its stdin."""
+def run_bridge(tmp_path, envelopes, secrets, requests=2, fail_delete=False):
+    """The real bridge against a fake signal-cli that replays `envelopes`, answers remoteDelete and records its stdin."""
     cli = tmp_path / "signal-cli"
     sent = tmp_path / "sent.jsonl"
     script = tmp_path / "script.json"
     script.write_text(json.dumps(envelopes))
     cli.write_text(
-        FAKE.format(python=sys.executable, log=str(sent), script=str(script), replies=replies)
+        FAKE.format(python=sys.executable, log=str(sent), script=str(script), requests=requests, fail=fail_delete)
     )
     cli.chmod(0o755)
     done = subprocess.run(
         [sys.executable, BRIDGE, "--account", ME, "--secrets-file", secrets, "--signal-cli", cli],
         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30,
     )
-    return done, sent
+    return done, [json.loads(line) for line in sent.read_text().splitlines()] if sent.exists() else []
 
 
-def test_bridge_saves_the_note_replies_with_the_key_and_prints_no_value(tmp_path):
+def test_bridge_saves_the_note_deletes_it_replies_with_the_key_and_prints_no_value(tmp_path):
     secrets = tmp_path / "super.env"
     secrets.write_text("KEEP=1\n")
-    other_chat = envelope("secret LEAK=other-chat-value", destination="+15550002222")
+    other_chat = envelope("secret LEAK=other-chat-value", destination="+15550002222", timestamp=TS + 1)
     done, sent = run_bridge(tmp_path, [other_chat, envelope(f"secret API_KEY={VALUE}")], secrets)
     assert done.returncode == 1  # the fake signal-cli ended
     assert secrets.read_text().startswith("KEEP=1\nexport API_KEY='p@ss")
     assert "LEAK" not in secrets.read_text()
-    request = json.loads(sent.read_text())
-    assert request["method"] == "send"
-    assert request["params"] == {"noteToSelf": True, "message": "saved API_KEY"}
+    assert [(r["method"], r["params"]) for r in sent] == [
+        ("remoteDelete", {"noteToSelf": True, "targetTimestamp": TS}),
+        ("send", {"noteToSelf": True, "message": "saved API_KEY"}),
+    ]
     for output in (done.stdout, done.stderr):
         assert VALUE not in output and "other-chat-value" not in output and "ünï" not in output
     assert "saved API_KEY" in done.stderr
 
 
-def test_a_failed_save_sends_no_reply_and_logs_no_value(tmp_path):
+def test_a_failed_delete_tells_the_user_to_delete_the_note_by_hand(tmp_path):
+    secrets = tmp_path / "super.env"
+    done, sent = run_bridge(tmp_path, [envelope(f"secret API_KEY={VALUE}")], secrets, fail_delete=True)
+    assert secrets.read_text().startswith("export API_KEY='p@ss")
+    assert sent[1]["params"] == {"noteToSelf": True, "message": "saved API_KEY (delete the note by hand)"}
+    assert VALUE not in done.stdout + done.stderr and "ünï" not in done.stderr
+
+
+def test_a_failed_save_sends_no_request_and_logs_no_value(tmp_path):
     missing = tmp_path / "no-such-dir/super.env"
-    done, sent = run_bridge(tmp_path, [envelope(f"secret API_KEY={VALUE}")], missing, replies=0)
-    assert not sent.exists() or sent.read_text() == ""
+    done, sent = run_bridge(tmp_path, [envelope(f"secret API_KEY={VALUE}")], missing, requests=0)
+    assert sent == []
     assert "dropped a message" in done.stderr and "FileNotFoundError" in done.stderr
     assert VALUE not in done.stdout + done.stderr and "ünï" not in done.stderr
     assert "API_KEY" not in done.stderr

@@ -24,7 +24,8 @@ For a valid note the bridge:
    A line that already sets `NAME` is replaced.
    Every other byte of the file stays as it was.
    A symlinked secrets file stays a symlink.
-2. Replies in Note to Self with `saved NAME`.
+2. Deletes the note from Note to Self with `remoteDelete`.
+3. Replies in Note to Self with `saved NAME`, or `saved NAME (delete the note by hand)` when the delete failed.
 
 The value is never in stdout, stderr, the journal, an exception text or a reply.
 The bridge logs key names and error classes only.
@@ -43,7 +44,7 @@ crewship:
 ```
 
 `./ship.sh launch` installs the latest `signal-cli` release (checksum verified), `~/.local/bin/fm-signal`, and the `fm-signal.service` user unit.
-The `signal-cli` native build exists for Linux x86_64 only.
+The `signal-cli` native build exists for Linux x86_64 only; `./ship.sh launch` refuses `signal` on another architecture.
 The unit waits until the account is linked.
 
 ## Link your phone (one step on the phone)
@@ -73,15 +74,15 @@ In Signal, open **Note to Self** and send:
 secret GITHUB_TOKEN=ghp_example
 ```
 
-The bridge replies `saved GITHUB_TOKEN`.
-Delete your note on the phone afterward.
+The bridge deletes the note and replies `saved GITHUB_TOKEN`.
+When the delete fails, it replies `saved GITHUB_TOKEN (delete the note by hand)`.
 
 ## Limits
 
-- signal-cli has no command that deletes a received message from its local store.
-  It keeps no decrypted message body.
-  It caches the encrypted envelope of a message and removes it once it has handled the message.
-  The bridge therefore cannot delete anything more, and the note stays in Note to Self on your phone until you delete it.
+- The bridge deletes the note with signal-cli's `remoteDelete` (`noteToSelf`, the note's timestamp).
+  Signal removes it from your phone and your linked devices.
+  When the delete fails, the reply is `saved NAME (delete the note by hand)`: delete the note on the phone yourself.
+  signal-cli keeps no decrypted message body; it removes the cached encrypted envelope once it has handled the message.
 - A value must be one line.
   A value that an editor spread over several lines in the secrets file is not replaced correctly.
 - The bridge reads and replaces the secrets file as a whole.

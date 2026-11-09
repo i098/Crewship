@@ -194,6 +194,17 @@ def test_fleet_guards_accept_the_default_document_when_enabled(configuration):
     assert ship.validate_config(configuration) is configuration
 
 
+@pytest.mark.parametrize(("machine", "accepted"), [("x86_64", True), ("aarch64", False)])
+def test_signal_needs_an_x86_64_host(configuration, monkeypatch, machine, accepted):
+    configuration["crewship"]["signal"] = {"account": "+15551234567"}
+    monkeypatch.setattr(ship.platform, "machine", lambda: machine)
+    if accepted:
+        assert ship.validate_config(configuration) is configuration
+    else:
+        with pytest.raises(ValueError, match="x86_64 only"):
+            ship.validate_config(configuration)
+
+
 def test_browsers_valid_block_accepted(configuration):
     assert ship.validate_config(configuration) is configuration
 

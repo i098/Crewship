@@ -4,8 +4,9 @@
 Runs `signal-cli jsonRpc` for a linked account. Only a Note to Self from that same
 account, in the exact form `secret NAME=value`, is acted on; every other message is
 dropped unread. The value goes into the secrets file as `export NAME='value'` and
-nowhere else: not stdout, stderr, an exception text, a log or a reply. The reply is
-`saved NAME`. See apps/signal/README.md.
+nowhere else: not stdout, stderr, an exception text, a log or a reply. The note is then
+deleted with `remoteDelete`, and the reply is `saved NAME`, or
+`saved NAME (delete the note by hand)` when that delete failed. See apps/signal/README.md.
 """
 
 import argparse
@@ -81,21 +82,38 @@ def write_secret(path: Path, name: str, value: str) -> None:
         raise
 
 
-def handle(line: str, account: str, secrets: Path, reply: Callable[[str], None]) -> None:
+def handle(
+    line: str, account: str, secrets: Path, send: Callable[[str, dict[str, Any]], int], pending: dict[int, str]
+) -> None:
+    """Save a valid note, then delete it from Note to Self; the reply waits for the delete's response."""
+
+    def reply(name: str, deleted: bool) -> None:
+        suffix = "" if deleted else " (delete the note by hand)"
+        send("send", {"noteToSelf": True, "message": f"saved {name}{suffix}"})
+
     try:
         message = json.loads(line)
         if message.get("method") != "receive":
-            if "error" in message:
+            name = pending.pop(message.get("id"), None)
+            failed = "error" in message
+            if failed:
                 log(f"signal-cli request failed, code {(message['error'] or {}).get('code')}")
+            if name is not None:
+                reply(name, not failed)
             return
-        text = note_to_self((message.get("params") or {}).get("envelope") or {}, account)
+        envelope = (message.get("params") or {}).get("envelope") or {}
+        text = note_to_self(envelope, account)
         parsed = parse_secret(text) if text is not None else None
         if parsed is None:
             return
         name, value = parsed
         write_secret(secrets, name, value)
         log(f"saved {name}")
-        reply(f"saved {name}")
+        timestamp = envelope["syncMessage"]["sentMessage"].get("timestamp", envelope.get("timestamp"))
+        if type(timestamp) is int:
+            pending[send("remoteDelete", {"noteToSelf": True, "targetTimestamp": timestamp})] = name
+        else:
+            reply(name, False)
     except Exception as error:  # one bad message must not stop the bridge; log the class only
         log(f"dropped a message: {describe(error)}")
 
@@ -107,18 +125,19 @@ def serve(signal_cli: str, account: str, secrets: Path) -> int:
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8"
     )
     requests = 0
+    pending: dict[int, str] = {}
 
-    def reply(text: str) -> None:
+    def send(method: str, params: dict[str, Any]) -> int:
         nonlocal requests
         requests += 1
-        params = {"noteToSelf": True, "message": text}
-        request = {"jsonrpc": "2.0", "id": requests, "method": "send", "params": params}
+        request = {"jsonrpc": "2.0", "id": requests, "method": method, "params": params}
         process.stdin.write(json.dumps(request) + "\n")
         process.stdin.flush()
+        return requests
 
     log("listening for Note to Self")
     for line in process.stdout:
-        handle(line, account, secrets, reply)
+        handle(line, account, secrets, send, pending)
     return process.wait() or 1  # signal-cli ended: exit nonzero so systemd restarts the bridge
 
 
