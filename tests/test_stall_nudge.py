@@ -61,12 +61,15 @@ def host(tmp_path):
         def stamp(self, age):
             (home / "state/.stall-nudge-last").write_text(str(int(time.time() - age)))
 
-        def board(self, role="user", age=400, session="b1"):
+        def board(self, role="user", age=400, session="b1", status="open"):
             at = datetime.fromtimestamp(time.time() - age, timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
             sessions = json.loads(lavish.read_text())["sessions"] if lavish.exists() else {}
-            sessions[session] = {"chat": [{"role": "agent", "at": at}, {"role": role, "at": at}]}
+            sessions[session] = {
+                "status": status,
+                "chat": [{"role": "agent", "at": at}, {"role": role, "at": at}],
+            }
             lavish.write_text(json.dumps({"sessions": sessions}))
 
         @property
@@ -282,3 +285,17 @@ def test_note_nudge_leaves_board_unlatched(host):
     host.board()
     assert host.run().returncode == 0 and len(host.sends) == 1
     assert host.latch == []
+
+
+def test_ended_board_is_not_nudged_but_open_board_is(host):
+    host.board(status="ended")
+    assert host.run().returncode == 0 and host.sends == []
+    host.board(status="open", session="b2")
+    assert host.run().returncode == 0 and len(host.sends) == 1
+    assert "Lavish board" in host.sends[0]
+
+
+def test_board_clause_only_for_board_reason(host):
+    host.note(400)
+    assert host.run().returncode == 0
+    assert "Lavish" not in host.sends[0]

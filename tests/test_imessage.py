@@ -2139,7 +2139,10 @@ def fake_bridge(tmp_path, test_mode=True):
                 "if os.environ.get('FM_DESK_SERVER_TOOLS') == '1' else answer)\n"
             ) + ' "$@"'
         ),
-        "fm-inbox": f'printf "%s\\n" "$*" >> {notes}; [ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ]',
+        "fm-inbox": (
+            f'if [ "$1" = receipts ]; then echo \'{{"handled":[]}}\'; exit 0; fi; '
+            f'printf "%s\\n" "$*" >> {notes}; [ "$1" != note ] || [ ! -e {fake / "inbox-fail"} ]'
+        ),
     }
     for name, body in stubs.items():
         (bin_dir / name).write_text(f"#!/bin/bash\n{body}\n")
