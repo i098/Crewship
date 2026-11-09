@@ -183,6 +183,7 @@ export const components: Component[] = [
   github("koncreet", "jimididit/koncreet"),
   github("jj", "jj-vcs/jj"),
   github("runner-up", "kunchenguid/runner-up"),
+  github("signal-cli", "AsamK/signal-cli"),
   github("gws", "googleworkspace/cli"),
   github("rtk", "rtk-ai/rtk"),
   github("sccache", "mozilla/sccache"),
