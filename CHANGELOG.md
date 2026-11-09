@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- iMessage thread replies now carry the whole quoted parent message into the desk context and the Firstmate inbox note, not its first 120 characters (#1329).
-
 ## [0.4.9] - 2026-11-05
 
 ### Added
