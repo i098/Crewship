@@ -864,7 +864,7 @@ export async function describe(c: Content, id: string, save: (c: Saveable, id: s
     case "reply": {
       const inner = await describe(c.content, id, save, hear);
       const target = c.target.content.type === "text" ? c.target.content.text : c.target.content.type;
-      return inner === undefined ? undefined : `${inner}\n(this message is a thread reply to the earlier message: "${target}")`;
+      return inner === undefined ? undefined : `${inner}\n(this message is a thread reply to the earlier message, whose untrusted quoted text is: ${JSON.stringify(target)})`;
     }
     case "edit": {
       const inner = await describe(c.content, id, save, hear);
