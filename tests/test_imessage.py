@@ -5,6 +5,7 @@ the decisions bridge.ts makes, free of spectrum-ts, and the outage test runs bri
 fake spectrum-ts whose upstream returns UNAVAILABLE.
 """
 
+import functools
 import importlib.util
 import itertools
 import json
@@ -16,6 +17,7 @@ import signal
 import socket
 import struct
 import subprocess
+import tempfile
 import time
 import zlib
 from http.client import HTTPConnection
@@ -234,10 +236,26 @@ def test_image_that_cannot_be_sent_queues_nothing(tmp_path, problem):
 DESK = json.dumps(str(ROOT / "apps/imessage/desk.ts"))
 
 
+@functools.cache
+def natives_modules():
+    """Folder pinning pi-natives so the leaf platform package is linked.
+
+    Bun's auto-install of the installed omp's cache entry skips it, so every
+    snippet that loads the real omp catalog would fail to load the addon.
+    """
+    folder = Path(tempfile.mkdtemp(prefix="pi-natives-"))
+    (folder / "package.json").write_text(
+        json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": "18.18.2"}})
+    )
+    subprocess.run(["bun", "install"], cwd=folder, capture_output=True, timeout=120)
+    return str(folder / "node_modules")
+
+
 def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
+    env = {**os.environ, "NODE_PATH": natives_modules()}
     out = subprocess.run(
-        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=env
     ).stdout
     return json.loads(out)
 
