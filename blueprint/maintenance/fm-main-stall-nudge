@@ -3,8 +3,8 @@
 # watcher wake as a queued follow-up and never start a turn; typed input in
 # main's pane is what starts the next one. Run by fm-main-stall-nudge.timer.
 # Types a short nudge when an operator note waits more than NOTE_MAX seconds, a
-# wake waits more than WAKE_MAX seconds, or a Lavish board's newest chat entry is
-# a user answer older than BOARD_MAX seconds (and younger than 24 h), at most
+# wake waits more than WAKE_MAX seconds, or an open Lavish board's newest chat entry is
+# a user answer older than BOARD_MAX seconds (and younger than 24 h; ended boards are skipped), at most
 # once per GAP seconds. Each board answer is nudged once; a latch file in the
 # state directory records it.
 #
@@ -39,7 +39,7 @@ board_key=
 [ -n "$oldest_note" ] && [ $((now - oldest_note)) -gt "$NOTE_MAX" ] && reason="an operator note waits $((now - oldest_note))s"
 [ -z "$reason" ] && [ -n "$oldest_wake" ] && [ $((now - oldest_wake)) -gt "$WAKE_MAX" ] && reason="a wake waits $((now - oldest_wake))s"
 if [ -z "$reason" ]; then
-  # First board whose newest chat entry is an unlatched user answer, as "<session> <key>".
+  # First non-ended board whose newest chat entry is an unlatched user answer, as "<session> <key>".
   read -r board board_key < <(BOARD_MAX=$BOARD_MAX LATCH=$LATCH LAVISH_STATE=$LAVISH_STATE python3 - <<'PY'
 import json, os, time
 from datetime import datetime
