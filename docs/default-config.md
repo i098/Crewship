@@ -11,7 +11,7 @@ These defaults are what the project owner personally runs. Change any of them in
 - **Opt-in profiles:** `development`, `sgrep`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `vphone`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
 - **New hosts:** `./ship.sh dock` writes the core only: `agents` and `firstmate`. Pick more with the checklist `bunx crewship` shows, or `--with NAMES` ([Configuration](configuration.md)). A host config made before this keeps its own values.
 - **Firstmate backend:** see [Firstmate backend](configuration.md#firstmate-backend) for the default, alternatives, and existing-checkout behavior.
-- **Opt-in settings:** `data_dir`, `usage`, `token_suggestions`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `ci_pool`, `runner_up`, `cloudflare_runner`
+- **Opt-in settings:** `data_dir`, `usage`, `token_suggestions`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `ci_pool`, `runner_up`, `cloudflare_runner`, `signal`
 - **Full lists:** [`blueprint/config/default.yml`](../blueprint/config/default.yml), [`blueprint/config/omp.yml`](../blueprint/config/omp.yml), and the [wiki](https://github.com/i098/Crewship/wiki).
 
 ## Optimizations in the default

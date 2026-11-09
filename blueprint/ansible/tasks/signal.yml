@@ -1,0 +1,51 @@
+---
+# Optional Signal bridge (apps/signal/README.md). Runs only when crewship.signal is set, which belongs in
+# .local/host.yml only. signal-cli is installed by the tool installer; the account is linked by hand with
+# `signal-cli link` (one QR scan), so the unit stays idle until the link exists.
+#
+#   * fm-signal saves `secret NAME=value` notes from Note to Self into crewship.signal.secrets_file
+#     (default ~/super.env). The playbook never reads or writes that file or any value.
+#   * the unit holds the account's phone number, so it is mode 0600
+
+- name: Ensure the Signal bridge directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_user_units }}/default.target.wants"
+
+- name: Install the Signal bridge
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/signal/signal_bridge.py"
+    dest: "{{ crewship_local_bin }}/fm-signal"
+    mode: "0755"
+    remote_src: true
+  notify: restart fm-signal
+
+- name: Render the Signal bridge unit
+  ansible.builtin.template:
+    src: fm-signal.service.j2
+    dest: "{{ crewship_user_units }}/fm-signal.service"
+    mode: "0600"
+  notify:
+    - reload user systemd
+    - restart fm-signal
+
+- name: Statically enable the Signal bridge
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/fm-signal.service"
+    dest: "{{ crewship_user_units }}/default.target.wants/fm-signal.service"
+    state: link
+    force: true
+    follow: false
+
+- name: Enable and start the Signal bridge
+  ansible.builtin.systemd_service:
+    scope: user
+    name: fm-signal.service
+    enabled: true
+    state: started
+  environment: "{{ crewship_user_systemd_env }}"
+  when: crewship_manage_services | bool

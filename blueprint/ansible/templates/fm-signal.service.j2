@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+# Signal bridge (apps/signal/README.md): saves `secret NAME=value` notes from Note to Self into the secrets file.
+# It idles until `signal-cli link` has made an account; after linking, restart it: systemctl --user restart fm-signal.
+# Never add --verbose to signal-cli: that level logs message text to the journal.
+
+[Unit]
+Description=Signal bridge, saves secrets sent to Note to Self (Crewship managed)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.local/share/signal-cli/data/accounts.json
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+UMask=0077
+NoNewPrivileges=yes
+ExecStart={{ crewship_local_bin }}/fm-signal --account {{ crewship_cfg.signal.account }} --secrets-file {{ crewship_cfg.signal.secrets_file | default(crewship_cfg.home ~ '/super.env') }} --signal-cli {{ crewship_local_bin }}/signal-cli
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

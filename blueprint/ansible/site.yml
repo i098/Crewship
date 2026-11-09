@@ -205,6 +205,19 @@
         - crewship_cfg.imessage is defined
       tags: [imessage]
 
+    - name: Optional Signal bridge that saves secrets sent to Note to Self
+      ansible.builtin.include_tasks:
+        file: tasks/signal.yml
+        apply:
+          become: "{{ crewship_become_target | bool }}"
+          become_user: "{{ crewship_cfg.user }}"
+          environment: "{{ crewship_user_env }}"
+          tags: [signal]
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.signal is defined
+      tags: [signal]
+
     # Runs on every host: without crewship.github_board it removes the timer.
     - name: Optional GitHub board for Firstmate work items
       ansible.builtin.import_tasks: tasks/github_board.yml
@@ -483,6 +496,17 @@
       environment: "{{ crewship_user_systemd_env }}"
       when: crewship_manage_services | bool
       listen: restart instagram-desk
+
+    - name: Restart the Signal bridge
+      ansible.builtin.systemd_service:
+        scope: user
+        name: fm-signal.service
+        state: restarted
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_systemd_env }}"
+      when: crewship_manage_services | bool
+      listen: restart fm-signal
 
     - name: Restart the crew board
       ansible.builtin.systemd_service:

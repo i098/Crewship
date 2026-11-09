@@ -681,6 +681,7 @@ RELEASES = {
         "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz.sha256",
     ),
     "rtk-ai/rtk": ("v9.9.9", "rtk-x86_64-unknown-linux-musl.tar.gz", "checksums.txt"),
+    "AsamK/signal-cli": ("v9.9.9", "signal-cli-9.9.9-Linux-native.tar.gz"),
 }
 
 
