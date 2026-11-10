@@ -223,11 +223,12 @@ COPY --from={DIND_IMAGE} /usr/local/libexec/docker/cli-plugins/docker-compose /u
 # Node LTS in the tool cache, so actions/setup-node (lts/*) finds it instead of downloading.
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 RUN set -eu; arch=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/'); \\
-    for v in $(curl -fsSL https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(*[x['version'][1:] for x in json.load(sys.stdin) if x['lts']][:1])"); do \\
-      d=/opt/hostedtoolcache/node/$v/$arch; mkdir -p $d; \\
-      curl -fsSL https://nodejs.org/dist/v$v/node-v$v-linux-$arch.tar.xz | tar -xJ --strip-components=1 -C $d; \\
-      touch /opt/hostedtoolcache/node/$v/$arch.complete; \\
-    done; chown -R runner:runner /opt/hostedtoolcache
+    v=$(curl -fsSL https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(next(x['version'][1:] for x in json.load(sys.stdin) if x['lts']))"); \\
+    [ -n "$v" ]; \\
+    d=/opt/hostedtoolcache/node/$v/$arch; mkdir -p $d; \\
+    curl -fsSL https://nodejs.org/dist/v$v/node-v$v-linux-$arch.tar.xz | tar -xJ --strip-components=1 -C $d; \\
+    touch /opt/hostedtoolcache/node/$v/$arch.complete; \\
+    chown -R runner:runner /opt/hostedtoolcache
 USER runner
 """
 # Runs as the image's `runner` user, which has passwordless sudo: empty the
