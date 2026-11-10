@@ -5,7 +5,7 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean
 ARG REFRESH
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
-      build-essential pkg-config libgtk-3-0 unzip git curl ca-certificates gnupg lsb-release postgresql-common \
+      build-essential pkg-config libgtk-3-0 unzip git tmux curl ca-certificates gnupg lsb-release postgresql-common \
       clang cmake libssl-dev libzstd-dev libfontconfig-dev libfreetype-dev libasound2-dev \
       libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libvulkan-dev mesa-vulkan-drivers \
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
@@ -27,4 +27,12 @@ RUN apt-get update -qq \
 RUN [ -d /etc/postgresql/17/main ] || (pg_createcluster 17 main && pg_conftool 17 main set port 5432)  && for v in 17 18; do pg_ctlcluster $v main stop 2>/dev/null || true; echo manual > /etc/postgresql/$v/main/start.conf; done  && cp -a /var/lib/postgresql /opt/postgresql-seed
 # The compose plugin, for repositories whose jobs talk to their own daemon (DIND_IMAGE).
 COPY --from=docker:dind-rootless /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/
+# Node LTS in the tool cache, so actions/setup-node (lts/*) finds it instead of downloading.
+ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+RUN set -eu; arch=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/'); \
+    for v in $(curl -fsSL https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(*[x['version'][1:] for x in json.load(sys.stdin) if x['lts']][:1])"); do \
+      d=/opt/hostedtoolcache/node/$v/$arch; mkdir -p $d; \
+      curl -fsSL https://nodejs.org/dist/v$v/node-v$v-linux-$arch.tar.xz | tar -xJ --strip-components=1 -C $d; \
+      touch /opt/hostedtoolcache/node/$v/$arch.complete; \
+    done; chown -R runner:runner /opt/hostedtoolcache
 USER runner
