@@ -261,7 +261,9 @@ def natives_modules():
 
 def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
-    env = {**os.environ, "NODE_PATH": natives_modules()}
+    modules = natives_modules()
+    # Same private cache as the install: a host or sandbox override would hide the addon from bun's auto-install.
+    env = {**os.environ, "NODE_PATH": modules, "BUN_INSTALL_CACHE_DIR": str(Path(modules).parent / ".bun-cache")}
     out = subprocess.run(
         ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=env
     ).stdout
