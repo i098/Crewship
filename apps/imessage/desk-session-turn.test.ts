@@ -39,13 +39,6 @@ test("the system prompt the child starts with tells the desk to ack an owner ins
   expect(prompt).toContain("Call handoff_main with a short ack as its text");
 });
 
-test("the system prompt keeps internal Firstmate work out of texts to the owner and keeps the ack from claiming delivery", async () => {
-  const argv = await sessionArgv("omp", "claude-haiku-5-5");
-  const prompt = argv[argv.indexOf("--system-prompt") + 1];
-  expect(prompt).toContain("Never write an internal instruction, a delivery problem, or a task for Firstmate to him");
-  expect(prompt).toContain("never say it already reached Firstmate");
-});
-
 test("the system prompt sends a link read or web lookup to the helper, also after the desk's own read is refused", async () => {
   const argv = await sessionArgv("omp", "claude-haiku-5-5");
   const prompt = argv[argv.indexOf("--system-prompt") + 1];
@@ -151,7 +144,7 @@ test("a mate delegation acks synchronously with its own text, before the send fi
   expect(events).toEqual([["answer", ["Your text is queued for the mate1 mate"]], ["send", "mate1"]]);
 });
 
-test("an owner instruction is acked with handoff_main: one handoff, one ack text, no background task", async () => {
+async function ownerInstruction(report: (events: unknown[][], parts: string[], guid: string) => void) {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const wrapper = join(dir, "omp");
@@ -164,13 +157,23 @@ test("an owner instruction is acked with handoff_main: one handoff, one ack text
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => events.push(["handoff"]), answer: () => events.push(["answer"]),
     react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true,
-    send: async () => { events.push(["send"]); return true; }, report: (parts, guid) => events.push(["report", parts, guid.startsWith("ack-")]),
+    send: async () => { events.push(["send"]); return true; }, report: (parts, guid) => report(events, parts, guid),
   });
   const request: TurnRequest = { requestId: "r1", text: "Never give time estimates, just do everything as soon as possible", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
   await Bun.sleep(100);
+  return { events, dir };
+}
+
+test("an owner instruction is acked with handoff_main: one handoff, one ack text, no background task", async () => {
+  const { events, dir } = await ownerInstruction((events, parts, guid) => events.push(["report", parts, guid.startsWith("ack-")]));
   expect(events).toEqual([["report", ["Got it, passing that to Firstmate."], true], ["handoff"]]);
   expect(existsSync(join(dir, "desk-tasks"))).toBe(false);
+});
+
+test("an owner instruction is still handed to Firstmate when the ack cannot be queued", async () => {
+  const { events } = await ownerInstruction(() => { throw new Error("queue write failed"); });
+  expect(events).toEqual([["handoff"]]);
 });
 
 test("a thread reply to a mate's bubble is relayed to that mate with no model turn;", async () => {

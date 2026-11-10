@@ -16,7 +16,10 @@ type SessionEnv = Record<string, string | undefined>;
 // The ack, when given, is queued before the slow handoff so the owner is not left waiting; it is a plain desk text with no task behind it.
 function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
   if (reason) host.log("desk handoff")(reason);
-  if (ack) host.report(ack.parts, `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, pending[ack.target - 1]!);
+  if (ack) {
+    try { host.report(ack.parts, `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, pending[ack.target - 1]!); }
+    catch (err) { host.log("desk ack")(`ack not queued: ${err instanceof Error ? err.message : err}`); }
+  }
   host.handoff(pending);
 }
 
