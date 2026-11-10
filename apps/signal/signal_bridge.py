@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 # One line, so the line-based replace in merge() stays exact; no NUL.
-SECRET = re.compile(r"secret ([A-Z][A-Z0-9_]*)=([^\r\n\0]+)")
+NOTE_FORM = re.compile(r"secret ([A-Z][A-Z0-9_]*)=([^\r\n\0]+)")
 
 
 def log(message: str) -> None:
@@ -35,8 +35,8 @@ def describe(error: BaseException) -> str:
     return f"{type(error).__name__} {reason}".strip()
 
 
-def parse_secret(text: str) -> tuple[str, str] | None:
-    match = SECRET.fullmatch(text)
+def parse_note(text: str) -> tuple[str, str] | None:
+    match = NOTE_FORM.fullmatch(text)
     return (match[1], match[2]) if match else None
 
 
@@ -103,7 +103,7 @@ def handle(
             return
         envelope = (message.get("params") or {}).get("envelope") or {}
         text = note_to_self(envelope, account)
-        parsed = parse_secret(text) if text is not None else None
+        parsed = parse_note(text) if text is not None else None
         if parsed is None:
             return
         name, value = parsed

@@ -47,8 +47,8 @@ def receive(env):
         ("secret A=b\0c", None),
     ],
 )
-def test_parse_secret_takes_only_the_exact_form(text, expected):
-    assert bridge.parse_secret(text) == expected
+def test_parse_note_takes_only_the_exact_form(text, expected):
+    assert bridge.parse_note(text) == expected
 
 
 @pytest.mark.parametrize(
