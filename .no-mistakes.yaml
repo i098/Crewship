@@ -5,4 +5,4 @@ pr:
 # The test step runs in cf-sandbox: private HOME, runtime directory, /tmp and pid space, so a test
 # cannot reach the live Herdr or TUIOS session (docs/security.md#test-sandbox).
 commands:
-  test: cf-sandbox -- uv run pytest -n 4 --dist worksteal tests
+  test: cf-sandbox -- env BUN_INSTALL_CACHE_DIR=/tmp/bun-cache uv run pytest -n 4 --dist worksteal tests
