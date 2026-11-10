@@ -249,7 +249,8 @@ def natives_modules():
         json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": "18.18.2"}})
     )
     try:
-        subprocess.run(["bun", "install"], cwd=folder, capture_output=True, check=True, timeout=120)
+        env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(folder / ".cache")}
+        subprocess.run(["bun", "install"], cwd=folder, capture_output=True, check=True, timeout=120, env=env)
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
