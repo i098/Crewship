@@ -41,6 +41,7 @@ Crewship installs or builds on these third-party projects. Each license comes fr
 - [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura`): the headless browser of the fleet browser ladder. License: Apache-2.0.
 - [voxl](https://github.com/tembo/voxl) (`voxl`): the browser stream of the fleet browser ladder's human tier, built by apply. License: MIT; the built binary links x264 (GPL-2.0).
 - [Koncreet](https://github.com/jimididit/koncreet) (`koncreet`): host hardening, patched by Crewship. License: MIT.
+- [signal-cli](https://github.com/AsamK/signal-cli) (`signal-cli`): the Signal client of the opt-in `signal` block, run as a linked device. License: GPL-3.0.
 - [Bun](https://github.com/oven-sh/bun) (`bun`): the JavaScript runtime and package manager. License: MIT.
 - [Node.js](https://github.com/nodejs/node) (`node`): the runtime of `npx crewship` and the chrome-devtools-axi bridge. License: MIT.
 - [uv](https://github.com/astral-sh/uv) (`uv`): the Python bootstrap and environments. License: MIT OR Apache-2.0.

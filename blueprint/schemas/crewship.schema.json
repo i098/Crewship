@@ -939,6 +939,23 @@
           },
           "required": ["credentials_file", "repos"]
         },
+        "signal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "account": {
+              "description": "The Signal account signal-cli is linked to: its +E.164 number, or its ACI when it has no number.",
+              "type": "string",
+              "pattern": "^(\\+[1-9][0-9]{6,14}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+            },
+            "secrets_file": {
+              "description": "Where `secret NAME=value` notes are saved; the default is ~/super.env.",
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_./+@-]+$"
+            }
+          },
+          "required": ["account"]
+        },
         "fleet": {
           "type": "object",
           "additionalProperties": false,

@@ -12,6 +12,7 @@ crewship_installer_selection: >-
                   + (crewship_chat_tools if (crewship_cfg.profiles.chat | bool) else [])
                   + (['jj'] if (crewship_cfg.profiles.jj | default(false) | bool) else [])
                   + (['runner-up'] if (crewship_cfg.runner_up is defined) else [])
+                  + (['signal-cli'] if (crewship_cfg.signal is defined) else [])
                   + (['cloudflared'] if ((crewship_cfg.profiles.gateway | bool)
                                          or (crewship_cfg.imessage.cards is defined)) else []))
                  | join(',')]

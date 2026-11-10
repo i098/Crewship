@@ -245,6 +245,9 @@ crewship:
   #   credentials_file: /home/you/super.env
   #   repos:
   #     - { repo: owner/name, label: cf-name }
+  # signal:              # Optional; save secrets sent to Signal's Note to Self. See ../apps/signal/README.md
+  #   account: "+<country code><number>"   # the account signal-cli is linked to
+  #   secrets_file: /home/you/super.env    # the default is ~/super.env
 ```
 
 See [iMessage credential loading](imessage.md#enable-it) for the shell format and security requirements of `~/super.env`.

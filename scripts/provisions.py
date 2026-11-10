@@ -177,6 +177,13 @@ GITHUB_LATEST = {
     # Token-saving command-output filter; verified against the release's checksums.txt.
     # The plain edition, not rtk-oss or rtk-proxy.
     "rtk": ("rtk-ai/rtk", "v", "rtk-{rtk}.tar.gz", {"rtk": "rtk"}),
+    # Opt-in Signal bridge (apps/signal/README.md); the Linux x86_64 native build, one binary per release.
+    "signal-cli": (
+        "AsamK/signal-cli",
+        "v",
+        "signal-cli-{v}-Linux-native.tar.gz",
+        {"signal-cli": "signal-cli"},
+    ),
 }
 # Resolved when they can be, skipped with a warning when they cannot: they never stop a run.
 OPTIONAL = {"koncreet"}

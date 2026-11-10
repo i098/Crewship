@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import platform
 import pwd
 import re
 import shlex
@@ -193,6 +194,8 @@ def validate_config(document):
         validate_runner_up(config)
     if "cloudflare_runner" in config:
         validate_cloudflare_runner(config)
+    if "signal" in config and platform.machine().lower() not in ("x86_64", "amd64"):
+        raise ValueError("signal needs an x86_64 host: the signal-cli native build is x86_64 only")
     prune = config["browser_prune"]
     if prune["enabled"] and not config["profiles"]["agents"]:
         raise ValueError("browser pruning requires the agents profile")
