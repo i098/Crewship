@@ -39,6 +39,13 @@ test("the system prompt the child starts with tells the desk to ack an owner ins
   expect(prompt).toContain("Call handoff_main with a short ack as its text");
 });
 
+test("the system prompt keeps internal Firstmate work out of texts to the owner and keeps the ack from claiming delivery", async () => {
+  const argv = await sessionArgv("omp", "claude-haiku-5-5");
+  const prompt = argv[argv.indexOf("--system-prompt") + 1];
+  expect(prompt).toContain("Never write an internal instruction, a delivery problem, or a task for Firstmate to him");
+  expect(prompt).toContain("never say it already reached Firstmate");
+});
+
 test("the system prompt sends a link read or web lookup to the helper, also after the desk's own read is refused", async () => {
   const argv = await sessionArgv("omp", "claude-haiku-5-5");
   const prompt = argv[argv.indexOf("--system-prompt") + 1];
@@ -162,7 +169,7 @@ test("an owner instruction is acked with handoff_main: one handoff, one ack text
   const request: TurnRequest = { requestId: "r1", text: "Never give time estimates, just do everything as soon as possible", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
   await Bun.sleep(100);
-  expect(events).toEqual([["handoff"], ["report", ["Got it, passing that to Firstmate."], true]]);
+  expect(events).toEqual([["report", ["Got it, passing that to Firstmate."], true], ["handoff"]]);
   expect(existsSync(join(dir, "desk-tasks"))).toBe(false);
 });
 

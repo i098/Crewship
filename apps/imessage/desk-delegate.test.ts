@@ -70,7 +70,7 @@ test("an answer the checked reply path refuses is not reported: the owner gets t
   expect(String(r.errors[0])).toContain("protected content");
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
   expect(r.sent.map((entry) => entry.target)).toEqual([mate1, "firstmate"]);
-  expect(r.sent[1].text).toContain("check the repo\nThe desk stopped waiting for this task (the answer was refused). Answer the owner directly.");
+  expect(r.sent[1].text).toContain("check the repo\nFirstmate: the desk stopped waiting for this owner task (the answer was refused). Firstmate, answer the owner directly.");
   expect(r.sent[1].text).toContain("The answer the desk refused to send:\nThe password is hunter2.");
 });
 
@@ -90,7 +90,7 @@ test("a mate that left the routing table gets no task: Firstmate gets the text a
   const r = rig({ listed: () => false });
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
-  expect(r.sent).toEqual([{ target: "firstmate", text: "check the repo\nThe desk stopped waiting for this task (not delivered). Answer the owner directly." }]);
+  expect(r.sent).toEqual([{ target: "firstmate", text: "check the repo\nFirstmate: the desk stopped waiting for this owner task (not delivered). Firstmate, answer the owner directly." }]);
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
   expect(String(r.errors[0])).toContain("mate1 was not delivered");
 });
@@ -122,7 +122,7 @@ test("no answer by the wait limit gives Firstmate a fresh note and the owner the
   const taskPath = r.answerPath(0);
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
   expect(r.sent.map((entry) => entry.target)).toEqual(["firstmate", "firstmate"]);
-  expect(r.sent[1].text).toBe("check the repo\nThe desk stopped waiting for this task (no answer in time). Answer the owner directly.");
+  expect(r.sent[1].text).toBe("check the repo\nFirstmate: the desk stopped waiting for this owner task (no answer in time). Firstmate, answer the owner directly.");
   writeFileSync(taskPath, "All green.");
   await until(() => r.reports.length === 2);
   await Bun.sleep(100);
@@ -245,7 +245,7 @@ test("a mate task that times out is sent to the mate again, Firstmate gets a sho
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
   expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, "firstmate"]);
-  expect(r.sent[1].text).toContain("The desk stopped waiting for this task (no answer in time)");
+  expect(r.sent[1].text).toContain("the desk stopped waiting for this owner task (no answer in time)");
   expect(r.sent[2].text).toContain("check the repo");
   expect(r.sent[2].text).not.toContain(STE_STYLE);
   expect(r.reports[0].parts[0]).toBe("Still with the mate1 mate; you will hear back");
@@ -256,7 +256,7 @@ test("a mate task that times out falls back to the whole task for Firstmate when
   r.delegate(mate1, "check the repo", "chat-1");
   await until(() => r.reports.length === 1);
   expect(r.sent.map((entry) => entry.target)).toEqual([mate1, mate1, mate1, "firstmate"]);
-  expect(r.sent[3].text).toContain("Answer the owner directly");
+  expect(r.sent[3].text).toContain("answer the owner directly");
   expect(r.reports).toEqual([{ parts: [FOLLOW_UP], origin: "chat-1" }]);
 });
 
