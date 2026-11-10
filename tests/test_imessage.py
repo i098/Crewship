@@ -249,7 +249,9 @@ def natives_modules():
         json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": "18.18.2"}})
     )
     try:
-        subprocess.run(["bun", "install"], cwd=folder, capture_output=True, check=True, timeout=120)
+        # The host cache can be read-only (cf-sandbox), so install through a private one.
+        env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(folder / ".bun-cache")}
+        subprocess.run(["bun", "install"], cwd=folder, env=env, capture_output=True, check=True, timeout=120)
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
