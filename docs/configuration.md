@@ -160,7 +160,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: true
   enable_linger: true
-  data_dir: ""            # See Data disk below for path requirements and storage behavior
+  data_dir: auto         # See Data disk below for path requirements and storage behavior
   profiles:
     agents: true          # Chrome autoprune, AXI tools, browser defaults
     development: false    # Rust, build tools
@@ -402,7 +402,10 @@ The limit on the number of Firstmate homes is a Firstmate setting; Crewship does
 ## Data disk
 
 Set `data_dir` to an existing absolute path on a mounted data disk.
-On a fresh account, the default `""` keeps the legacy storage layout and writes no bulk data-location defaults (the [Worktree cap](#worktree-cap) is still written).
+The default `auto` picks the largest mounted ext4, xfs, or btrfs disk of 100 GiB or more outside `/`, `/boot`, `/snap`, `/usr`, and `/var`.
+It applies only to a fresh account: an account that already has `~/.treehouse` keeps the legacy layout, so Docker data and existing pools never move.
+Set `""` to keep the legacy storage layout; it writes no bulk data-location defaults (the [Worktree cap](#worktree-cap) is still written).
+Without a qualifying disk, `auto` behaves like `""`.
 Clearing `data_dir` removes the managed Bash block and user-manager file.
 Apply and preview tolerate a missing `.bashrc`.
 Native tool keys and existing data remain unchanged.

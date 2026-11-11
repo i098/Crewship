@@ -6,8 +6,9 @@ crewship:
   start_services: true
   enable_linger: true
   # Existing mounted data path for new bulk defaults and Docker's data root.
+  # `auto` uses the largest mounted data disk (100 GiB or more) on a fresh account; "" keeps the system disk.
   # See docs/configuration.md#data-disk for path requirements and storage behavior.
-  data_dir: ""
+  data_dir: auto
   # A new host gets the core only: agents and firstmate. Every other profile is
   # opt-in (docs/default-config.md).
   profiles:

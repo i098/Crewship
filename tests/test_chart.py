@@ -362,6 +362,7 @@ def test_chart_creates_only_missing_directories(tmp_path, existing_home, profile
         "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
         "crewship": {
             "home": str(home), "workspace": str(home / "Dev"), "user": getpass.getuser(),
+            "data_dir": "",
             "profiles": {"fleet_guards": False, "fleet_browsers": False, "firstmate": False,
                          **profiles},
             "start_services": False,

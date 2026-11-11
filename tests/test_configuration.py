@@ -262,6 +262,12 @@ def test_data_dir_must_be_a_plain_absolute_path(configuration, data_dir):
         ship.validate_config(configuration)
 
 
+@pytest.mark.parametrize("data_dir", ["auto", "", "/mnt/data"])
+def test_data_dir_accepts_auto_empty_or_a_path(configuration, data_dir):
+    configuration["crewship"]["data_dir"] = data_dir
+    ship.validate_config(configuration)
+
+
 def test_bad_polling_window_cannot_disable_idle_accrual(configuration):
     configuration["crewship"]["browser_prune"]["max_gap_seconds"] = 120
     with pytest.raises(ValueError, match="observation intervals"):
