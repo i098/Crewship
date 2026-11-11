@@ -1,0 +1,43 @@
+---
+# `data_dir: auto` (the default) keeps the disk the managed bulk defaults already name, and fails if
+# that disk is no longer mounted. Otherwise it takes the largest mounted data disk, unless the
+# account already has ~/.treehouse (legacy layout). `data_dir: ""` always opts out.
+- name: Read the data disk recorded by an earlier apply
+  ansible.builtin.slurp:
+    src: "{{ crewship_bulk_defaults_path }}"
+  register: crewship_recorded_bulk
+  failed_when: false
+
+- name: Look for a legacy worktree pool under the home
+  ansible.builtin.stat:
+    path: "{{ crewship_cfg.home }}/.treehouse"
+  register: crewship_legacy_pools
+
+- name: Resolve the automatic data disk
+  ansible.builtin.set_fact:
+    crewship_recorded_data_dir: >-
+      {{ (crewship_recorded_bulk.content | default('') | b64decode)
+         | regex_search('(?m)^TMPDIR=\$\{TMPDIR:-(/.*)/tmp\}$', '\1') | default([''], true) | first }}
+    crewship_data_candidate: >-
+      {{ ansible_facts.mounts
+         | selectattr('device', 'match', '^/dev/(?!loop)')
+         | selectattr('fstype', 'in', ['ext4', 'xfs', 'btrfs'])
+         | selectattr('size_total', 'ge', 107374182400)
+         | selectattr('mount', 'match', '^(?!/(boot|snap|usr|var|home|media|run|tmp)(/|$))/[A-Za-z0-9_-][A-Za-z0-9_./-]*$')
+         | sort(attribute='size_total') | map(attribute='mount') | list | last | default('') }}
+
+- name: Require the recorded data disk to stay mounted
+  ansible.builtin.assert:
+    that: crewship_recorded_data_dir in (ansible_facts.mounts | map(attribute='mount') | list)
+    fail_msg: >-
+      The data disk {{ crewship_recorded_data_dir }} recorded by an earlier apply is not mounted.
+      Mount it, or set crewship.data_dir explicitly.
+    quiet: true
+  when: crewship_recorded_data_dir | length > 0
+
+- name: Apply the automatic data disk
+  ansible.builtin.set_fact:
+    crewship_cfg: >-
+      {{ crewship_cfg | combine({'data_dir': (
+           crewship_recorded_data_dir if crewship_recorded_data_dir | length > 0
+           else (crewship_data_candidate if not crewship_legacy_pools.stat.exists else '')) }) }}

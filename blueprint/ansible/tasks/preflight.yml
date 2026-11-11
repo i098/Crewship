@@ -6,26 +6,8 @@
   ansible.builtin.set_fact:
     crewship_cfg: "{{ crewship_cfg }}"
 
-# `data_dir: auto` (the default) takes the largest mounted data disk, but only on a fresh account.
-# An account that already has ~/.treehouse keeps its legacy layout; `data_dir: ""` always opts out.
-- name: Look for a legacy worktree pool under the home
-  ansible.builtin.stat:
-    path: "{{ crewship_cfg.home }}/.treehouse"
-  register: crewship_legacy_pools
-  when: crewship_cfg.data_dir == 'auto'
-
 - name: Resolve the automatic data disk
-  ansible.builtin.set_fact:
-    crewship_cfg: >-
-      {{ crewship_cfg | combine({'data_dir': (
-           ansible_facts.mounts
-           | selectattr('device', 'match', '^/dev/(?!loop)')
-           | selectattr('fstype', 'in', ['ext4', 'xfs', 'btrfs'])
-           | selectattr('size_total', 'ge', 107374182400)
-           | selectattr('mount', 'match', '^(?!/(boot|snap|usr|var)(/|$))/[A-Za-z0-9_-][A-Za-z0-9_./-]*$')
-           | rejectattr('mount', 'equalto', '/')
-           | sort(attribute='size_total') | map(attribute='mount') | list | last | default('')
-         ) if not crewship_legacy_pools.stat.exists else ''}) }}
+  ansible.builtin.include_tasks: data_dir.yml
   when: crewship_cfg.data_dir == 'auto'
 
 - name: Assert the configuration document matches the contract

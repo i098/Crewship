@@ -1858,3 +1858,53 @@ def test_herdr_start_uses_reloaded_manager_and_unit_without_bulk_restart(
     finally:
         if pid_file.exists():
             os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+
+GIB = 1024 ** 3
+
+
+def _mount(path, size_gib, fstype="ext4", device=None):
+    return {"mount": path, "size_total": size_gib * GIB, "fstype": fstype,
+            "device": device or "/dev/sd" + path.strip("/").replace("/", "")[:2]}
+
+
+RECORD = "TMPDIR=${TMPDIR:-/srv/old/tmp}\n"
+
+
+@pytest.mark.parametrize("mounts,legacy,record,expected", [
+    ([_mount("/", 900), _mount("/srv/a", 200), _mount("/srv/b", 400)], False, "", "/srv/b"),
+    ([_mount("/", 900), _mount("/home", 500), _mount("/media/usb", 500), _mount("/var", 500),
+      _mount("/mnt/small", 50), _mount("/mnt/nfs", 500, fstype="nfs"),
+      _mount("/mnt/loop", 500, device="/dev/loop3")], False, "", ""),
+    ([_mount("/mnt/data", 400)], True, "", ""),
+    ([_mount("/mnt/data", 400)], True, RECORD, None),
+    ([_mount("/srv/old", 200), _mount("/srv/bigger", 800)], False, RECORD, "/srv/old"),
+    ([_mount("/srv/bigger", 800)], False, RECORD, None),
+])
+def test_auto_data_dir_resolution(tmp_path, mounts, legacy, record, expected):
+    home = tmp_path / "home"
+    (home / ".treehouse" if legacy else home).mkdir(parents=True)
+    bulk = home / "bulk.conf"
+    if record:
+        bulk.write_text(record)
+    playbook = tmp_path / "play.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": [
+            {"ansible.builtin.set_fact": {"ansible_facts": {"mounts": mounts},
+                                          "crewship_bulk_defaults_path": str(bulk),
+                                          "crewship_cfg": {"home": str(home), "data_dir": "auto"}}},
+            {"ansible.builtin.include_tasks": str(ROOT / "blueprint/ansible/tasks/data_dir.yml")},
+            {"ansible.builtin.copy": {"dest": str(tmp_path / "out"),
+                                      "content": "{{ crewship_cfg.data_dir }}"}},
+        ],
+    }]))
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook)],
+        capture_output=True, text=True,
+    )
+    if expected is None:
+        assert result.returncode != 0 and "not mounted" in result.stdout
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "out").read_text() == expected
