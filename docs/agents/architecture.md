@@ -123,12 +123,12 @@ The [fleet cleanup guards](../fleet-guards.md#cleanup-pool-roots) remove eligibl
 
 ## Seeded Firstmate and OMP configuration
 
-The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`blueprint/ansible/group_vars/all/agent_config.yml`) from this repository's `blueprint/config/` into the Firstmate checkout's `config/`, which Firstmate gitignores. Preflight requires every source and verify requires every destination. The seeded files:
+The `firstmate` profile copies each name in `crewship_firstmate_config_names` (`blueprint/ansible/group_vars/all/agent_config.yml`) from this repository's `blueprint/config/` into the Firstmate checkout's `config/`, which Firstmate gitignores, except `crewship_firstmate_brief_include`, which one template task renders so the stow step names this host's checkout. Preflight requires every source and verify requires every destination. The seeded files:
 
 | File | Value |
 | --- | --- |
 | `crew-dispatch.json` | See [Firstmate dispatch defaults](../configuration.md#firstmate-dispatch-defaults) for per-task model choices and thinking levels. |
-| `brief-include.md` | Appended to crewmate and scout briefs; holds the rule that a feature branch built from several slices gets one validation run, and the `runs-tui --json` query line for agents in the Crewship repo. See [batching](../omp.md#no-mistakes-pipeline-agent). |
+| `brief-include.md` | Appended to crewmate and scout briefs; holds the rule that a feature branch built from several slices gets one validation run, the `runs-tui --json` query line for agents in the Crewship repo, and the stow step that reads this checkout's `.agents/skills/stow/SKILL.md`. See [batching](../omp.md#no-mistakes-pipeline-agent). |
 | `secondmate-harness` | `omp anthropic/claude-opus-5-5 medium`. |
 | `omp-crew-overlay.yml` | omp overlay Firstmate applies to crewmate and scout launches, never secondmates, ahead of its tracked worker overlay. It sets `modelRoles.advisor: anthropic/claude-fable-5-1:low`, `advisor.enabled: true`, `advisor.immuneTurns: 10` and `advisor.syncBacklog: "off"`, plus `providers.anthropic.serverSideFallback: false`: with the global server-side fallback on, Anthropic rejects every advisor call with a 400. Every omp crewmate runs a fable-5.1 advisor at low thinking (its lowest level). Crews never wait on it, because `syncBacklog: "off"` overrides the global `"1"`. Turns that land during a review batch into the next call instead of one call per turn, and the advisor interrupts at most once per 10 turns. omp has no every-N-turns setting. |
 | `spawn-memory-floor-mb` | `8000`; see [fleet guards](../fleet-guards.md). |
