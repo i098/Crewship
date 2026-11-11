@@ -262,9 +262,8 @@ def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
     modules = natives_modules()
     env = {**os.environ, "NODE_PATH": modules}
-    default_cache = Path(os.environ.get("BUN_INSTALL", Path.home() / ".bun")) / "install/cache"
-    if not os.access(default_cache, os.W_OK):  # a fresh cache loses the omp copy that links pi-natives
-        env["BUN_INSTALL_CACHE_DIR"] = str(Path(modules).parent / ".cache")
+    env["BUN_TMPDIR"] = str(Path(modules).parent / ".tmp")  # the read-only default cache stays warm; bun only needs a writable temp dir
+    Path(env["BUN_TMPDIR"]).mkdir(exist_ok=True)
     out = subprocess.run(
         ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=env
     ).stdout
