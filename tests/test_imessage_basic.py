@@ -1215,10 +1215,11 @@ def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_unc
 def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
-    (fake / "lookup-timeout").touch()
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        wait_for(lambda: list((state / "reads-done").glob("*.json")), "the read receipt")  # its lookup shares the fake's lookup flags
+        (fake / "lookup-timeout").touch()
         desk_clock()
         wait_for(lambda: "lookup timed out" in text(err), "the failed lookup")
         bridge.terminate()
