@@ -1081,7 +1081,7 @@ def test_a_new_chrome_devtools_mcp_release_leaves_the_managed_environment_unchan
     before = _managed_environment(tmp_path, True, "1.0.0")
     assert _managed_environment(tmp_path, True, "1.1.0") == before
     assert before["CHROME_DEVTOOLS_AXI_MCP_PATH"].endswith(
-        "/chrome-devtools-mcp/current/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+        "/chrome-devtools-mcp/current/node_modules/chrome-devtools-mcp/out/Default/gen/src/bin/chrome-devtools-mcp.js"
     )
 
 
@@ -1147,7 +1147,7 @@ def test_board_environment_reaches_new_shells_and_agents_and_is_removed_on_opt_o
         assert shell.stdout.splitlines() == [
             socket if board is not None else "unset",
             f"{tmp_path}/.local/share/crewship/chrome-devtools-mcp/current/"
-            "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+            "node_modules/chrome-devtools-mcp/out/Default/gen/src/bin/chrome-devtools-mcp.js",
         ]
         for line in (
             'Environment="FM_OMP_ARM_READY_TIMEOUT_MS=45000"',
