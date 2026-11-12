@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { whoSent } from "./who-sent.ts";
+import { senderOfQuoted, whoSent } from "./who-sent.ts";
 
 const desk = [{ key: "ok", sender: "", id: "d1" }, { key: "old", sender: "mate1" }];
 
@@ -14,4 +14,9 @@ test("a reply to the desk's own bubble is labelled us, by id", () => {
 
 test("a bubble saved without an id matches by text and keeps its sender", () => {
   expect(whoSent(new Set(), desk, "x", "old")).toBe("us (sender mate1)");
+});
+
+test("routing finds the mate by text when the reply target id matches no bubble", () => {
+  expect(senderOfQuoted(desk, "old", "unknown-id")).toBe("mate1");
+  expect(senderOfQuoted([{ key: "plan", sender: "mate2", id: "A" }], "plan", "other")).toBe("mate2");
 });
