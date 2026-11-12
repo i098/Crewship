@@ -37,7 +37,7 @@ def apply(tmp_path, tasks, variables, *options, injected_facts="True"):
 @pytest.mark.parametrize("injected_facts", ["True", "False"])
 def test_platform_and_account_use_namespaced_facts(tmp_path, injected_facts):
     preflight = yaml.safe_load((ANSIBLE / "tasks/preflight.yml").read_text())
-    tasks = preflight[1:3] + [preflight[-1]]
+    tasks = preflight[2:4] + [preflight[-1]]
     tasks.append({"ansible.builtin.assert": {"that": [
         "crewship_platform in ['linux-x86_64', 'linux-aarch64']",
         "crewship_deb_arch in ['amd64', 'arm64']",
