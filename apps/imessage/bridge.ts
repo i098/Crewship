@@ -45,7 +45,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 
@@ -127,6 +127,7 @@ const DESK_LOG = `${STATE}/desk.log`; // what the desk did, for Firstmate to rea
 const ATTACH_DIR = `${STATE}/attachments`; // his files, for Firstmate to open
 const MEMORY_DIR = `${STATE}/memory`; // the desk's memory: the whole chat, word for word (memory.ts)
 const OUTBOX_DIR = `${STATE}/outbox`; // sends and tapbacks not delivered yet, one file each (outbox.ts)
+const READS_DIR = `${STATE}/reads`; // his texts taken in whose read receipt is not sent yet
 const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment not saved yet
 const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
@@ -470,6 +471,13 @@ const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgai
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
   }
 });
+// One read receipt per owner text, sent once the text is durable in routing. The keyed queue survives a restart and never repeats.
+const reads = new Queue<Ref>(READS_DIR, "read receipt", async (ref) => {
+  const line = lineOf(ref);
+  if (!line) throw Object.assign(new Error(`transport ${ref.line} is not set`), { permanent: true });
+  await (await line.find(ref)).read();
+  trace(ref.id, "read");
+}, RETRY_MS, undefined, (ref) => `${ref.line ?? "photon"}-${ref.id}`);
 for (const item of routing.values()) {
   ensureRemembered(item);
   if (item.route === "pending" && (item.loop === "v2") !== DESK_V2) {
@@ -1166,14 +1174,11 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
 }
 
 // A desk task goes to Firstmate as an inbox note, or to a mate (the delegator adds the marker `id` its handling is traced by).
-async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
+async function sendDeskTask(target: string | Secondmate, id: string, text: string) {
   if (target === "firstmate") {
-    const key = `desk-task-${id}`;
-    readMarks.noted(key, requests);
-    return await noteMain(key, text);
+    return await noteMain(`desk-task-${id}`, text);
   }
   if (typeof target === "string") return false; // a helper has no inbox
-  readMarks.delivered(id, target.id, requests);
   return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
 }
 
@@ -1437,7 +1442,6 @@ function spawnSender(mate: Secondmate, text: string) {
 }
 
 async function deliverToMate(item: Routing, mate: Secondmate) {
-  readMarks.delivered(item.requestId, mate.id, [item.requestId]);
   const text = `[from captain via desk] ${item.text}\n${deskRequestMarker(item.requestId)}`;
   const routed = `routed to ${mate.id}`;
   if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
@@ -1642,16 +1646,6 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
-const readMarks = new ReadMarks({
-  receipts: async () => {
-    const proc = track(Bun.spawn([INBOX, "receipts"], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "pipe", stderr: "ignore", timeout: 5000 }));
-    return JSON.parse(await new Response(proc.stdout).text());
-  },
-  mateTook: (mate, marker) => mateInboxHas(FM_HOME, mate, marker, true),
-  log, trace: (message, event) => trace(message.id, event),
-});
-setInterval(() => { if (!stopping) void readMarks.poll(); }, Number(env.FM_IMESSAGE_READ_POLL_MS || 5000)).unref();
-
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
   if (stopping) return;
@@ -1680,7 +1674,7 @@ async function handle(line: Line, message: LineMessage) {
     proactiveAt = at;
     persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
   }
-  readMarks.hold(`${line.name}-${message.id}`, message);
+  reads.add(ref); // the text is durable in routing: it is taken in, whichever way it is answered
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
   if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
