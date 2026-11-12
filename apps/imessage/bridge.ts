@@ -47,7 +47,7 @@ import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
-import { quoteKey, senderOfQuoted, type SentBubble, whoSent as whoSentBy } from "./who-sent.ts";
+import { quoteKey, senderOfQuoted, type SentBubble, whoSent as whoSentBy } from "./reply-target.ts";
 
 
 let stopping = false;
