@@ -135,6 +135,8 @@ def test_chat_quote_older_than_its_window_cannot_state_current_work(tmp_path):
         date = (now - age).isoformat().replace("+00:00", "Z")
         return basic_answer(tmp_path, reply, status="", messages=[{"i": 7, "kind": "supervisor", "text": line, "date": date}])
     assert answer(timedelta(hours=9)) is None
+    own = {"i": 7, "kind": "desk", "text": line, "date": now.isoformat().replace("+00:00", "Z")}
+    assert basic_answer(tmp_path, reply, status="", messages=[own]) is None
     assert answer(timedelta(minutes=1)) == {"answer": line, "identity": False}
 
 

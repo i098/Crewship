@@ -244,7 +244,7 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
     }
     case "chat": {
       const message = msgs.find((m) => m.i === evidence.id);
-      if (message?.kind === "owner") return;
+      if (message?.kind === "owner" || message?.kind === "desk") return; // a desk reply only repeats an earlier source
       if (message?.date && Date.now() - Date.parse(message.date) > CHAT_FRESH_MS) return;
       source = message?.text;
       break;
