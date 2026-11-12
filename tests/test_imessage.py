@@ -261,6 +261,7 @@ def natives_modules():
 
 def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
+    require_bridge()
     modules = natives_modules()
     env = {**os.environ, "NODE_PATH": modules}
     env["BUN_TMPDIR"] = str(Path(modules).parent / ".tmp")  # the read-only default cache stays warm; bun only needs a writable temp dir
@@ -2140,10 +2141,54 @@ def publish_json(path, record):
 TEST_QUIET_MS = 2000  # the bridge's test quiet period; production waits 350 milliseconds
 
 
-def fake_bridge(tmp_path, test_mode=True):
+def probe_decision(error, ci):
+    """What a failed or passed bridge probe means for a test: "run", "skip" or "exit" (CI never goes green skipped)."""
+    return "run" if error is None else "exit" if ci else "skip"
+
+
+@functools.cache
+def bridge_probe():
+    """Start the bridge once against the fake spectrum-ts; return the error text, or None when it listens."""
+    tmp = Path(tempfile.mkdtemp(prefix="bridge-probe-"))
+    bridge = None
+    try:
+        _, _, _, _, start, _, _, _ = fake_bridge(tmp, probe=True)
+        bridge = start(1, timeout=10)
+        return None
+    except BaseException as error:  # a probe failure of any kind is the environment fault
+        return f"{type(error).__name__}: {str(error).splitlines()[0]}"
+    finally:
+        if bridge:
+            bridge.terminate()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("error", "ci", "action"),
+    [(None, False, "run"), (None, True, "run"), ("TimeoutExpired", False, "skip"), ("TimeoutExpired", True, "exit")],
+)
+def test_a_failed_bridge_probe_skips_outside_ci_and_ends_the_session_in_ci(error, ci, action):
+    assert probe_decision(error, ci) == action
+
+
+def require_bridge():
+    """Skip, or in CI end the session, when the bun bridge cannot start; one bounded probe serves every test."""
+    error = bridge_probe()
+    action = probe_decision(error, bool(os.environ.get("CI")))
+    if action == "run":
+        return
+    reason = f"the bun bridge cannot start ({error})"
+    if action == "exit":
+        pytest.exit(reason, returncode=1)
+    pytest.skip(reason)
+
+
+def fake_bridge(tmp_path, test_mode=True, probe=False):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
     timer overrides and uses the production burst timing."""
+    if not probe:
+        require_bridge()
     app, fake, state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
     shutil.copytree(ROOT / "apps/imessage", app, ignore=shutil.ignore_patterns("fm-*"))
     pkg = app / "node_modules/spectrum-ts"
@@ -2198,10 +2243,10 @@ def fake_bridge(tmp_path, test_mode=True):
     out, err = tmp_path / "out", tmp_path / "err"
     text = lambda p: p.read_text() if p.exists() else ""  # noqa: E731
 
-    def start(n):
+    def start(n, timeout=30):
         with out.open("a") as o, err.open("a") as e:
             bridge = subprocess.Popen(["bun", "bridge.ts"], cwd=app, env=env, stdout=o, stderr=e)
-        wait_for(lambda: text(out).count("listening") == n, f"bridge start {n}")
+        wait_for(lambda: text(out).count("listening") == n, f"bridge start {n}", timeout=timeout)
         return bridge
 
     def inbound(mid, wait_note=True, **fields):
@@ -2790,6 +2835,7 @@ class FallbackRig:
     """The bridge on the photon and bluebubbles transports, over the fake spectrum-ts and a fake relay. It restarts."""
 
     def __init__(self, tmp_path, **env):
+        require_bridge()
         self.app, self.fake, self.state, bin_dir = (tmp_path / d for d in ("app", "fake", "state", "bin"))
         shutil.copytree(ROOT / "apps/imessage", self.app, ignore=shutil.ignore_patterns("fm-*"))
         pkg = self.app / "node_modules/spectrum-ts"
