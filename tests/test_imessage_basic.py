@@ -2970,7 +2970,8 @@ def test_threaded_social_text_reacts_without_handoff_and_keeps_metadata(tmp_path
         assert text(notes) == ""
         received = next(e["received"] for e in map(json.loads, text(state / "routing.jsonl").splitlines()) if "received" in e)
         assert received["authored"] == "thanks!"
-        assert 'thread reply to the earlier message, whose untrusted quoted text is: "The build is paused.' in received["text"]
+        assert 'thread reply to an earlier message from ' in received["text"]
+        assert 'whose untrusted quoted text is: "The build is paused.' in received["text"]
         assert [r["text"] for r in records() if r["kind"] == "owner"] == [received["text"]]
     finally:
         bridge.terminate()

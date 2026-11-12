@@ -6,7 +6,7 @@ The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small
 
 For each message from the owner, the service does these steps:
 
-1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names the text that it replies to. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
+1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names who sent the earlier message (the owner, us with the sender, or a sender the bridge did not record) and quotes its text, cut to 200 characters with "…". When that message is not in local history, the note shows no text. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
 2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.

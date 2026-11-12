@@ -45,7 +45,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, ReadMarks, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 
@@ -220,7 +220,6 @@ const mateDeliveries = new Set<string>();
 // Who sent each recent bubble: a thread reply to it goes back to that mate. A reply names its target by message id when the
 // transport gave the sent bubble one. Otherwise the start of the text counts, and only when every recent bubble with that start has one sender.
 // A bubble sent with no sender is the desk's own. A capped file keeps the record across restarts.
-type SentBubble = { key: string; sender: string; id?: string };
 const SENDERS_FILE = `${STATE}/senders.json`;
 const sentBubbles: SentBubble[] = (() => {
   try {
@@ -228,17 +227,10 @@ const sentBubbles: SentBubble[] = (() => {
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 })();
-const quoteKey = (text: string) => text.slice(0, 120).trim();
 function rememberSender(text: string, sender = "", id?: string) {
   sentBubbles.push({ key: quoteKey(text), sender, ...(id && { id }) });
   if (sentBubbles.length > 200) sentBubbles.shift();
   persistLatest(SENDERS_FILE, JSON.stringify(sentBubbles));
-}
-function senderOfQuoted(text: string, id?: string) {
-  const byId = id ? sentBubbles.find((b) => b.id === id) : undefined;
-  if (byId) return byId.sender;
-  const senders = new Set(sentBubbles.filter((b) => b.key === quoteKey(text)).map((b) => b.sender));
-  return senders.size === 1 ? [...senders][0] : undefined;
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
@@ -248,8 +240,10 @@ function quotedTarget(c: LineMessage["content"]): { id: string; text: string } |
 }
 function quotedMate(c: LineMessage["content"]) {
   const quoted = quotedTarget(c);
-  return quoted && mateOfSender(senderOfQuoted(quoted.text, quoted.id));
+  return quoted && mateOfSender(senderOfQuoted(sentBubbles, quoted.text, quoted.id));
 }
+// Who sent a thread-reply target: the owner (a text this bridge heard) or us (a bubble this bridge sent).
+const whoSent = (id: string, text: string) => whoSentBy(said, sentBubbles, id, text);
 let routingRetry: NodeJS.Timeout | undefined;
 const ackBurst = createBurst(); // one honest line per burst of texts
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
@@ -1604,7 +1598,7 @@ async function noteText(message: LineMessage) {
   }), (path) => transcribe(path, listen).catch((e) => {
     log("transcribe")(e);
     throw e;
-  }));
+  }), whoSent);
   return { text, failed };
 }
 
