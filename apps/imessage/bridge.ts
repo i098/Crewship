@@ -24,7 +24,7 @@
 // Runs as the systemd --user service fm-imessage (docs/imessage.md). Docs: https://photon.codes/docs/spectrum-ts
 import { cleanText, statusLine } from "./clean.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, mkdtempSync, realpathSync, renameSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -472,6 +472,10 @@ const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgai
   }
 });
 // One read receipt per owner text, sent once the text is durable in routing. The keyed queue survives a restart and never repeats.
+for (const f of existsSync(`${READS_DIR}-done`) ? readdirSync(`${READS_DIR}-done`) : []) {
+  const done = `${READS_DIR}-done/${f}`;
+  if (Date.now() - statSync(done).mtimeMs > 7 * 86_400_000) rmSync(done, { force: true });
+}
 const reads = new Queue<Ref>(READS_DIR, "read receipt", async (ref) => {
   const line = lineOf(ref);
   if (!line) throw Object.assign(new Error(`transport ${ref.line} is not set`), { permanent: true });

@@ -11,7 +11,7 @@ For each message from the owner, the service does these steps:
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
    It keeps authored text separate from quoted thread metadata for action and social checks.
-3. It marks the text as read once the text is stored for routing, whether the desk answers it or Firstmate or a mate takes it. Each text is marked read once. A failed read mark is tried again, and a text that arrived while the service was down is marked read after it starts.
+3. It marks the text as read once the text is stored for routing, whether the desk answers it or Firstmate or a mate takes it. Each text is marked read once. A failed read mark is tried again, and a text that arrived while the service was down is marked read after it starts, if it arrives within the transport catch-up window. Records of sent receipts are deleted after 7 days.
 4. It combines text until 350 milliseconds of silence or 2 seconds from the first text, whichever comes first.
    This cap limits the batching wait, not status retrieval, model work, or delivery.
    Each new text cancels a running draft, resets the quiet timer, and starts a fresh status read.

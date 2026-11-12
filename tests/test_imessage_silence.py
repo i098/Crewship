@@ -618,3 +618,36 @@ mock.module("node:fs", () => ({
         fault.unlink(missing_ok=True)
         bridge.terminate()
         bridge.wait(10)
+
+
+def test_owner_text_only_the_desk_answers_is_marked_read_once(tmp_path, desk_clock):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    bridge = start(1)
+    try:
+        receive("lookup", "What is the build status?")
+        desk_clock()
+        wait_for(lambda: text(fake / "sent"), "the desk answer")
+        wait_for(lambda: text(fake / "read"), "the read receipt")
+        desk_clock(8000)
+        assert text(fake / "read").splitlines() == ["lookup"]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+def test_read_receipt_records_older_than_a_week_are_pruned_at_start(tmp_path):
+    fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
+    done = state / "reads-done"
+    done.mkdir(parents=True)
+    old, new = done / "1.json", done / "2.json"
+    for f in (old, new):
+        f.write_text("{}")
+    week = time.time() - 8 * 86400
+    os.utime(old, (week, week))
+    bridge = start(1)
+    try:
+        wait_for(lambda: not old.exists(), "the old record to go")
+        assert new.exists()
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
