@@ -49,7 +49,7 @@ async function attempt<O>(host: DelegateHost<O>, target: DelegateTarget, id: str
 
 // A task nobody answered goes to the named mate once more (one retry), and Firstmate hears of it; else Firstmate gets the whole task. `mate` is set only for a timeout.
 async function lost<O>(host: DelegateHost<O>, job: Job<O>, why: string, refused = "", mate?: Secondmate) {
-  const note = `${job.text}\nThe desk stopped waiting for this task (${why}). Answer the owner directly.${refused && `\nThe answer the desk refused to send:\n${refused}`}`;
+  const note = `${job.text}\nFirstmate: the desk stopped waiting for this owner task (${why}). Firstmate, answer the owner directly.${refused && `\nThe answer the desk refused to send:\n${refused}`}`;
   let held: Secondmate | undefined;
   if (mate) for (let i = 0; i < 2 && !held; i++) if (await attempt(host, mate, `${job.id}-lost`, note, job.requests)) held = mate;
   const noted = await attempt(host, "firstmate", `${job.id}-lost`, held ? `The desk sent this task to the ${held.id} mate again: no answer in time. Make sure it is answered.\n${job.text}` : note, job.requests);

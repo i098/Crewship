@@ -13,11 +13,14 @@ export { ACK_GUID_PREFIX, TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
 
-// The text goes to Firstmate first; the ack, when given, is a plain desk text with no task behind it.
+// The ack, when given, is queued before the slow handoff so the owner is not left waiting; it is a plain desk text with no task behind it.
 function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
   if (reason) host.log("desk handoff")(reason);
+  if (ack) {
+    try { host.report(ack.parts, `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, pending[ack.target - 1]!); }
+    catch (err) { host.log("desk ack")(`ack not queued: ${err instanceof Error ? err.message : err}`); }
+  }
   host.handoff(pending);
-  if (ack) host.report(ack.parts, `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, pending[ack.target - 1]!);
 }
 
 // A thread reply to a mate's bubble goes back to that mate, with the same relay checks.

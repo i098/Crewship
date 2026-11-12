@@ -261,7 +261,10 @@ def natives_modules():
 
 def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
-    env = {**os.environ, "NODE_PATH": natives_modules()}
+    modules = natives_modules()
+    env = {**os.environ, "NODE_PATH": modules}
+    env["BUN_TMPDIR"] = str(Path(modules).parent / ".tmp")  # the read-only default cache stays warm; bun only needs a writable temp dir
+    Path(env["BUN_TMPDIR"]).mkdir(exist_ok=True)
     out = subprocess.run(
         ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=env
     ).stdout
