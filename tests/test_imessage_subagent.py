@@ -1,6 +1,7 @@
 """Exercise the native background runner without provider or transport calls."""
 
 import json
+from datetime import datetime, timedelta, timezone
 import shutil
 import subprocess
 from pathlib import Path
@@ -124,6 +125,17 @@ def test_legacy_keeps_whitespace_in_nonblank_evidence(tmp_path):
         messages=[{"i": 7, "kind": "supervisor", "text": quotes[2]}],
         tools={"read-1": {"name": "read", "text": quotes[1]}},
     ) == {"answer": "\n".join(quotes), "identity": False}
+
+
+def test_chat_quote_older_than_its_window_cannot_state_current_work(tmp_path):
+    line = "The gradient change sits in pull request 166."
+    reply = {"kind": "reply", "answer": line, "evidence": [{"source": "chat", "quote": line, "id": 7}]}
+    now = datetime.now(timezone.utc)
+    def answer(age):
+        date = (now - age).isoformat().replace("+00:00", "Z")
+        return basic_answer(tmp_path, reply, status="", messages=[{"i": 7, "kind": "supervisor", "text": line, "date": date}])
+    assert answer(timedelta(hours=9)) is None
+    assert answer(timedelta(minutes=1)) == {"answer": line, "identity": False}
 
 
 def test_blank_reply_evidence_cannot_bypass_isolated_source_selection(tmp_path):

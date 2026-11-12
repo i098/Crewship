@@ -15,7 +15,7 @@ export type SubagentOptions = Pick<NativeOptions, "model" | "provider" | "reason
   view: string;
   recent: string;
   status: string;
-  messages: readonly Pick<Msg, "i" | "kind" | "text">[];
+  messages: readonly Pick<Msg, "i" | "kind" | "text" | "date">[];
   writePath?: string;
   current: () => boolean;
   signal?: AbortSignal;
