@@ -2158,11 +2158,12 @@ def bridge_probe():
         bridge.wait(10)  # the reported fault: a bridge that listens but ignores SIGTERM
         bridge = None
         return None
-    except BaseException as error:  # a probe failure of any kind is the environment fault
-        return f"{type(error).__name__}: {str(error).splitlines()[0]}"
+    except Exception as error:  # a probe failure is the environment fault
+        return f"{type(error).__name__}: {(str(error).splitlines() or [''])[0]}"
     finally:
         if bridge:
             bridge.kill()
+            bridge.wait()
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -2249,7 +2250,12 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
     def start(n, timeout=30):
         with out.open("a") as o, err.open("a") as e:
             bridge = subprocess.Popen(["bun", "bridge.ts"], cwd=app, env=env, stdout=o, stderr=e)
-        wait_for(lambda: text(out).count("listening") == n, f"bridge start {n}", timeout=timeout)
+        try:
+            wait_for(lambda: text(out).count("listening") == n, f"bridge start {n}", timeout=timeout)
+        except BaseException:
+            bridge.kill()
+            bridge.wait()
+            raise
         return bridge
 
     def inbound(mid, wait_note=True, **fields):
