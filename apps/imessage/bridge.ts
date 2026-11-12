@@ -45,9 +45,8 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, ReadMarks, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, ReadMarks, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
-import { quoteKey, senderOfQuoted, type SentBubble, whoSent as whoSentBy } from "./reply-target.ts";
 
 
 let stopping = false;

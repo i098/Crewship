@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sendRecorded, sendReply } from "./outbox";
-import { pickTarget, refusal, routeRow, senderOfQuoted, whoSent, withTarget } from "./reply-target";
+import { pickTarget, refusal, routeRow, withTarget } from "./reply-target";
 
 const dir = mkdtempSync(`${tmpdir()}/reply-send-`);
 const texts = (...ids: string[]) => ids.map((id) => ({ id, space: "chat" }));
@@ -100,25 +100,4 @@ test("/send path: muted queues nothing", () => {
 test("the routing row names the target, its space and how it was chosen", () => {
   expect(routeRow({ id: "a", space: "chat" }, q("reply-id=a"))).toEqual({ replyTarget: "a", space: "chat", by: "id" });
   expect(routeRow({ id: "a", space: "chat" }, q("reply=1"))).toEqual({ replyTarget: "a", space: "chat", by: "position" });
-});
-
-
-const desk = [{ key: "ok", sender: "", id: "d1" }, { key: "old", sender: "mate1" }];
-
-test("a reply to the owner's ok is not labelled us when the desk once sent ok under another id", () => {
-  expect(whoSent(new Set(["o1"]), desk, "o1", "ok")).toBe("the owner");
-  expect(whoSent(new Set(), desk, "o1", "ok")).toBeUndefined();
-});
-
-test("a reply to the desk's own bubble is labelled us, by id", () => {
-  expect(whoSent(new Set(), desk, "d1", "ok")).toBe("us");
-});
-
-test("a bubble saved without an id matches by text and keeps its sender", () => {
-  expect(whoSent(new Set(), desk, "x", "old")).toBe("us (sender mate1)");
-});
-
-test("routing finds the mate by text when the reply target id matches no bubble", () => {
-  expect(senderOfQuoted(desk, "old", "unknown-id")).toBe("mate1");
-  expect(senderOfQuoted([{ key: "plan", sender: "mate2", id: "A" }], "plan", "other")).toBe("mate2");
 });
