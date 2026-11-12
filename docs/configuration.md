@@ -402,7 +402,7 @@ The limit on the number of Firstmate homes is a Firstmate setting; Crewship does
 ## Data disk
 
 Set `data_dir` to an existing absolute path on a mounted data disk.
-The default `auto` picks the largest mounted ext4, xfs, or btrfs disk of 100 GiB or more outside `/`, `/boot`, `/snap`, `/usr`, `/var`, `/home`, `/media`, `/run`, and `/tmp`.
+The default `auto` picks the largest mounted ext4, xfs, or btrfs disk of 100 GiB or more outside `/`, `/boot`, `/snap`, `/usr`, `/var`, `/home`, `/media`, `/run`, `/tmp`, and `/etc`.
 It applies only to a fresh account: an account that already has `~/.treehouse` keeps the legacy layout, so Docker data and existing pools never move, unless the managed bulk defaults already name a data disk.
 Once named, that disk stays: a later apply keeps it even when a larger disk appears, and fails when it is no longer mounted.
 Set `""` to keep the legacy storage layout; it writes no bulk data-location defaults (the [Worktree cap](#worktree-cap) is still written).

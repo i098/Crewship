@@ -7,7 +7,7 @@
     crewship_cfg: "{{ crewship_cfg }}"
 
 - name: Resolve the automatic data disk
-  ansible.builtin.include_tasks: data_dir.yml
+  ansible.builtin.import_tasks: data_dir.yml
   when: crewship_cfg.data_dir == 'auto'
 
 - name: Assert the configuration document matches the contract

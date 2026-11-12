@@ -23,7 +23,7 @@
          | selectattr('device', 'match', '^/dev/(?!loop)')
          | selectattr('fstype', 'in', ['ext4', 'xfs', 'btrfs'])
          | selectattr('size_total', 'ge', 107374182400)
-         | selectattr('mount', 'match', '^(?!/(boot|snap|usr|var|home|media|run|tmp)(/|$))/[A-Za-z0-9_-][A-Za-z0-9_./-]*$')
+         | selectattr('mount', 'match', '^(?!/(boot|snap|usr|var|home|media|run|tmp|etc)(/|$))/[A-Za-z0-9_-][A-Za-z0-9_./-]*$')
          | sort(attribute='size_total') | map(attribute='mount') | list | last | default('') }}
 
 - name: Require the recorded data disk to stay mounted
