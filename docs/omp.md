@@ -308,7 +308,7 @@ See [Default config](default-config.md) for the gate tiers and their model and e
 For a hard run, use `no-mistakes axi run --intent "..." --model anthropic/claude-opus-5-5 --effort high`.
 
 Firstmate appends [`blueprint/config/brief-include.md`](../blueprint/config/brief-include.md) to each crewmate and scout brief through `config/brief-include.md`.
-The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`, and tells every agent to run [`board-phone-fit`](#board-phone-fit) before it sends a board link.
+The include is a template: its stow step names the `.agents/skills/stow/SKILL.md` path in the installed Firstmate checkout, which workers can read. The brief includes the batching rule: a feature branch built from several slices gets one validation run. It also tells agents in the Crewship repo to query past runs with `bun tools/runs-tui/runs-tui.ts --json --all`, and tells every agent to run [`board-phone-fit`](#board-phone-fit) before it sends a board link.
 
 ## Board phone fit
 

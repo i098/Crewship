@@ -245,8 +245,19 @@
         directory_mode: "{{ '0700' if crewship_fm_source_is_directory | bool else omit }}"
         remote_src: true
       become: true
-      loop: "{{ crewship_firstmate_config_names }}"
+      loop: "{{ crewship_firstmate_config_names | difference([crewship_firstmate_brief_include]) }}"
       when: >-
         not (crewship_firstmate_config_first_write | bool)
         or (crewship_firstmate_dir ~ '/config/' ~ item)
            not in (crewship_fm_dest_stat.stdout | from_json).existing
+
+    # A template, so the stow step names this host's Firstmate checkout.
+    - name: Write the Firstmate brief include
+      ansible.builtin.template:
+        src: "{{ crewship_blueprint }}/config/{{ crewship_firstmate_brief_include }}"
+        dest: "{{ crewship_firstmate_dir }}/config/{{ crewship_firstmate_brief_include }}"
+        owner: "{{ crewship_cfg.user }}"
+        group: "{{ crewship_group }}"
+        mode: "0600"
+        force: "{{ not (crewship_firstmate_config_first_write | bool) }}"
+      become: true
