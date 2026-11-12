@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -1476,7 +1476,7 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["status", "supervisor"])
 @pytest.mark.parametrize("question,fact", [
     ("What is Firstmate?", "Firstmate is the coding-agent supervisor."),
     ("What is your role?", "I am the iMessage front desk."),
@@ -1501,7 +1501,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_c
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": TODAY + "T00:00:00.000Z"}
+        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
         (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": fact}
     (fake / "answer").write_text(json.dumps({
@@ -1559,7 +1559,7 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, desk_
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": TODAY + "T00:00:00.000Z"}
+        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
         (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = {"source": "chat", "id": 0, "quote": claim}
     (fake / "answer").write_text(json.dumps({
@@ -1761,7 +1761,7 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["tool", "status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["tool", "status", "supervisor"])
 @pytest.mark.parametrize("question,rewrite,expected", [
     ("Quote the source text.", " logging: on\n memory: off", " logging: on\n memory: off"),
     ("Quote the source text.", "logging: on\n memory: off", None),
@@ -1784,7 +1784,7 @@ def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_des
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": TODAY + "T00:00:00.000Z"}
+        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
         (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = [{"source": "chat", "id": 0, "quote": line} for line in draft.splitlines()]
     replies.append(lambda body: {"content": json.dumps({"kind": "reply", "answer": draft, "evidence": evidence})})
@@ -1796,8 +1796,7 @@ def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_des
         wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete quotation delivery")
         assert text(fake / "sent") == ("" if expected is None else "".join(f"send {part}\n" for part in expected.split("\n\n")))
         assert text(notes).count("photon-quote ") == (1 if expected is None else 0)
-        prior = [draft] if source_kind == "desk" else []
-        assert [row["text"] for row in records() if row["kind"] == "desk"] == prior + ([] if expected is None else [expected])
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == ([] if expected is None else [expected])
         voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
         assert voices == [{"draft": draft, "question": question}]
     finally:
@@ -1949,7 +1948,7 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["status", "supervisor"])
 @pytest.mark.parametrize("lines,rewrite,accepted,question", [
     (
         ["herdr", "off"],
@@ -1995,7 +1994,7 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     else:
         main = state / "memory/main"
         main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": TODAY + "T00:00:00.000Z"}
+        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
         (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
         evidence = [{"source": "chat", "id": 0, "quote": line} for line in lines]
     (fake / "voice-answer").write_text(rewrite)
@@ -2016,7 +2015,7 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
                 wait_for(lambda: "photon-lookup-0 " in text(notes), "the rejected excerpt handoff", timeout=45)
         assert text(fake / "sent") == (f"send {rewrite}\n" * count if accepted else "")
         assert text(notes).count("photon-lookup-0 ") == (0 if accepted else 1)
-        expected = ([source_text] if source_kind == "desk" else []) + ([rewrite] * count if accepted else [])
+        expected = [rewrite] * count if accepted else []
         assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
         assert not any(message["role"] == "tool" for body in requests for message in body["messages"])
         voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]

@@ -127,7 +127,7 @@ def test_legacy_keeps_whitespace_in_nonblank_evidence(tmp_path):
     ) == {"answer": "\n".join(quotes), "identity": False}
 
 
-def test_chat_quote_older_than_its_window_cannot_state_current_work(tmp_path):
+def test_chat_quote_cannot_state_current_work(tmp_path):
     line = "The gradient change sits in pull request 166."
     reply = {"kind": "reply", "answer": line, "evidence": [{"source": "chat", "quote": line, "id": 7}]}
     now = datetime.now(timezone.utc)
@@ -137,7 +137,11 @@ def test_chat_quote_older_than_its_window_cannot_state_current_work(tmp_path):
     assert answer(timedelta(hours=9)) is None
     own = {"i": 7, "kind": "desk", "text": line, "date": now.isoformat().replace("+00:00", "Z")}
     assert basic_answer(tmp_path, reply, status="", messages=[own]) is None
-    assert answer(timedelta(minutes=1)) == {"answer": line, "identity": False}
+    assert answer(timedelta(minutes=1)) is None
+    fact = "Firstmate is the coding-agent supervisor."
+    fresh = {"kind": "reply", "answer": fact, "evidence": [{"source": "chat", "quote": fact, "id": 7}]}
+    date = now.isoformat().replace("+00:00", "Z")
+    assert basic_answer(tmp_path, fresh, status="", messages=[{"i": 7, "kind": "supervisor", "text": fact, "date": date}]) == {"answer": fact, "identity": False}
 
 
 def test_blank_reply_evidence_cannot_bypass_isolated_source_selection(tmp_path):

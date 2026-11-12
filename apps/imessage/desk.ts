@@ -56,7 +56,7 @@ That text may end with one period or exclamation mark. Omit it when the reaction
 For a direct answer return {"kind":"reply","target":1,"answer":"exact quoted fact","evidence":[
 {"source":"status","quote":"exact quoted fact"}]}.
 For chat evidence use {"source":"chat","id":MESSAGE_ID,"quote":"exact quoted fact"}.
-Chat older than 30 minutes is history: it may be out of date, so never quote it for what work is doing now. Use status or a tool result, or hand off.
+Chat is history: it may be out of date, so never quote it for what work is doing now, even from a recent message. Use status or a tool result, or hand off.
 For a server result use {"source":"tool","quote":"exact result line, without its line-number prefix"}.
 For your model identity use {"source":"identity","subject":"desk","quote":"${deskModel}"}.
 ${supervisorModel ? `For Firstmate's model identity use {"source":"identity","subject":"supervisor","quote":"${supervisorModel}"}.` : "Firstmate's model identity is unknown; hand off questions about it."}
@@ -187,6 +187,7 @@ export function authorizedWritePath(texts: string[]): string | undefined {
 
 // A chat quote is history, not current status: past this age only status or a tool result may back a reply.
 export const CHAT_FRESH_MS = 30 * 60_000;
+const WORK_STATE = /\b(?:still|currently|right now|in (?:progress|review|flight)|sits? in|(?:pr|pull request)\s*#?\d+|(?:is|are|being)\s+(?:running|working|building|deploying|pending|queued|open|blocked|waiting|merged))\b/i;
 export type ChatMsg = { i: number; kind: string; text: string; date?: string };
 export type DeskEvidence = Record<string, { name: string; text: string }>;
 export type VoiceSource = { answer: string; identity: boolean };
@@ -246,6 +247,7 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
       const message = msgs.find((m) => m.i === evidence.id);
       if (message?.kind === "owner" || message?.kind === "desk") return; // a desk reply only repeats an earlier source
       if (message?.date && Date.now() - Date.parse(message.date) > CHAT_FRESH_MS) return;
+      if (WORK_STATE.test(evidence.quote)) return;
       source = message?.text;
       break;
     }
