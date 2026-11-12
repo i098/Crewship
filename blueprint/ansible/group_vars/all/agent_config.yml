@@ -37,11 +37,12 @@ crewship_agent_config_files:
 
 # Firstmate reads these from its own checkout and already gitignores them, so
 # the clone stays clean and no .gitignore is edited.
+crewship_firstmate_brief_include: brief-include.md
 crewship_firstmate_config_names:
   - crew-harness
   - secondmate-harness
   - crew-dispatch.json
-  - brief-include.md
+  - "{{ crewship_firstmate_brief_include }}"
   # 1000000 estimated tokens: no practical cap on the startup prompt memory.
   - startup-memory-budget
   # Fresh spawns are refused while host MemAvailable is under this many MB

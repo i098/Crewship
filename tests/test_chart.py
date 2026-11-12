@@ -418,6 +418,9 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
     (sources / "config/crew-dispatch.json").write_bytes(
         (ROOT / "blueprint/config/crew-dispatch.json").read_bytes()
     )
+    (sources / "config/brief-include.md").write_bytes(
+        (ROOT / "blueprint/config/brief-include.md").read_bytes()
+    )
     home = tmp_path / "home"
     existing = home / "preferences/existing.conf"
     existing.parent.mkdir(parents=True)
@@ -450,7 +453,10 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
             for path in (existing, missing)
         ],
         "crewship_firstmate_dir": str(home / "firstmate"),
-        "crewship_firstmate_config_names": ["settings.conf", "nested", "crew-dispatch.json"],
+        "crewship_firstmate_brief_include": "brief-include.md",
+        "crewship_firstmate_config_names": [
+            "settings.conf", "nested", "crew-dispatch.json", "brief-include.md",
+        ],
         "crewship_firstmate_config_first_write": first_write,
         "crewship_fm_git": {"stat": {"exists": True}},
         "ansible_become": False,
@@ -472,6 +478,10 @@ def test_batched_checks_preserve_existing_preferences_and_respect_firstmate_mode
     assert (destination / "settings.conf").read_text() == expected
     assert (destination / "nested/operator.conf").read_text() == "operator nested settings\n"
     assert (destination / "nested/managed.conf").exists() is not first_write
+    include = (destination / "brief-include.md").read_text()
+    stow_skill = home / "firstmate/.agents/skills/stow/SKILL.md"
+    assert f"`{stow_skill}`" in include
+    assert "skill://" not in include and "{{" not in include
     dispatch = json.loads((destination / "crew-dispatch.json").read_text())
     choices = {choice["model"]: choice for rule in dispatch["rules"] for choice in rule["use"]}
     assert choices["inception/mercury-3"]["effort"] == "high"
