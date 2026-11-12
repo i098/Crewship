@@ -4,7 +4,6 @@ import {
 } from "./desk.ts";
 import { cleanText } from "./clean.ts";
 import type { DeskReadResult } from "./desk.ts";
-import type { Msg } from "./memory.ts";
 
 type NativeOptions = Parameters<typeof spawnDesk>[0];
 
@@ -15,7 +14,6 @@ export type SubagentOptions = Pick<NativeOptions, "model" | "provider" | "reason
   view: string;
   recent: string;
   status: string;
-  messages: readonly Pick<Msg, "i" | "kind" | "text" | "date">[];
   writePath?: string;
   current: () => boolean;
   signal?: AbortSignal;
@@ -60,8 +58,8 @@ Number successful tool results in conversation order starting at 1; skip failed 
 Number physical text lines within each result starting at 1, including blank lines.
 A physical line ends at a newline, not at a sentence boundary. Select the whole line even when it contains several sentences.
 This is an internal source selection. The later voice pass handles conversational wording and length.
-Only for non-tool status, chat, or model identity facts, use {"kind":"reply","target":1,"answer":"exact source line","evidence":[{"source":"status","quote":"exact source line"}]}.
-For chat evidence use {"source":"chat","id":MESSAGE_ID,"quote":"complete original line"}; owner messages are not factual evidence.
+Only for non-tool status or model identity facts, use {"kind":"reply","target":1,"answer":"exact source line","evidence":[{"source":"status","quote":"exact source line"}]}.
+Chat is never evidence; when status has no answer, use a tool result or hand off.
 For model identity use {"source":"identity","subject":"desk","quote":"${options.model}"} or subject "supervisor" with its known full model name.
 Each reply quote must equal a complete source line. Set answer to the quotes joined with a newline; never add claims or promises.
 Memory lines use id+n for summaries. Use zoom(id,n) to read originals before quoting summaries; zoom(id,1) reads one message.
@@ -104,7 +102,7 @@ function checkedResult(options: SubagentOptions, result: DeskReadResult): Checke
   if (!result.ok) return { kind: "handoff", reason: "failed", tools };
   const source = sourceReply(result.drafted, tools);
   if (source === undefined) return { kind: "handoff", reason: "unverified", tools };
-  const answer = basicAnswer(result.ok, source.drafted, options.status, options.messages,
+  const answer = basicAnswer(result.ok, source.drafted, options.status,
     { desk: options.model, supervisor: options.supervisorModel }, tools);
   if (!answer || "react" in answer) return { kind: "handoff", reason: "unverified", tools };
   if ("handled" in answer) return options.writePath

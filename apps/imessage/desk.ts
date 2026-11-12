@@ -55,8 +55,7 @@ An optional "text" may be only: "thanks", "thank you", "you're welcome", "anytim
 That text may end with one period or exclamation mark. Omit it when the reaction is enough.
 For a direct answer return {"kind":"reply","target":1,"answer":"exact quoted fact","evidence":[
 {"source":"status","quote":"exact quoted fact"}]}.
-For chat evidence use {"source":"chat","id":MESSAGE_ID,"quote":"exact quoted fact"}.
-Chat is history: it may be out of date, so never quote it for what work is doing now, even from a recent message. Use status or a tool result, or hand off.
+Chat is never evidence for a reply, even a recent message: it may be out of date. When status has no answer, use a tool result or hand off.
 For a server result use {"source":"tool","quote":"exact result line, without its line-number prefix"}.
 For your model identity use {"source":"identity","subject":"desk","quote":"${deskModel}"}.
 ${supervisorModel ? `For Firstmate's model identity use {"source":"identity","subject":"supervisor","quote":"${supervisorModel}"}.` : "Firstmate's model identity is unknown; hand off questions about it."}
@@ -185,15 +184,11 @@ export function authorizedWritePath(texts: string[]): string | undefined {
   return canonicalWritePath(path);
 }
 
-// A chat quote is history, not current status: past this age only status or a tool result may back a reply.
-export const CHAT_FRESH_MS = 30 * 60_000;
-const WORK_STATE = /\b(?:still|currently|right now|in (?:progress|review|flight)|sits? in|(?:pr|pull request)\s*#?\d+|(?:is|are|being)\s+(?:running|working|building|deploying|pending|queued|open|blocked|waiting|merged))\b/i;
-export type ChatMsg = { i: number; kind: string; text: string; date?: string };
 export type DeskEvidence = Record<string, { name: string; text: string }>;
 export type VoiceSource = { answer: string; identity: boolean };
 export type BasicAnswer = (VoiceSource & { target?: number }) | { react: string; text?: string; target?: number } | { handled: true };
 
-export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: readonly ChatMsg[], models: { desk: string; supervisor: string }, tools: DeskEvidence = {}): BasicAnswer | undefined {
+export function basicAnswer(ok: boolean, drafted: string, status: string, models: { desk: string; supervisor: string }, tools: DeskEvidence = {}): BasicAnswer | undefined {
   const value = verdict(ok, drafted);
   if (value.kind === "handled") return Object.values(tools).some((tool) => tool.name === "write") ? { handled: true } : undefined;
   if (value.kind === "tapback") {
@@ -203,7 +198,7 @@ export function basicAnswer(ok: boolean, drafted: string, status: string, msgs: 
   if (value.kind !== "reply" || value.answer.length > 2000 || !Array.isArray(value.evidence)) return;
   if (!value.evidence.length || value.evidence.length > 8) return;
   if (claimsWork(value.answer)) return;
-  const facts = value.evidence.map((e: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }) => quotedFact(e, status, msgs, models, tools));
+  const facts = value.evidence.map((e: { source?: unknown; subject?: unknown; quote?: unknown }) => quotedFact(e, status, models, tools));
   if (facts.includes(undefined)) return;
   return value.answer === facts.join("\n") ? { answer: value.answer, identity: value.evidence.every((e) => e.source === "identity"), target: value.target } : undefined;
 }
@@ -229,7 +224,7 @@ export function socialOnly(texts: readonly string[], previous?: { kind: string; 
 }
 
 
-function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown; id?: unknown }, status: string, msgs: readonly ChatMsg[], models: { desk: string; supervisor: string }, tools: DeskEvidence) {
+function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unknown }, status: string, models: { desk: string; supervisor: string }, tools: DeskEvidence) {
   if (typeof evidence?.quote !== "string") return;
   if (!evidence.quote.trim()) return;
   let source: string | undefined;
@@ -242,14 +237,6 @@ function quotedFact(evidence: { source?: unknown; subject?: unknown; quote?: unk
     case "tool": {
       return Object.values(tools).some(({ text }) => text.split(/\r?\n/).some((line) =>
         line === evidence.quote || line.replace(/^\s*\*?\d+[:|]/, "") === evidence.quote)) ? evidence.quote : undefined;
-    }
-    case "chat": {
-      const message = msgs.find((m) => m.i === evidence.id);
-      if (message?.kind === "owner" || message?.kind === "desk") return; // a desk reply only repeats an earlier source
-      if (message?.date && Date.now() - Date.parse(message.date) > CHAT_FRESH_MS) return;
-      if (WORK_STATE.test(evidence.quote)) return;
-      source = message?.text;
-      break;
     }
   }
   return source?.split(/\r?\n/).includes(evidence.quote) ? evidence.quote : undefined;

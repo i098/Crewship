@@ -62,7 +62,7 @@ For each message from the owner, the service does these steps:
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
-   The internal draft must equal complete evidence lines from status, supervisor records from the last 30 minutes that do not state current work or run status, or successful current tool results.
+   The internal draft must equal complete evidence lines from status or successful current tool results. Stored chat, including supervisor records, is never evidence; when status has no answer, the desk uses a tool result or hands off.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
    The service checks every quote against its source and rejects conflicting draft text, missing evidence, and work claims.
