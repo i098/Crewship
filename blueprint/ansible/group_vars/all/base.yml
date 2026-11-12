@@ -54,10 +54,11 @@ crewship_tools_root: "{{ crewship_share_dir }}/tools"
 crewship_omp_root: "{{ crewship_share_dir }}/omp/{{ crewship_omp_version }}"
 # AXI must launch the chrome-devtools MCP build the installer installed (the
 # latest release) instead of resolving `npx ...@latest` at runtime. The
-# installer re-points `current` at that release, so this text, and with it the
-# Herdr unit and the profile block, stays the same between releases. Exported
-# to the managed shell environment and to the Herdr service environment.
-crewship_chrome_devtools_mcp_path: "{{ crewship_share_dir }}/chrome-devtools-mcp/current/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+# installer links this command from the package's own `bin` field, so a release
+# that moves its entry file still resolves, and this text, with it the Herdr
+# unit and the profile block, stays the same between releases. Exported to the
+# managed shell environment and to the Herdr service environment.
+crewship_chrome_devtools_mcp_path: "{{ crewship_local_bin }}/chrome-devtools-mcp"
 # Environment shared by the interactive shell profile and the Herdr unit.
 # Consumed only when the agents profile is on, because the npm set that
 # provides the MCP entrypoint is installed by `--npm`. Nothing here may be a

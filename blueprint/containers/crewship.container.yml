@@ -33,6 +33,7 @@ crewship:
   workspace: /home/coder/Dev
   start_services: false
   enable_linger: false
+  data_dir: ""
   profiles:
     agents: true
     development: true

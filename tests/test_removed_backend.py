@@ -115,7 +115,7 @@ def test_apply_preserves_running_retired_stack_and_volume(tmp_path, capsys, monk
         document = {
             "ansible_become": False, "crewship_repo": str(ROOT), "crewship_blueprint": str(ROOT / "blueprint"),
             "crewship_group": "root", "crewship_become_target": False,
-            "crewship": {"home": str(home), "user": "root", "start_services": False,
+            "crewship": {"home": str(home), "user": "root", "start_services": False, "data_dir": "",
                          "profiles": {"fleet_guards": True}},
         }
         assert ship.provision(document, False) == 0
