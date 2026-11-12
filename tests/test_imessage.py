@@ -1094,6 +1094,84 @@ process.exit(0);
             os.kill(int(pidfile.read_text()), 0)
 
 
+REPLY = '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"one line summary"}]}}'
+CUT = REPLY.replace('"stop"', '"aborted"').replace("one line summary", "one line sum")
+
+
+def compact_run(tmp_path, omp_body, script):
+    """Run `script` in bun with a fake omp first on PATH; it prints one JSON value."""
+    omp = tmp_path / "bin" / "omp"
+    omp.parent.mkdir()
+    omp.write_text(f"#!/bin/bash\n{omp_body}\n")
+    omp.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{omp.parent}:{os.environ['PATH']}",
+        "TMPDIR": str(tmp_path),
+        "STATE_DIRECTORY": str(tmp_path / "state"),
+    }
+    code = f"""
+import {{ compactChat }} from {DESK};
+import {{ Memory }} from {MEMORY};
+{script}
+process.exit(0);
+"""
+    return json.loads(subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, timeout=30, env=env).stdout)
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_stalled_exit_keeps_a_complete_summary(tmp_path):
+    """A call that sent a complete message and then stalls is ended by the bound and still returns its summary."""
+    result = compact_run(tmp_path, f"echo '{REPLY}'; exec sleep 300", f"""
+const dir = {json.dumps(str(tmp_path / "mem"))};
+const errors = [];
+const m = new Memory(dir, (s) => compactChat(s, () => false, (p) => p, 500), (e) => e instanceof Error && errors.push(String(e)));
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json").exists(), node: m.nodes.get("0:0")?.text }}));
+""")
+    assert result["errors"] == [] and not result["retry"]
+    assert result["node"] == "one line summary"
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_stalled_call_with_a_cut_message_still_fails(tmp_path):
+    """A message that the kill cut (stopReason aborted) is not a summary: the call fails with the timeout error."""
+    result = compact_run(tmp_path, f"echo '{CUT}'; exec sleep 300", f"""
+const dir = {json.dumps(str(tmp_path / "mem"))};
+const errors = [];
+const m = new Memory(dir, (s) => compactChat(s, () => false, (p) => p, 500), (e) => errors.push(String(e)));
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json").exists(), node: m.nodes.get("0:0")?.text ?? null }}));
+""")
+    assert len(result["errors"]) == 1 and "compaction call timed out after 500 ms" in result["errors"][0]
+    assert result["retry"] and result["node"] is None
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_service_stop_cancels_a_compaction_without_a_failure(tmp_path):
+    """SIGTERM from a service stop is no error and no cooldown; the next start builds the node."""
+    result = compact_run(tmp_path, "exec sleep 300", f"""
+const dir = {json.dumps(str(tmp_path / "mem"))};
+const errors = [], procs = [];
+let stopped = false;
+const m = new Memory(dir, (s) => compactChat(s, () => stopped, (p) => (procs.push(p), p), 60_000), (e) => e instanceof Error && errors.push(String(e)));
+m.append("owner", "x".repeat(600));
+while (!procs.length) await Bun.sleep(10);
+stopped = true;
+procs[0].kill("SIGTERM");
+while (m.pending) await Bun.sleep(10);
+m.append("owner", "after the stop");
+while (m.pending) await Bun.sleep(10);
+const next = new Memory(dir, () => ({{ async say() {{ return "rebuilt"; }}, end() {{}} }}), (e) => e instanceof Error && errors.push(String(e)));
+while (next.pending) await Bun.sleep(10);
+console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json").exists(), node: next.nodes.get("0:0")?.text }}));
+""")
+    assert result["errors"] == [] and not result["retry"]
+    assert result["node"] == "rebuilt"
+
+
 @pytest.mark.parametrize("args", [("hello",), ("--reply", "1", "hi"), ("--typing",), ("--react", "👍")])
 def test_send_commands_carry_the_local_header(tmp_path, args):
     result, calls = send(tmp_path, *args)
@@ -2323,7 +2401,7 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         wait_for(lambda: text(fake / "sent").splitlines() == ["send claude-haiku-5-5"], "the first desk reply", timeout=15)
         retry_file = state / "memory/retry.json"
         wait_for(retry_file.exists, "the runner timeout and saved cooldown", timeout=75)
-        assert "compaction call failed (exit 143)" in text(err)
+        assert "compaction call timed out after 60000 ms" in text(err)
         assert json.loads(retry_file.read_text())["nextAllowed"] > time.time() * 1000
         inbound("during-cooldown", wait_note=False, text="What desk model answers?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the desk reply during cooldown", timeout=15)

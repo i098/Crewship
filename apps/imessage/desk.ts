@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
-import { CALL_OVERHEAD, CEILING, type Chat, clip, type Memory, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CALL_OVERHEAD, Cancelled, CEILING, type Chat, clip, type Memory, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { logTokens, usageTokens } from "./tokenlog.ts";
 import { STE_STYLE } from "./ste.ts";
 export { steChecked } from "./ste.ts";
@@ -645,25 +645,27 @@ export async function readDesk(proc: DeskProc, serverTools = false): Promise<Des
 }
 
 // The reply text and token use of a compaction call. Output that is not an omp json event stream is the text itself.
-export function compactReply(output: string): { text: string; input?: number; output?: number; model: string } {
+export function compactReply(output: string): { text: string; ended: boolean; input?: number; output?: number; model: string } {
   let text: string | undefined;
   let model = "gpt-6-luna";
   let spent: { input: number; output: number } | undefined;
   let streamed = false;
+  let ended = false;
   for (const row of output.split("\n")) {
     let event;
     try { event = JSON.parse(row); } catch { continue; }
     streamed ||= /^(agent|turn|message|tool)_/.test(event?.type);
     if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
+    ended = event.message.stopReason === "stop"; // a message cut by the kill has stopReason aborted or error
     text = (event.message.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
     const used = usageTokens(event.message.usage);
     if (used) spent = { input: (spent?.input ?? 0) + used.input, output: (spent?.output ?? 0) + used.output };
     if (typeof event.message.model === "string") model = event.message.model;
   }
-  return { text: text ?? (streamed ? "" : output), model, ...spent };
+  return { text: text ?? (streamed ? "" : output), ended, model, ...spent };
 }
 
-export const COMPACT_TIMEOUT_MS = 60_000;
+export const COMPACT_TIMEOUT_MS = 60_000; // longest time of one call, from spawn
 export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per call
 
 // One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
@@ -671,24 +673,26 @@ export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per cal
 // `stopping` says the service is shutting down; `track` registers each child so a stop can kill it.
 // Each call runs in its own process group: a timeout, an output overflow or an exit kills the whole group, so a
 // grandchild that ignores SIGTERM or holds the pipe open cannot outlive the call and pile up memory.
+// A call that exits non-zero after the bridge ended it, but already sent a complete assistant message, keeps that text.
 export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS): Chat {
-  if (stopping()) throw new Error("bridge stopping");
+  if (stopping()) throw new Cancelled();
   const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
   // --no-extensions does not disable omp's native memory backend or its teardown work.
   writeFileSync(`${dir}/config.yml`, "memory:\n  backend: off\n", { mode: 0o600 });
   let turns = 0;
   return {
     async say(text) {
-      if (stopping()) throw new Error("bridge stopping");
+      if (stopping()) throw new Cancelled();
       const proc = track(Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
           "--mode=json", "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
         { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", detached: true },
       ));
       const killGroup = (signal: "SIGTERM" | "SIGKILL" = "SIGKILL") => { try { process.kill(-proc.pid, signal); } catch { /* group already gone */ } };
-      // SIGTERM first (exit 143), SIGKILL for whatever ignores it.
-      let hard: NodeJS.Timeout | undefined;
-      const timer = setTimeout(() => { killGroup("SIGTERM"); hard = setTimeout(killGroup, 2000); hard.unref(); }, timeoutMs);
+      // SIGTERM first (exit 143), SIGKILL for whatever ignores it. `why` is the first reason the bridge ended the call.
+      let hard: NodeJS.Timeout | undefined, why: string | undefined;
+      const end = (reason: string) => { why ??= reason; killGroup("SIGTERM"); hard ??= setTimeout(killGroup, 2000); hard.unref(); };
+      const timer = setTimeout(end, timeoutMs, `after ${timeoutMs} ms`);
       try {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -701,7 +705,11 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
         const reply = compactReply(Buffer.concat(chunks).toString());
         if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
         const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
-        if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
+        if (exit !== 0 && why && reply.ended && line) return line;
+        if (exit !== 0 || !line) {
+          if (stopping()) throw new Cancelled(); // the service stop ended the call: nothing failed
+          throw new Error(why ? `compaction call timed out ${why}, ${size} bytes received (exit ${exit})` : `compaction call failed (exit ${exit})`);
+        }
         return line;
       } finally {
         clearTimeout(timer);
