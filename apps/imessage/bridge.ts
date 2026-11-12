@@ -250,6 +250,13 @@ function quotedMate(c: LineMessage["content"]) {
   const quoted = quotedTarget(c);
   return quoted && mateOfSender(senderOfQuoted(quoted.text, quoted.id));
 }
+// Who sent a thread-reply target: the owner (a text this bridge heard) or us (a bubble this bridge sent).
+function whoSent(id: string, text: string) {
+  if (said.has(id)) return "the owner";
+  const sender = senderOfQuoted(text, id);
+  const ours = sentBubbles.some((b) => b.id === id || b.key === quoteKey(text));
+  return ours ? `us${sender ? ` (sender ${sender})` : ""}` : undefined;
+}
 let routingRetry: NodeJS.Timeout | undefined;
 const ackBurst = createBurst(); // one honest line per burst of texts
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
@@ -1604,7 +1611,7 @@ async function noteText(message: LineMessage) {
   }), (path) => transcribe(path, listen).catch((e) => {
     log("transcribe")(e);
     throw e;
-  }));
+  }), whoSent);
   return { text, failed };
 }
 
