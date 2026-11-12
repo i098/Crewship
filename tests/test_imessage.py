@@ -2154,12 +2154,15 @@ def bridge_probe():
     try:
         _, _, _, _, start, _, _, _ = fake_bridge(tmp, probe=True)
         bridge = start(1, timeout=10)
+        bridge.terminate()
+        bridge.wait(10)  # the reported fault: a bridge that listens but ignores SIGTERM
+        bridge = None
         return None
     except BaseException as error:  # a probe failure of any kind is the environment fault
         return f"{type(error).__name__}: {str(error).splitlines()[0]}"
     finally:
         if bridge:
-            bridge.terminate()
+            bridge.kill()
         shutil.rmtree(tmp, ignore_errors=True)
 
 
