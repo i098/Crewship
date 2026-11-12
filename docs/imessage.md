@@ -540,8 +540,9 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   The runner uses a private temporary cwd and explicitly sets `memory.backend: off` in an omp configuration overlay.
   The existing flags skip extensions, tools, skills, and rules; sessions preserve shortening turns.
   Inherited native memory work can delay exit after the model produces a valid summary.
-  Each call runs in its own process group. After 60 seconds without any output the bridge sends SIGTERM to the group, and SIGKILL 2 seconds later. A call that keeps producing output is ended the same way after 5 minutes in total. The error names the bound that ended the call and the bytes received. `omp` can send no output for about 30 seconds at start while it waits for an MCP server, so the bound is on silence and not on total time. The group also gets SIGKILL when the call ends and when the output passes 1 MB, so no child outlives the call.
-  A stalled exit still fails the call; a partial response is not accepted.
+  Each call runs in its own process group. After 60 seconds from spawn the bridge sends SIGTERM to the group, and SIGKILL 2 seconds later. The error names the bound and the bytes received, for example `compaction call timed out after 60000 ms, N bytes received (exit 143)`. The group also gets SIGKILL when the call ends and when the output passes 1 MB, so no child outlives the call.
+  The model that answers can be a fallback: omp skips the requested model when quota blocks it. `tokens.jsonl` records the model that answered.
+  A stalled exit keeps the reply when the bridge ended the call and the output holds a complete assistant message with text. It logs no error. A non-zero exit with no bridge end, or with no text, still fails the call.
   Each saved model summary logs `compacted summary`, its range, and its byte count.
 - **Compaction failures.** A failed node leaves the source messages, existing summaries, and view intact.
   A call that a service stop ends is a cancel, not a failure: it logs no error, adds nothing to the cooldown, and the next start rebuilds the node from the log.

@@ -645,26 +645,27 @@ export async function readDesk(proc: DeskProc, serverTools = false): Promise<Des
 }
 
 // The reply text and token use of a compaction call. Output that is not an omp json event stream is the text itself.
-export function compactReply(output: string): { text: string; input?: number; output?: number; model: string } {
+export function compactReply(output: string): { text: string; ended: boolean; input?: number; output?: number; model: string } {
   let text: string | undefined;
   let model = "gpt-6-luna";
   let spent: { input: number; output: number } | undefined;
   let streamed = false;
+  let ended = false;
   for (const row of output.split("\n")) {
     let event;
     try { event = JSON.parse(row); } catch { continue; }
     streamed ||= /^(agent|turn|message|tool)_/.test(event?.type);
     if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
+    ended = true;
     text = (event.message.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
     const used = usageTokens(event.message.usage);
     if (used) spent = { input: (spent?.input ?? 0) + used.input, output: (spent?.output ?? 0) + used.output };
     if (typeof event.message.model === "string") model = event.message.model;
   }
-  return { text: text ?? (streamed ? "" : output), model, ...spent };
+  return { text: text ?? (streamed ? "" : output), ended, model, ...spent };
 }
 
-export const COMPACT_TIMEOUT_MS = 60_000; // a call that sends no output for this long is hung
-export const COMPACT_CAP_MS = 300_000; // longest total time of one call, however much output it sends
+export const COMPACT_TIMEOUT_MS = 60_000; // longest time of one call, from spawn
 export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per call
 
 // One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
@@ -672,9 +673,8 @@ export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per cal
 // `stopping` says the service is shutting down; `track` registers each child so a stop can kill it.
 // Each call runs in its own process group: a timeout, an output overflow or an exit kills the whole group, so a
 // grandchild that ignores SIGTERM or holds the pipe open cannot outlive the call and pile up memory.
-// The timeout bounds silence, not total time: omp can be silent for 30 s at start while it waits for an MCP server,
-// so a fixed total bound turned a slow call that was still streaming into a kill. `capMs` still ends a runaway call.
-export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS, capMs = COMPACT_CAP_MS): Chat {
+// A call that exits non-zero after the bridge ended it, but already sent a complete assistant message, keeps that text.
+export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS): Chat {
   if (stopping()) throw new Cancelled();
   const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
   // --no-extensions does not disable omp's native memory backend or its teardown work.
@@ -690,11 +690,9 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
       ));
       const killGroup = (signal: "SIGTERM" | "SIGKILL" = "SIGKILL") => { try { process.kill(-proc.pid, signal); } catch { /* group already gone */ } };
       // SIGTERM first (exit 143), SIGKILL for whatever ignores it. `why` is the first reason the bridge ended the call.
-      let hard: NodeJS.Timeout | undefined, idle: NodeJS.Timeout | undefined, why: string | undefined;
+      let hard: NodeJS.Timeout | undefined, why: string | undefined;
       const end = (reason: string) => { why ??= reason; killGroup("SIGTERM"); hard ??= setTimeout(killGroup, 2000); hard.unref(); };
-      const arm = () => { clearTimeout(idle); idle = setTimeout(end, timeoutMs, `no output for ${timeoutMs} ms`); };
-      const cap = setTimeout(end, capMs, `still running after ${capMs} ms`);
-      arm();
+      const timer = setTimeout(end, timeoutMs, `after ${timeoutMs} ms`);
       try {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -702,20 +700,19 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
           size += chunk.length;
           if (size > COMPACT_OUTPUT_MAX) { killGroup(); throw new Error("compaction output too large"); }
           chunks.push(Buffer.from(chunk));
-          arm();
         }
         const exit = await proc.exited;
         const reply = compactReply(Buffer.concat(chunks).toString());
         if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
         const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
+        if (exit !== 0 && why && reply.ended && line) return line;
         if (exit !== 0 || !line) {
           if (stopping()) throw new Cancelled(); // the service stop ended the call: nothing failed
-          throw new Error(why ? `compaction call timed out: ${why}, ${size} bytes received (exit ${exit})` : `compaction call failed (exit ${exit})`);
+          throw new Error(why ? `compaction call timed out ${why}, ${size} bytes received (exit ${exit})` : `compaction call failed (exit ${exit})`);
         }
         return line;
       } finally {
-        clearTimeout(idle);
-        clearTimeout(cap);
+        clearTimeout(timer);
         clearTimeout(hard);
         killGroup();
       }

@@ -330,7 +330,7 @@ export class Memory {
           }
         })
         .catch((e) => {
-          if (e instanceof Cancelled) return; // not requeued: a stopping service would only cancel it again
+          if (e instanceof Cancelled) { this.queued.delete(key(x)); return; } // not requeued: a stopping service would only cancel it again
           this.retry.failures++;
           this.retry.nextAllowed = Date.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(this.retry.failures - 1, 4));
           this.log(e);

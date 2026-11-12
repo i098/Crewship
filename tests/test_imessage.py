@@ -1119,25 +1119,18 @@ process.exit(0);
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
-def test_compaction_call_that_keeps_streaming_outlives_the_silence_bound(tmp_path):
-    """A call slower than the silence bound but never silent for that long returns its reply; a runaway call still ends."""
-    body = f'for i in 1 2 3 4 5 6 7 8; do echo \'{{"type":"turn_start"}}\'; sleep 0.2; done; echo \'{REPLY}\''
-    result = compact_run(tmp_path, body, """
-const t0 = Date.now();
-const reply = await compactChat("s", () => false, (p) => p, 500, 10_000).say("x");
-console.log(JSON.stringify({ reply, ms: Date.now() - t0 }));
+def test_stalled_exit_keeps_a_complete_summary(tmp_path):
+    """A call that sent a complete message and then stalls is ended by the bound and still returns its summary."""
+    result = compact_run(tmp_path, f"echo '{REPLY}'; exec sleep 300", f"""
+const dir = {json.dumps(str(tmp_path / "mem"))};
+const errors = [];
+const m = new Memory(dir, (s) => compactChat(s, () => false, (p) => p, 500), (e) => e instanceof Error && errors.push(String(e)));
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json").exists(), node: m.nodes.get("0:0")?.text }}));
 """)
-    assert result["reply"] == "one line summary" and result["ms"] > 1000
-
-    runaway = tmp_path / "runaway"
-    runaway.mkdir()
-    result = compact_run(runaway, 'while true; do echo \'{"type":"turn_start"}\'; sleep 0.1; done', """
-const t0 = Date.now();
-const error = await compactChat("s", () => false, (p) => p, 500, 1_000).say("x").catch(String);
-console.log(JSON.stringify({ error, ms: Date.now() - t0 }));
-""")
-    assert "still running after 1000 ms" in result["error"] and "bytes received" in result["error"]
-    assert result["ms"] < 5000
+    assert result["errors"] == [] and not result["retry"]
+    assert result["node"] == "one line summary"
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
@@ -2392,7 +2385,7 @@ def test_bridge_sends_desk_replies_during_compaction_timeout_and_cooldown(tmp_pa
         wait_for(lambda: text(fake / "sent").splitlines() == ["send claude-haiku-5-5"], "the first desk reply", timeout=15)
         retry_file = state / "memory/retry.json"
         wait_for(retry_file.exists, "the runner timeout and saved cooldown", timeout=75)
-        assert "compaction call timed out: no output for 60000 ms" in text(err)
+        assert "compaction call timed out after 60000 ms" in text(err)
         assert json.loads(retry_file.read_text())["nextAllowed"] > time.time() * 1000
         inbound("during-cooldown", wait_note=False, text="What desk model answers?")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 2, "the desk reply during cooldown", timeout=15)
