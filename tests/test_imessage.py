@@ -1094,7 +1094,8 @@ process.exit(0);
             os.kill(int(pidfile.read_text()), 0)
 
 
-REPLY = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"one line summary"}]}}'
+REPLY = '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"one line summary"}]}}'
+CUT = REPLY.replace('"stop"', '"aborted"').replace("one line summary", "one line sum")
 
 
 def compact_run(tmp_path, omp_body, script):
@@ -1131,6 +1132,21 @@ console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json")
 """)
     assert result["errors"] == [] and not result["retry"]
     assert result["node"] == "one line summary"
+
+
+@pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
+def test_stalled_call_with_a_cut_message_still_fails(tmp_path):
+    """A message that the kill cut (stopReason aborted) is not a summary: the call fails with the timeout error."""
+    result = compact_run(tmp_path, f"echo '{CUT}'; exec sleep 300", f"""
+const dir = {json.dumps(str(tmp_path / "mem"))};
+const errors = [];
+const m = new Memory(dir, (s) => compactChat(s, () => false, (p) => p, 500), (e) => errors.push(String(e)));
+m.append("owner", "x".repeat(600));
+while (m.pending) await Bun.sleep(10);
+console.log(JSON.stringify({{ errors, retry: await Bun.file(dir + "/retry.json").exists(), node: m.nodes.get("0:0")?.text ?? null }}));
+""")
+    assert len(result["errors"]) == 1 and "compaction call timed out after 500 ms" in result["errors"][0]
+    assert result["retry"] and result["node"] is None
 
 
 @pytest.mark.skipif(not shutil.which("bun"), reason="needs bun")
