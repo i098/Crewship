@@ -656,7 +656,7 @@ export function compactReply(output: string): { text: string; ended: boolean; in
     try { event = JSON.parse(row); } catch { continue; }
     streamed ||= /^(agent|turn|message|tool)_/.test(event?.type);
     if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
-    ended = event.message.stopReason === "stop";
+    ended = true;
     text = (event.message.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
     const used = usageTokens(event.message.usage);
     if (used) spent = { input: (spent?.input ?? 0) + used.input, output: (spent?.output ?? 0) + used.output };
