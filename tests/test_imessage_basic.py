@@ -781,12 +781,13 @@ mock.module("node:fs", () => ({
 def test_undelivered_desk_response_stops_typing(tmp_path, desk_clock, response, ending):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
-    (fake / "outage").touch()
     if response == "reaction":
         (fake / "answer").write_text('{"kind":"tapback","emoji":"❤️"}')
     bridge = start(1)
     try:
         receive("question", "thanks!" if response == "reaction" else "What is the build status?")
+        wait_for(lambda: list((state / "reads-done").glob("*.json")), "the read receipt")  # its lookup fails under the outage
+        (fake / "outage").touch()
         desk_clock()
         wait_for(lambda: "failed (try" in text(err), "the undelivered desk response")
         desk_clock(4000)
@@ -1083,10 +1084,14 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
     failure_flag = fake / f"lookup-{failure}"
-    (fake / "react-unsure" if prior_uncertain else failure_flag).touch()
+    if prior_uncertain:
+        (fake / "react-unsure").touch()
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        wait_for(lambda: list((state / "reads-done").glob("*.json")), "the read receipt")  # its lookup shares the fake's lookup flags
+        if not prior_uncertain:
+            failure_flag.touch()
         desk_clock()
         if prior_uncertain:
             wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
@@ -1124,10 +1129,14 @@ def test_photon_reaction_lookup_failure_preserves_only_prior_uncertainty(tmp_pat
 def test_photon_reaction_crash_during_lookup_preserves_only_prior_uncertainty(tmp_path, desk_clock, prior_uncertain):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
-    (fake / ("react-unsure" if prior_uncertain else "lookup-stop")).touch()
+    if prior_uncertain:
+        (fake / "react-unsure").touch()
     bridge = start(1)
     try:
         receive("lost", "thanks!")
+        wait_for(lambda: list((state / "reads-done").glob("*.json")), "the read receipt")  # its lookup shares the fake's lookup flags
+        if not prior_uncertain:
+            (fake / "lookup-stop").touch()
         desk_clock()
         if prior_uncertain:
             wait_for(lambda: "reaction timed out" in text(err), "the uncertain reaction")
@@ -1206,10 +1215,11 @@ def test_bluebubbles_reaction_crash_during_health_check_preserves_only_prior_unc
 def test_photon_reaction_retries_after_lookup_recovers_on_restart(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"tapback","emoji":"👍"}')
-    (fake / "lookup-timeout").touch()
     bridge = start(1)
     try:
         receive("thanks", "thanks!")
+        wait_for(lambda: list((state / "reads-done").glob("*.json")), "the read receipt")  # its lookup shares the fake's lookup flags
+        (fake / "lookup-timeout").touch()
         desk_clock()
         wait_for(lambda: "lookup timed out" in text(err), "the failed lookup")
         bridge.terminate()
