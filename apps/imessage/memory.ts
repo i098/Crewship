@@ -40,6 +40,10 @@ export type Node = { l: number; i: number; text: string; size: number };
 export type Line = [l: number, i: number];
 // One model conversation: each say() sends the next user turn and returns the reply.
 export type Chat = { say(text: string): Promise<string>; end(): void };
+// A call that the service stop ended. Nothing failed: the unfinished nodes rebuild from the log at the next start.
+export class Cancelled extends Error {
+  constructor() { super("bridge stopping"); }
+}
 
 const bytes = (s: string) => Buffer.byteLength(s);
 const key = ([l, i]: Line) => `${l}:${i}`;
@@ -326,6 +330,7 @@ export class Memory {
           }
         })
         .catch((e) => {
+          if (e instanceof Cancelled) return; // not requeued: a stopping service would only cancel it again
           this.retry.failures++;
           this.retry.nextAllowed = Date.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.min(this.retry.failures - 1, 4));
           this.log(e);

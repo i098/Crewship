@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Message } from "spectrum-ts";
-import { CALL_OVERHEAD, CEILING, type Chat, clip, type Memory, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
+import { CALL_OVERHEAD, Cancelled, CEILING, type Chat, clip, type Memory, OVERHEAD, STATUS_MAX, UNBUILT, VIEW_MAX, ZOOM_RESERVE } from "./memory.ts";
 import { logTokens, usageTokens } from "./tokenlog.ts";
 import { STE_STYLE } from "./ste.ts";
 export { steChecked } from "./ste.ts";
@@ -663,7 +663,8 @@ export function compactReply(output: string): { text: string; input?: number; ou
   return { text: text ?? (streamed ? "" : output), model, ...spent };
 }
 
-export const COMPACT_TIMEOUT_MS = 60_000;
+export const COMPACT_TIMEOUT_MS = 60_000; // a call that sends no output for this long is hung
+export const COMPACT_CAP_MS = 300_000; // longest total time of one call, however much output it sends
 export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per call
 
 // One compaction conversation (the memory's `chat`): a private temporary cwd and session, which end() removes.
@@ -671,24 +672,29 @@ export const COMPACT_OUTPUT_MAX = 1_000_000; // bytes of omp output kept per cal
 // `stopping` says the service is shutting down; `track` registers each child so a stop can kill it.
 // Each call runs in its own process group: a timeout, an output overflow or an exit kills the whole group, so a
 // grandchild that ignores SIGTERM or holds the pipe open cannot outlive the call and pile up memory.
-export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS): Chat {
-  if (stopping()) throw new Error("bridge stopping");
+// The timeout bounds silence, not total time: omp can be silent for 30 s at start while it waits for an MCP server,
+// so a fixed total bound turned a slow call that was still streaming into a kill. `capMs` still ends a runaway call.
+export function compactChat(system: string, stopping: () => boolean, track: <T extends Bun.Subprocess>(proc: T) => T, timeoutMs = COMPACT_TIMEOUT_MS, capMs = COMPACT_CAP_MS): Chat {
+  if (stopping()) throw new Cancelled();
   const dir = mkdtempSync(`${tmpdir()}/fm-imessage-compact-`);
   // --no-extensions does not disable omp's native memory backend or its teardown work.
   writeFileSync(`${dir}/config.yml`, "memory:\n  backend: off\n", { mode: 0o600 });
   let turns = 0;
   return {
     async say(text) {
-      if (stopping()) throw new Error("bridge stopping");
+      if (stopping()) throw new Cancelled();
       const proc = track(Bun.spawn(
         ["omp", "-p", "--no-extensions", "--no-tools", "--no-skills", "--no-rules", "--config", `${dir}/config.yml`, "--session-dir", dir, ...(turns++ ? ["--continue"] : []),
           "--mode=json", "--thinking=off", "--service-tier=priority", "--model", "openai-codex/gpt-6-luna", "--system-prompt", system],
         { cwd: dir, stdin: new Blob([text]), stdout: "pipe", stderr: "ignore", detached: true },
       ));
       const killGroup = (signal: "SIGTERM" | "SIGKILL" = "SIGKILL") => { try { process.kill(-proc.pid, signal); } catch { /* group already gone */ } };
-      // SIGTERM first (exit 143), SIGKILL for whatever ignores it.
-      let hard: NodeJS.Timeout | undefined;
-      const timer = setTimeout(() => { killGroup("SIGTERM"); hard = setTimeout(killGroup, 2000); hard.unref(); }, timeoutMs);
+      // SIGTERM first (exit 143), SIGKILL for whatever ignores it. `why` is the first reason the bridge ended the call.
+      let hard: NodeJS.Timeout | undefined, idle: NodeJS.Timeout | undefined, why: string | undefined;
+      const end = (reason: string) => { why ??= reason; killGroup("SIGTERM"); hard ??= setTimeout(killGroup, 2000); hard.unref(); };
+      const arm = () => { clearTimeout(idle); idle = setTimeout(end, timeoutMs, `no output for ${timeoutMs} ms`); };
+      const cap = setTimeout(end, capMs, `still running after ${capMs} ms`);
+      arm();
       try {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -696,15 +702,20 @@ export function compactChat(system: string, stopping: () => boolean, track: <T e
           size += chunk.length;
           if (size > COMPACT_OUTPUT_MAX) { killGroup(); throw new Error("compaction output too large"); }
           chunks.push(Buffer.from(chunk));
+          arm();
         }
         const exit = await proc.exited;
         const reply = compactReply(Buffer.concat(chunks).toString());
         if (reply.input !== undefined) logTokens({ kind: "compaction", model: reply.model, input: reply.input, output: reply.output! });
         const line = reply.text.replace(/^Working\.\.\.\s*/m, "").trim();
-        if (exit !== 0 || !line) throw new Error(`compaction call failed (exit ${exit})`);
+        if (exit !== 0 || !line) {
+          if (stopping()) throw new Cancelled(); // the service stop ended the call: nothing failed
+          throw new Error(why ? `compaction call timed out: ${why}, ${size} bytes received (exit ${exit})` : `compaction call failed (exit ${exit})`);
+        }
         return line;
       } finally {
-        clearTimeout(timer);
+        clearTimeout(idle);
+        clearTimeout(cap);
         clearTimeout(hard);
         killGroup();
       }
