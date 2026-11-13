@@ -99,6 +99,10 @@ uv run ruff check .
 # Test, in parallel as CI runs it (the Koncreet apply tests need root or fakeroot; unprivileged without it they skip)
 uv run pytest -n auto --dist worksteal
 
+# Only the tests that your change affects (pytest-testmon; the validation step runs this in cf-sandbox).
+# The first run on a host has no data and runs everything. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon.
+scripts/test-affected
+
 # Ansible syntax check
 uv run ansible-playbook -i blueprint/ansible/inventory.yml blueprint/ansible/site.yml --syntax-check
 

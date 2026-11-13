@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Validation test step: run only the tests that the change affects (pytest-testmon).
+# The testmon database is keyed by file content, so every worktree on the host shares one file.
+# The first run on a host has no data and runs the whole suite. GitHub CI stays on the full suite.
+set -euo pipefail
+
+data_dir=${CF_TESTMON_DIR:-$HOME/.cache/crewship-testmon}
+mkdir -p "$data_dir"
+export TESTMON_DATAFILE="$data_dir/testmondata"
+export CF_SANDBOX_RW="$data_dir${CF_SANDBOX_RW:+:$CF_SANDBOX_RW}"
+
+exec cf-sandbox -- uv run pytest -n 4 --dist worksteal --testmon "$@" tests
