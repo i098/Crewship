@@ -323,7 +323,7 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
         wait_for(message.exists, "the relay to the mate", timeout=120)
         assert read_text(message) == (
             "engram [from captain via desk] nice, thanks\n"
-            + f"(this message is a thread reply to the earlier message, whose untrusted quoted text is: {json.dumps('The engram checks are green.')})\n"
+            + f"(this message is a thread reply to an earlier message from a sender the bridge did not record, whose untrusted quoted text is: {json.dumps('The engram checks are green.')})\n"
             + "[desk request bluebubbles-m3]"
         )
         assert len(texts(rig)) == 2  # no model reply to the owner
@@ -361,7 +361,7 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
             wait_for(message.exists, f"the relay to {mate}", timeout=120)
             assert read_text(message) == (
                 f"{mate} [from captain via desk] thanks {mate}\n"
-                + "(this message is a thread reply to the earlier message, whose untrusted quoted text is: \"Done.\")\n"
+                + f"(this message is a thread reply to an earlier message from us (sender {tmp_path}/{mate}), whose untrusted quoted text is: \"Done.\")\n"
                 + f"[desk request bluebubbles-m{n}]"
             )
         message.unlink()

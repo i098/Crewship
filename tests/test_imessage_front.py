@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from test_imessage import bun_env
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = [{"id": "inception/mercury-3", "reasoning": ["low", "high"]}]
@@ -78,7 +79,7 @@ try {{
 finally {{ server?.stop(true); }}
 """)
     completed = subprocess.run(
-        ["bun", str(script)], cwd=tmp_path, capture_output=True, text=True, check=True,
+        ["bun", str(script)], cwd=tmp_path, capture_output=True, text=True, check=True, env=bun_env(),
     )
     return json.loads(completed.stdout)
 
