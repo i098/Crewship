@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Validation test step: run only the tests that the change affects (pytest-testmon).
+# The testmon database is keyed by file content, so every worktree on the host shares one file.
+# The first run on a host has no data and runs the whole suite. GitHub CI stays on the full suite.
+# testmon sees only Python that runs in the pytest process. Any changed non-.py file (playbook, shell, .ts, ...)
+# or an unknown merge base runs the full suite; testmon still records data (--testmon-noselect).
+set -euo pipefail
+
+data_dir=${CF_TESTMON_DIR:-$HOME/.cache/crewship-testmon}
+mkdir -p "$data_dir"
+export TESTMON_DATAFILE="$data_dir/testmondata"
+export CF_SANDBOX_RW="$data_dir${CF_SANDBOX_RW:+:$CF_SANDBOX_RW}"
+
+mode=--testmon-noselect
+base=
+for ref in origin/HEAD origin/main origin/master main master; do
+    if git rev-parse --verify -q "$ref^{commit}" >/dev/null; then base=$(git merge-base HEAD "$ref" 2>/dev/null) && break; base=; fi
+done
+if [ -n "$base" ] && changed=$(git diff --no-renames --name-only "$base" && git ls-files --others --exclude-standard); then
+    mode=--testmon
+    while IFS= read -r path; do
+        case $path in "" | *.py) ;; *) mode=--testmon-noselect; break ;; esac
+    done <<<"$changed"
+fi
+
+exec cf-sandbox -- uv run pytest -n 4 --dist worksteal "$mode" "$@" tests
