@@ -1253,7 +1253,7 @@ async function dispatchV2(pending: Routing[], intent: Extract<FrontIntent, { kin
     ...selection, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env,
     owner: env.FM_IMESSAGE_OWNER_NAME || "the owner", supervisorModel: SUPERVISOR_MODEL,
     requests: pending.map((r) => ({ authored: r.authored ?? r.text, context: r.text })),
-    view: memory.render(from), recent: memory.recent(from), messages: memory.msgs, status: status.status,
+    view: memory.render(from), recent: memory.recent(from), status: status.status,
     writePath, current, signal, onProcess: track,
   });
   if (!current() || !result) return;
@@ -1396,7 +1396,7 @@ async function draftBasic(pending: Routing[], current: () => boolean): Promise<D
   if (deskRun !== proc) return;
   deskRun = undefined;
   if (stopping || !current()) return;
-  const answer = basicAnswer(ok, drafted, status, memory.msgs, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
+  const answer = basicAnswer(ok, drafted, status, { desk: DESK_MODEL, supervisor: SUPERVISOR_MODEL }, tools);
   if (!answer) {
     trace(pending.at(-1)!.ref.id, "model-handoff");
     return;

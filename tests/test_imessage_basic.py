@@ -8,7 +8,6 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -24,8 +23,6 @@ from test_imessage import (
     read_text,
     wait_for,
 )
-
-TODAY = date.today().isoformat()  # stored chat records must stay inside the memory window
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
@@ -1476,7 +1473,7 @@ def test_failed_unsupported_or_ungrounded_answer_hands_off_without_a_desk_reply(
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["status"])
 @pytest.mark.parametrize("question,fact", [
     ("What is Firstmate?", "Firstmate is the coding-agent supervisor."),
     ("What is your role?", "I am the iMessage front desk."),
@@ -1498,12 +1495,6 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_c
     if source_kind == "status":
         (fake / "status").write_text(fact)
         evidence = {"source": "status", "quote": fact}
-    else:
-        main = state / "memory/main"
-        main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": fact, "size": len(fact.encode()), "date": TODAY + "T00:00:00.000Z"}
-        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
-        evidence = {"source": "chat", "id": 0, "quote": fact}
     (fake / "answer").write_text(json.dumps({
         "kind": "reply", "answer": fact, "evidence": [evidence],
     }))
@@ -1527,7 +1518,7 @@ def test_grounded_personal_descriptions_receive_a_direct_answer(tmp_path, desk_c
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["status"])
 @pytest.mark.parametrize("claim", [
     "I fixed the bridge.",
     "I've deployed it.",
@@ -1556,12 +1547,6 @@ def test_grounded_action_claims_handoff_once_without_a_desk_send(tmp_path, desk_
     if source_kind == "status":
         (fake / "status").write_text(claim)
         evidence = {"source": "status", "quote": claim}
-    else:
-        main = state / "memory/main"
-        main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": claim, "size": len(claim.encode()), "date": TODAY + "T00:00:00.000Z"}
-        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
-        evidence = {"source": "chat", "id": 0, "quote": claim}
     (fake / "answer").write_text(json.dumps({
         "kind": "reply", "answer": claim, "evidence": [evidence],
     }))
@@ -1761,7 +1746,7 @@ def test_native_server_tools_answer_current_board_without_main_noise(tmp_path, n
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["tool", "status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["tool", "status"])
 @pytest.mark.parametrize("question,rewrite,expected", [
     ("Quote the source text.", " logging: on\n memory: off", " logging: on\n memory: off"),
     ("Quote the source text.", "logging: on\n memory: off", None),
@@ -1781,12 +1766,6 @@ def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_des
     elif source_kind == "status":
         (fake / "status").write_text(draft)
         evidence = [{"source": "status", "quote": line} for line in draft.splitlines()]
-    else:
-        main = state / "memory/main"
-        main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": draft, "size": len(draft.encode()), "date": TODAY + "T00:00:00.000Z"}
-        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
-        evidence = [{"source": "chat", "id": 0, "quote": line} for line in draft.splitlines()]
     replies.append(lambda body: {"content": json.dumps({"kind": "reply", "answer": draft, "evidence": evidence})})
     (fake / "voice-answer").write_text(rewrite)
     bridge = start(1)
@@ -1796,8 +1775,7 @@ def test_native_exact_quotes_preserve_characters_or_handoff(tmp_path, native_des
         wait_for(lambda: not list((state / "outbox").glob("*.json")), "the complete quotation delivery")
         assert text(fake / "sent") == ("" if expected is None else "".join(f"send {part}\n" for part in expected.split("\n\n")))
         assert text(notes).count("photon-quote ") == (1 if expected is None else 0)
-        prior = [draft] if source_kind == "desk" else []
-        assert [row["text"] for row in records() if row["kind"] == "desk"] == prior + ([] if expected is None else [expected])
+        assert [row["text"] for row in records() if row["kind"] == "desk"] == ([] if expected is None else [expected])
         voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
         assert voices == [{"draft": draft, "question": question}]
     finally:
@@ -1949,7 +1927,7 @@ def test_native_lookup_answers_use_evidence_without_copying_its_format(tmp_path,
         bridge.wait(10)
 
 
-@pytest.mark.parametrize("source_kind", ["status", "supervisor", "desk"])
+@pytest.mark.parametrize("source_kind", ["status"])
 @pytest.mark.parametrize("lines,rewrite,accepted,question", [
     (
         ["herdr", "off"],
@@ -1992,12 +1970,6 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
     if source_kind == "status":
         (fake / "status").write_text(source_text)
         evidence = [{"source": "status", "quote": line} for line in lines]
-    else:
-        main = state / "memory/main"
-        main.mkdir(parents=True)
-        record = {"i": 0, "kind": source_kind, "text": source_text, "size": len(source_text.encode()), "date": TODAY + "T00:00:00.000Z"}
-        (main / f"{TODAY}.jsonl").write_text(json.dumps(record) + "\n")
-        evidence = [{"source": "chat", "id": 0, "quote": line} for line in lines]
     (fake / "voice-answer").write_text(rewrite)
     count = 2 if accepted else 1
     replies.extend([
@@ -2016,7 +1988,7 @@ def test_native_stored_and_status_excerpts_use_plain_voice_or_handoff(tmp_path, 
                 wait_for(lambda: "photon-lookup-0 " in text(notes), "the rejected excerpt handoff", timeout=45)
         assert text(fake / "sent") == (f"send {rewrite}\n" * count if accepted else "")
         assert text(notes).count("photon-lookup-0 ") == (0 if accepted else 1)
-        expected = ([source_text] if source_kind == "desk" else []) + ([rewrite] * count if accepted else [])
+        expected = [rewrite] * count if accepted else []
         assert [row["text"] for row in records() if row["kind"] == "desk"] == expected
         assert not any(message["role"] == "tool" for body in requests for message in body["messages"])
         voices = [json.loads(body["messages"][-1]["content"]) for body in requests if not body.get("stream")]
@@ -3034,7 +3006,7 @@ def test_supervisor_activity_cancels_a_draft_without_losing_the_pending_request(
 
 
 @pytest.mark.parametrize("source_kind", ["owner", "supervisor"])
-def test_only_trusted_chat_records_can_ground_a_basic_answer(tmp_path, source_kind):
+def test_stored_chat_records_never_ground_a_basic_answer(tmp_path, source_kind):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "answer").write_text('{"kind":"handoff"}')
     bridge = start(1)
@@ -3050,12 +3022,8 @@ def test_only_trusted_chat_records_can_ground_a_basic_answer(tmp_path, source_ki
             "evidence": [{"source": "chat", "id": source["i"], "quote": "The queue is empty."}],
         }))
         receive("question", "What is in the queue?")
-        if source_kind == "supervisor":
-            wait_for(lambda: text(fake / "sent").splitlines().count("send The queue is empty.") == 2, "the grounded answer")
-            assert "photon-question " not in text(notes)
-        else:
-            wait_for(lambda: "photon-question " in text(notes), "the untrusted-source handoff")
-            assert text(fake / "sent") == ""
+        wait_for(lambda: "photon-question " in text(notes), "the chat-evidence handoff")
+        assert text(fake / "sent").splitlines() == (["send The queue is empty."] if source_kind == "supervisor" else [])
     finally:
         bridge.terminate()
         bridge.wait(10)

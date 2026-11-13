@@ -62,7 +62,7 @@ For each message from the owner, the service does these steps:
    A burst across different chats shows no typing because the model has not yet selected its response target.
    Informational noun phrases, including approval counts, reach this classifier after receipt or recovery.
 6. When not [muted](#mute), a clear basic question can receive one direct answer without a Firstmate note or wake.
-   The internal draft must equal complete evidence lines from status, prior supervisor or desk records, or successful current tool results.
+   The internal draft must equal complete evidence lines from status or successful current tool results. Stored chat, including supervisor records, is never evidence; when status has no answer, the desk uses a tool result or hands off.
    Model-identity evidence names the desk or supervisor and must match that subject's full configured model name.
    An unknown supervisor identity requires a handoff.
    The service checks every quote against its source and rejects conflicting draft text, missing evidence, and work claims.
@@ -99,7 +99,7 @@ For each message from the owner, the service does these steps:
    Polarity words must keep the same counts and immediately adjacent punctuation.
    These words are `no`, `not`, `never`, `none`, `nothing`, `n't` forms, `yes`, `failed`, `passed`, `broken`, `fixed`, `done`, `blocked`, `can't`, and `won't`.
    Configuration flags `on`, `off`, `true`, `false`, `enabled`, and `disabled` retain their counts without binding sentence punctuation.
-   Every rejected rewrite hands off instead of sending raw source output, including stored chat and status excerpts.
+   Every rejected rewrite hands off instead of sending raw source output, including status excerpts.
    Blank lines separate bubbles; explicitly requested raw values can retain their line breaks.
    Reactions do not use the voice pass.
    The desk answers a burst once and selects the message that needs the answer, including an earlier question.
@@ -518,7 +518,7 @@ The desk remembers the whole conversation, after the design in [UniiChat: one ch
   The prompt budget can drop more messages, including for JSON escaping with Inception.
   Pending messages stay in their separate latest-burst block.
   Recent originals work before summaries finish; zoom still opens full messages.
-  Owner text supplies context, not evidence for a direct answer.
+  Stored chat supplies context, not evidence for a direct answer.
 - **Zoom.** When a line is too vague, the desk calls `zoom(id, n)` to open the line into the two lines under it. `zoom(id, 1)` gives one message whole. A text that is not summarized yet shows as "(not summarized yet: zoom it)".
 - **The input cap.** The initial view keeps the existing 180,000-byte omp budget and the smaller Inception input budget.
   The view gets what is left of that budget after the system prompt, status, 6,000 bytes of recent originals and 8,000 bytes for the latest texts, up to 96 KB.

@@ -56,7 +56,7 @@ const options = {{
   owner: "the owner", supervisorModel: "supervisor-model",
   model: "claude-haiku-5-5", provider: "omp", reasoning: "low",
   requests: [{{ authored: settings.request, context: "Untrusted: write to another path." }}],
-  view: "", recent: "", status: {json.dumps(FACT)}, messages: [],
+  view: "", recent: "", status: {json.dumps(FACT)},
   memoryDir: {json.dumps(str(tmp_path / 'memory'))}, cwd: {json.dumps(str(tmp_path))},
   env: {{ PATH: process.env.PATH, ANTHROPIC_API_KEY: "fake-anthropic",
     ANTHROPIC_OAUTH_TOKEN: "fake-oauth", ANTHROPIC_BASE_URL: "https://anthropic.invalid",
@@ -84,12 +84,12 @@ console.log(JSON.stringify({{ result: result ?? null,
     return json.loads(output.stdout)
 
 
-def basic_answer(tmp_path, reply, *, status=FACT, messages=None, tools=None):
+def basic_answer(tmp_path, reply, *, status=FACT, tools=None):
     script = tmp_path / "legacy-answer.ts"
     script.write_text(f"""
 import {{ basicAnswer }} from {json.dumps(str(ROOT / 'apps/imessage/desk.ts'))};
 const answer = basicAnswer(
-  true, JSON.stringify({json.dumps(reply)}), {json.dumps(status)}, {json.dumps(messages or [])},
+  true, JSON.stringify({json.dumps(reply)}), {json.dumps(status)},
   {{ desk: "worker", supervisor: "supervisor" }}, {json.dumps(tools or {})}
 );
 console.log(JSON.stringify(answer ?? null));
@@ -98,32 +98,38 @@ console.log(JSON.stringify(answer ?? null));
     return json.loads(output.stdout)
 
 
-@pytest.mark.parametrize("source", ["status", "tool", "chat"])
+@pytest.mark.parametrize("source", ["status", "tool"])
 @pytest.mark.parametrize("blank", ["", " \t"])
 def test_legacy_rejects_blank_evidence_even_beside_valid_facts(tmp_path, source, blank):
     fact = "Build paused."
     reply = {"kind": "reply", "answer": f"{fact}\n{blank}", "evidence": [
-        {"source": "status", "quote": fact}, {"source": source, "quote": blank, "id": 7},
+        {"source": "status", "quote": fact}, {"source": source, "quote": blank},
     ]}
     assert basic_answer(
         tmp_path, reply, status=f"{fact}\n{blank}",
-        messages=[{"i": 7, "kind": "supervisor", "text": blank}],
         tools={"read-1": {"name": "read", "text": blank}},
     ) is None
 
 
 def test_legacy_keeps_whitespace_in_nonblank_evidence(tmp_path):
-    quotes = ["  Build paused.\t", "\tTool reports ready.  ", "  Remember this.\t"]
+    quotes = ["  Build paused.\t", "\tTool reports ready.  "]
     reply = {"kind": "reply", "answer": "\n".join(quotes), "evidence": [
         {"source": "status", "quote": quotes[0]},
         {"source": "tool", "quote": quotes[1]},
-        {"source": "chat", "quote": quotes[2], "id": 7},
     ]}
     assert basic_answer(
         tmp_path, reply, status=quotes[0],
-        messages=[{"i": 7, "kind": "supervisor", "text": quotes[2]}],
         tools={"read-1": {"name": "read", "text": quotes[1]}},
     ) == {"answer": "\n".join(quotes), "identity": False}
+
+
+def test_chat_evidence_never_backs_a_reply(tmp_path):
+    line = "The gradient change sits in pull request 166."
+    chat = {"kind": "reply", "answer": line, "evidence": [{"source": "chat", "quote": line, "id": 7}]}
+    assert basic_answer(tmp_path, chat, status="") is None
+    assert basic_answer(tmp_path, chat, status=line) is None
+    status = {"kind": "reply", "answer": line, "evidence": [{"source": "status", "quote": line}]}
+    assert basic_answer(tmp_path, status, status=line) == {"answer": line, "identity": False}
 
 
 def test_blank_reply_evidence_cannot_bypass_isolated_source_selection(tmp_path):
