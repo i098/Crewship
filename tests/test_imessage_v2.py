@@ -454,4 +454,7 @@ def test_text_gets_one_read_mark_once_the_bridge_takes_it_in(tmp_path):
         deliver(rig, "m1", "please check the repo")
         wait_for(lambda: read_marks(rig), "the read mark after arrival", timeout=30)
         handed_off(rig, "m1")
+        rig.cli("Done with it.")
+        wait_for(lambda: answered(rig), "the answered text", timeout=30)
+        time.sleep(3)
         assert len(read_marks(rig)) == 1
