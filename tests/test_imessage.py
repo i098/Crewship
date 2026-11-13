@@ -237,6 +237,9 @@ def test_image_that_cannot_be_sent_queues_nothing(tmp_path, problem):
 DESK = json.dumps(str(ROOT / "apps/imessage/desk.ts"))
 
 
+REAL_OMP = shutil.which("omp")
+
+
 @functools.cache
 def natives_modules():
     """Folder pinning pi-natives so the leaf platform package is linked.
@@ -251,10 +254,10 @@ def natives_modules():
         version = subprocess.run(["bun", "-e", """
 const { dirname } = await import("node:path");
 const { realpathSync, readFileSync } = await import("node:fs");
-let dir = dirname(Bun.resolveSync("@oh-my-pi/pi-natives", dirname(realpathSync(Bun.which("omp")))));
+let dir = dirname(Bun.resolveSync("@oh-my-pi/pi-natives", dirname(realpathSync(process.env.REAL_OMP))));
 while (!(await Bun.file(`${dir}/package.json`).exists())) dir = dirname(dir);
 console.log(JSON.parse(readFileSync(`${dir}/package.json`, "utf8")).version);
-"""], capture_output=True, text=True, check=True, timeout=120).stdout.strip()
+"""], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "REAL_OMP": REAL_OMP}).stdout.strip()
         (folder / "package.json").write_text(
             json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": version}})
         )
@@ -268,7 +271,6 @@ console.log(JSON.parse(readFileSync(`${dir}/package.json`, "utf8")).version);
     return str(folder / "node_modules")
 
 
-@functools.cache
 def bun_env():
     """Environment for bun snippets that load the real omp modules."""
     modules = natives_modules()
