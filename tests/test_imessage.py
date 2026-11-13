@@ -251,13 +251,13 @@ def natives_modules():
     """
     folder = Path(tempfile.mkdtemp(prefix="pi-natives-"))
     try:
-        version = subprocess.run(["bun", "-e", """
+        version = REAL_OMP and subprocess.run(["bun", "-e", """
 const { dirname } = await import("node:path");
 const { realpathSync, readFileSync } = await import("node:fs");
 let dir = dirname(Bun.resolveSync("@oh-my-pi/pi-natives", dirname(realpathSync(process.env.REAL_OMP))));
 while (!(await Bun.file(`${dir}/package.json`).exists())) dir = dirname(dir);
 console.log(JSON.parse(readFileSync(`${dir}/package.json`, "utf8")).version);
-"""], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "REAL_OMP": REAL_OMP}).stdout.strip()
+"""], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "REAL_OMP": REAL_OMP}).stdout.strip() or "18.18.2"  # no omp on PATH (CI): the last known pin
         (folder / "package.json").write_text(
             json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": version}})
         )
