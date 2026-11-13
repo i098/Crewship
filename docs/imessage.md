@@ -323,7 +323,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - The memory view seeds a new session and a session that was just compacted.
 - The session can read with `read`, `grep`, `glob`, `zoom`, and `fleet_status`. It has no write tool. An install ask goes to its helper (see Helper below); it hands every other write to Firstmate.
 - The session acts through five action tools. The bridge checks each call before it does the action:
-  - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text.
+  - `reply` sends text only when `deskMayAct` permits it, after `clean.ts` cleans the text. It refuses text that speaks of the owner in the third person (for example "The captain asks…"), because `clean.ts` would turn it into broken second person. A possessive ("the captain's PR"), a name after the title, or "of" after it passes.
   - `tapback` reacts only when `deskMayAct` permits it.
   - `relay_mate` relays only while `relayTargetCurrent` confirms that the mate still owns the work.
   - `handoff_main` gives the text to Firstmate. With `text`, it first sends the owner that short ack, checked like `reply`. Firstmate then takes the text, and no background task, wait or follow-up text follows. The desk uses this for an owner instruction or standing rule: it acks it and never argues with it.
