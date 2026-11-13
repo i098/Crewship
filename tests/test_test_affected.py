@@ -6,16 +6,28 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "test-affected"
 
 
 def _git(repo, *args):
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _mode(repo):
     fake = repo.parent / (repo.name + "-bin")
     fake.mkdir(exist_ok=True)
-    (fake / "cf-sandbox").write_text('#!/bin/sh\nfor a; do case $a in --testmon*) echo "$a";; esac; done\n')
+    (fake / "cf-sandbox").write_text(
+        '#!/bin/sh\nfor a; do case $a in --testmon*) echo "$a";; esac; done\n'
+    )
     (fake / "cf-sandbox").chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "CF_TESTMON_DIR": str(repo.parent / (repo.name + "-tm"))}
-    out = subprocess.run([str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True)
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "CF_TESTMON_DIR": str(repo.parent / (repo.name + "-tm")),
+    }
+    out = subprocess.run(
+        [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
+    )
     return out.stdout.strip()
 
 

@@ -213,7 +213,7 @@ The network is shared unless you pass `--no-net`. Abstract Unix sockets belong t
 How to use it:
 
 - Workers: run every test, lint or build command that is not a plain read-only check as `cf-sandbox -- <command>`, from inside the worktree. This applies to any test that starts, stops or lists sessions.
-- no-mistakes: this repository's [`.no-mistakes.yaml`](../.no-mistakes.yaml) sets `commands.test` to `cf-sandbox -- uv run pytest ...`. no-mistakes has no global setting that wraps the test command of another repository (its host-level `repository_overrides.<remote>.commands.<step>` accepts `nice` only), so add the same `cf-sandbox --` prefix to the `commands.test` of each repository you validate on the host.
+- no-mistakes: this repository's [`.no-mistakes.yaml`](../.no-mistakes.yaml) sets `commands.test` to `scripts/test-affected`, which runs pytest under `cf-sandbox --`. no-mistakes has no global setting that wraps the test command of another repository (its host-level `repository_overrides.<remote>.commands.<step>` accepts `nice` only), so add the same `cf-sandbox --` prefix to the `commands.test` of each repository you validate on the host.
 - Real Herdr work still goes through [`tests/herdr-lab`](../tests/herdr-lab) on a named lab session; the sandbox does not replace it.
 
 [`tests/test_cf_sandbox.py`](../tests/test_cf_sandbox.py) proves the boundary with fake sockets: a client that sends `kill-session` reaches a fake daemon outside the sandbox and none inside it.

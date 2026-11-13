@@ -47,7 +47,14 @@ else:
         except IndexError:
             code, fsha = get_source_sha(directory=self.rootdir, filename=filename)
             mtime = os.path.getmtime(os.path.join(self.rootdir, filename))
-            module = Module(source_code=code, mtime=mtime, ext="txt", fs_fsha=fsha, filename=filename, rootdir=self.rootdir)
+            module = Module(
+                source_code=code,
+                mtime=mtime,
+                ext="txt",
+                fs_fsha=fsha,
+                filename=filename,
+                rootdir=self.rootdir,
+            )
             self.cache[filename] = module
             return module
 
