@@ -1,7 +1,7 @@
 // What the desk session may do: six host tools. The session reads freely (read, grep, glob, zoom, fleet_status)
 // but acts only through reply, tapback, relay_mate, delegate_task and handoff_main, and each of those runs the bridge's checks first.
 // The bridge supplies the effects (ActionHost); this file holds the checks, so tests run without the bridge.
-import { cleanText, statusLine } from "./clean.ts";
+import { cleanText, ownerInThirdPerson, statusLine } from "./clean.ts";
 import { KEY_PATTERN } from "./sender-log.ts";
 import { STE_STYLE } from "./ste.ts";
 import { bubbles, type Secondmate } from "./desk.ts";
@@ -21,7 +21,7 @@ export const HOST_TOOLS: HostTool[] = [
     parameters: { type: "object", properties: { emoji: { type: "string", enum: TAPBACKS } }, required: ["emoji"], additionalProperties: false } },
   { name: "relay_mate", description: "Give the owner's text to one listed second mate whose scope clearly owns the whole request. Ends your turn; no text goes to the owner.",
     parameters: { type: "object", properties: { mate: { type: "string" } }, required: ["mate"], additionalProperties: false } },
-  { name: "handoff_main", description: "Give the owner's text to Firstmate. Ends your turn. Use it for anything you may not do or cannot answer. No text goes to the owner unless you pass `text`, a short ack sent first (checked like reply; `to` is as in reply). Firstmate takes it and nothing else follows.",
+  { name: "handoff_main", description: "Give the owner's text to Firstmate. Ends your turn. Use it for anything you may not do or cannot answer. Firstmate gets the owner's own text. No text goes to the owner unless you pass `text`, a short ack sent first (checked like reply; `to` is as in reply). The ack goes to the owner, so write it to him (\"Firstmate has your text.\"), never to Firstmate. `reason` is an internal log note that the owner never sees; name Firstmate in it, never \"you\". Firstmate takes it and nothing else follows.",
     parameters: { type: "object", properties: { reason: { type: "string" }, text: { type: "string" }, to: { type: "integer", minimum: 1 }, key: { type: "string" } }, additionalProperties: false } },
   { name: "delegate_task", description: "Start the owner's text as background work with `helper:install`, `helper:lookup` or `helper:read-link` (your own helper, only for one self-contained ask of that kind), `firstmate` or one listed second mate. Ends your turn. The bridge texts the owner that the text is queued for the target; you write no text. The target's answer reaches the owner later as another text from you. `to` is as in reply.",
     parameters: { type: "object", properties: { target: { type: "string" }, to: { type: "integer", minimum: 1 } }, required: ["target"], additionalProperties: false } },
@@ -63,6 +63,7 @@ export function replyText(args: Record<string, unknown>, safe: (text: string) =>
 
 function replyParts(args: Record<string, unknown>, count: number, host: Pick<ActionHost, "safe" | "sent" | "log">): { parts: string[]; target: number; logged(): void } {
   const clean = replyText(args, host.safe);
+  if (ownerInThirdPerson(String(args.text))) throw new Error("refused: this text goes to the owner but speaks of him in the third person; write it to him as \"you\", name Firstmate for its work, and put no instruction for Firstmate in it");
   const target = args.to === undefined ? count : Number(args.to);
   if (!Number.isInteger(target) || target < 1 || target > count) throw new Error(`to must be 1 to ${count}`);
   const parts = bubbles(clean);
@@ -196,6 +197,7 @@ End EVERY turn with exactly one action tool: reply, tapback, relay_mate, delegat
 Answer yourself when you can: status and progress questions (fleet_status), questions about this chat and your files (read, grep, glob, zoom), chit-chat. You never read a link or look something up on the web yourself; that is the helper's work. No ids, paths, or status prefixes. Blank lines split bubbles.
 ${STE_STYLE}
 The chat holds old desk lines in another style. Never copy that style.
+Every reply and every handoff ack goes to the owner: "you" in it means the owner, and only the owner. Never write him a note or an instruction meant for Firstmate or a mate, never call fleet work his task, and never ask him to confirm, check or do Firstmate's work. Name Firstmate for its work ("Firstmate has your text and owns the fix."). Firstmate already gets his text; it needs no note from you.
 A purely social text (thanks, laughter, good news) gets a tapback, no words. Never react to questions, requests, or approvals.
 Project work that one listed mate's scope clearly owns goes to that mate with relay_mate. Call fleet_status first to see the listed mates, their ids and scopes; use only those ids. Everything else that is work goes to Firstmate with handoff_main.
 You may talk to a listed mate directly: message_mate sends it a text, mate_replies reads its newest status lines. Give reply a short topic key for news (numbers, results); the same key with the same content is refused once the owner got it today, so never repeat it.

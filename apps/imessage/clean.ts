@@ -42,6 +42,16 @@ export function cleanText(text: string): string {
   return out || text.replace(COLON, "") || text; // never turn a send into nothing
 }
 
+// The desk writes to the owner, so a bare "the captain" in its own text is a note about him meant for Firstmate;
+// cleanText would turn it into "You asks ...". A possessive ("the captain's PR") still reads fine as "your PR".
+export function ownerInThirdPerson(text: string): boolean {
+  const s = text.replace(HOLD, " ");
+  return [...s.matchAll(READER)].some((m) => {
+    const rest = s.slice(m.index! + m[0].length);
+    return !m[2] && !/^ of\b/i.test(rest) && !/^ +[A-Z]/.test(rest);
+  });
+}
+
 // A status line is internal detail, not a text for the owner. Returns why a paragraph is one, or undefined for prose.
 const STATUS: [string, RegExp][] = [
   ["starts with a task or mate id", /^[ \t\x01]*(?:(?:cf|sm)-[a-z0-9][a-z0-9-]*|[a-z0-9]+(?:-[a-z0-9]+)*-mate-[a-z0-9]+)\b/i],

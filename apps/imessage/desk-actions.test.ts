@@ -229,3 +229,9 @@ test("delegate_task refuses a helper target that is not a listed kind: the ask i
     expect(h.calls).toEqual([]);
   }
 });
+
+test("reply refuses text that speaks of the owner in the third person", async () => {
+  const h = host(["hello"]);
+  await expect(h.run("reply", { text: "The captain asks for a fix." })).rejects.toThrow("third person");
+  expect(h.calls).toEqual([]);
+});

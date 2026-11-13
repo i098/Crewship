@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanText, statusLine } from "./clean.ts";
+import { cleanText, ownerInThirdPerson, statusLine } from "./clean.ts";
 
 test("status lines are refused", () => {
   for (const t of [
@@ -36,4 +36,11 @@ test("cleanText strips a child status prefix", () => {
 
 test("cleanText strips pr, mode, yolo, head and task tokens", () => {
   expect(cleanText("ok pr=12 mode=dark yolo=1 head=ab task=x end")).toBe("ok end");
+});
+
+test("ownerInThirdPerson refuses a bare mention and allows possessive, title and of", () => {
+  expect(ownerInThirdPerson("The captain asks for a fix.")).toBe(true);
+  expect(ownerInThirdPerson("The owner's PR is merged.")).toBe(false);
+  expect(ownerInThirdPerson("Ask the captain Jane about it.")).toBe(false);
+  expect(ownerInThirdPerson("The captain of the ship agreed.")).toBe(false);
 });
