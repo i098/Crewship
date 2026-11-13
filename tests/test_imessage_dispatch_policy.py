@@ -382,12 +382,13 @@ for (const name of Object.keys(process.env)) delete process.env[name];
 Object.assign(process.env, {{ PATH: path, HOME: {json.dumps(str(home))},
   PI_CODING_AGENT_DIR: {json.dumps(str(agent))}, OPENAI_API_KEY: "test-openai-key" }});
 const {{ dirname }} = await import("node:path");
+const {{ Database }} = await import("bun:sqlite");
 const {{ realpathSync, readFileSync, readdirSync }} = await import("node:fs");
 const base = dirname(realpathSync(Bun.which("omp")));
 const {{ getAgentDbPath }} = await import(Bun.resolveSync("@oh-my-pi/pi-utils", base));
 const {{ AuthStorage, SqliteAuthCredentialStore }} = await import(Bun.resolveSync("@oh-my-pi/pi-ai/auth-storage", base));
 const databasePath = getAgentDbPath({json.dumps(str(agent))});
-const store = await SqliteAuthCredentialStore.open(databasePath);
+const store = new SqliteAuthCredentialStore(new Database(databasePath));
 await store.upsertAuthCredential("openai-codex", {json.dumps(credential)});
 if ({json.dumps(disabled)}) await store.deleteAuthCredentials("openai-codex", "disabled for test");
 const auth = new AuthStorage(store);

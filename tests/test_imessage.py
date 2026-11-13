@@ -237,18 +237,30 @@ def test_image_that_cannot_be_sent_queues_nothing(tmp_path, problem):
 DESK = json.dumps(str(ROOT / "apps/imessage/desk.ts"))
 
 
+REAL_OMP = shutil.which("omp")
+
+
 @functools.cache
 def natives_modules():
     """Folder pinning pi-natives so the leaf platform package is linked.
 
     Bun's auto-install of the installed omp's cache entry skips it, so every
     snippet that loads the real omp catalog would fail to load the addon.
+    The pin follows the pi-natives that omp resolves, so an omp upgrade cannot
+    leave the addon and its loader on different versions.
     """
     folder = Path(tempfile.mkdtemp(prefix="pi-natives-"))
-    (folder / "package.json").write_text(
-        json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": "18.18.2"}})
-    )
     try:
+        version = REAL_OMP and subprocess.run(["bun", "-e", """
+const { dirname } = await import("node:path");
+const { realpathSync, readFileSync } = await import("node:fs");
+let dir = dirname(Bun.resolveSync("@oh-my-pi/pi-natives", dirname(realpathSync(process.env.REAL_OMP))));
+while (!(await Bun.file(`${dir}/package.json`).exists())) dir = dirname(dir);
+console.log(JSON.parse(readFileSync(`${dir}/package.json`, "utf8")).version);
+"""], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "REAL_OMP": REAL_OMP}).stdout.strip() or "18.18.2"  # no omp on PATH (CI): the last known pin
+        (folder / "package.json").write_text(
+            json.dumps({"private": True, "dependencies": {"@oh-my-pi/pi-natives": version}})
+        )
         # The host cache can be read-only (cf-sandbox), so install through a private one.
         env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(folder / ".bun-cache")}
         subprocess.run(["bun", "install"], cwd=folder, env=env, capture_output=True, check=True, timeout=120)
@@ -259,15 +271,20 @@ def natives_modules():
     return str(folder / "node_modules")
 
 
-def bun(code):
-    """Run TypeScript that prints one JSON value; return the value."""
-    require_bridge()
+def bun_env():
+    """Environment for bun snippets that load the real omp modules."""
     modules = natives_modules()
     env = {**os.environ, "NODE_PATH": modules}
     env["BUN_TMPDIR"] = str(Path(modules).parent / ".tmp")  # the read-only default cache stays warm; bun only needs a writable temp dir
     Path(env["BUN_TMPDIR"]).mkdir(exist_ok=True)
+    return env
+
+
+def bun(code):
+    """Run TypeScript that prints one JSON value; return the value."""
+    require_bridge()
     out = subprocess.run(
-        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=env
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=bun_env()
     ).stdout
     return json.loads(out)
 
@@ -2947,7 +2964,7 @@ class FallbackRig:
             (bin_dir / name).chmod(0o755)
         ports = [free_port(), free_port()]
         self.hook_port = ports[1]
-        self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_DIR": str(self.fake)}
+        self.env = {**bun_env(), "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_DIR": str(self.fake)}
         self.relay = subprocess.Popen(["bun", "-e", FAKE_RELAY], env=self.env)
         wait_for(lambda: read_text(self.fake / "relay-port"), "the fake relay")
         self.env |= {
