@@ -112,7 +112,9 @@ def validate_runner_up(config):
 
 def validate_cloudflare_runner(config):
     runner = config["cloudflare_runner"]
-    if ".." in Path(runner["credentials_file"]).parts:
+    if "credentials_file" not in runner and not all(entry.get("kvz") for entry in runner["repos"]):
+        raise ValueError("cloudflare_runner.credentials_file is required unless every repository has a kvz block")
+    if ".." in Path(runner.get("credentials_file", "")).parts:
         raise ValueError("cloudflare_runner.credentials_file must not traverse; give a plain path")
     repos = [entry["repo"].lower() for entry in runner["repos"]]
     if len(set(repos)) != len(repos):
