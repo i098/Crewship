@@ -173,6 +173,7 @@ export const components: Component[] = [
   github("treehouse", "kunchenguid/treehouse"),
   github("uv", "astral-sh/uv", ""),
   github("btop", "aristocratos/btop", "v", { command: "btop-bin" }),
+  github("tuios", "Gaurav-Gosain/tuios"),
   github("sentrux", "sentrux/sentrux"),
   github("fallow", "fallow-rs/fallow"),
   github("cloudflared", "cloudflare/cloudflared", ""),
