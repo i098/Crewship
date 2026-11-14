@@ -877,6 +877,8 @@ def test_desk_cancels_after_transport_preparation(tmp_path, desk_clock, activity
     try:
         rig.start()
         receive("photon", "question", "What is the build status?")
+        # The read receipt also looks the space up; it must finish first, or its lookup sets `space-waiting` for the draft.
+        wait_for(lambda: list((rig.state / "reads-done").glob("*.json")), "the read receipt")
         (rig.fake / "space-hold").touch()
         desk_clock()
         wait_for(lambda: (rig.fake / "space-waiting").exists(), "the transport preparation wait")
@@ -954,6 +956,8 @@ def test_restored_desk_text_is_dropped(tmp_path, desk_clock, transport, failure,
         receive(transport, "private", "What is the build status?")
         (rig.fake / "retry-pause").write_text("15")
         desk_clock()
+        # A failing read receipt retries on the same 15 ms timer, so the retry signal alone can come before the answer exists.
+        wait_for(lambda: list((rig.state / "outbox").glob("*.json")), "the retained answer")
         wait_for(lambda: (rig.fake / "retry-waiting").exists(), "the retained answer before retry")
         assert read_text(rig.fake / "sent") == read_text(rig.fake / "relay-sent") == ""
         assert f"{transport}-private " not in read_text(rig.notes)
