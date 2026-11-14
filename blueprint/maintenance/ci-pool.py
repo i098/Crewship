@@ -363,6 +363,15 @@ def remove_tree(path):
     path.rmdir()
 
 
+def seed_tool_cache(tool, image):
+    """Copy the image's /opt/hostedtoolcache into the empty tool cache directory of a slot. The
+    job mounts that directory over the image's own path, so without the copy a fresh slot finds
+    no preinstalled tool and actions/setup-node downloads Node again. Best effort: a failed copy
+    only costs that download."""
+    quiet([*docker(), "run", "--rm", "--user", "0", "--volume", f"{tool}:/t",
+           "--entrypoint", "cp", image, "-a", "/opt/hostedtoolcache/.", "/t/"])
+
+
 def systemctl(*args):
     subprocess.run(["systemctl", "--user", *args], check=True)
 
@@ -567,6 +576,10 @@ def run(instance):
         (scratch / name).chmod(0o1777)
     for path in (work, *(apt / name for name in APT_DIRS), *(cache / name for name in CACHE_DIRS)):
         path.mkdir(parents=True, exist_ok=True)
+    image, tool = job_image(pool), cache / "tool"
+    if not any(tool.iterdir()):
+        # Before the mount hides them, and while the slot is not yet registered on GitHub.
+        seed_tool_cache(tool, image)
 
     body = {
         "name": f"pool-{instance}-{int(time.time())}",
@@ -629,7 +642,7 @@ def run(instance):
                 # becoming an empty directory, so no job runs without the check.
                 "--mount", f"type=bind,src={HOOK},dst=/home/runner/job-started.sh,readonly",
                 "--env", f"{HOOK_ENV}=/home/runner/job-started.sh",
-                job_image(pool), "bash", "-c", CONTAINER_PREP,
+                image, "bash", "-c", CONTAINER_PREP,
             ]), check=True, stdout=subprocess.DEVNULL)
         rc = subprocess.run([*docker(), "start", "--attach", container]).returncode
     except Exception as error:
