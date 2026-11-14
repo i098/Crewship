@@ -6,9 +6,11 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 import yaml
@@ -26,6 +28,14 @@ from test_imessage import (
 
 pytestmark = pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 PAST_QUIET = TEST_QUIET_MS / 1000 + 0.5  # seconds: past the bridge's test-mode quiet period, so a desk turn would have run
+
+
+@pytest.fixture
+def tmp_path():
+    """Short and outside any repository: the desk refuses writes under a git work tree, and a socket path has 108 bytes."""
+    path = Path(tempfile.mkdtemp(prefix="cf-", dir="/tmp"))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture
@@ -2362,10 +2372,11 @@ def test_native_tool_approval_refuses_untrusted_delete_and_external_send(tmp_pat
 
 
 @pytest.mark.parametrize("bus_variable", ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"])
-def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path_factory, monkeypatch, request, bus_variable):
+def test_native_systemctl_connects_to_the_existing_user_bus(tmp_path, monkeypatch, request, bus_variable):
     if not shutil.which("systemctl"):
         pytest.skip("needs systemctl")
-    runtime = tmp_path_factory.mktemp("bus")
+    runtime = tmp_path / "bus"
+    runtime.mkdir()
     (runtime / "systemd").mkdir(parents=True, mode=0o700)
     if bus_variable == "XDG_RUNTIME_DIR":
         address = runtime / "systemd/private"
