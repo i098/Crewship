@@ -129,7 +129,7 @@ Other wrappers keep their executable names; the viewer does not inspect their ch
 
 ### Terminal panes
 
-The installer also installs three more OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
+The installer also installs six OpenTUI panes from `tools/` into `~/.local/share/crewship/tui` and links their commands in `~/.local/bin`.
 `launch` opens each one in the `machine` workspace in the same way as the schedules tab: a missing tab is created and the command starts there.
 The tab label is the command name, except `crewship schedules`, labelled `schedules`, and `browser-tui`, labelled `browsers`.
 An existing tab is never changed; `launch` prints `run <command> in the <label> tab` instead.
@@ -144,6 +144,9 @@ A rerun adds no duplicate tab, and it never restarts Herdr or touches a running 
 | `crewboard-tui --queue` (tab `decision-queue`) | the decision queue of every Firstmate home | `crewship.herdr.crewboard_tab` |
 | `browser-tui` (tab `browsers`) | every running headed and headless browser with its CDP pages; it can close a page or stop a browser | `crewship.herdr.browsers_tab` |
 | `crewboard-tui --desk` (tab `frontdesk`) | iMessage front desk health and recent turns | `crewship.herdr.crewboard_tab` |
+| `fleet-health-tui` | fleet health by kind, with installed and latest versions and use state | `crewship.herdr.fleet_health_tab` |
+| `runs-tui` | every validation run on the host | `crewship.herdr.runs_tab` |
+| `lavish-tui` | every lavish board on the host | `crewship.herdr.lavish_tab` |
 
 A switch set to `false` skips only the tab; the command stays installed and existing tabs stay open.
 

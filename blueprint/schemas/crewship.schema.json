@@ -189,6 +189,15 @@
             "browsers_tab": {
               "type": "boolean"
             },
+            "fleet_health_tab": {
+              "type": "boolean"
+            },
+            "runs_tab": {
+              "type": "boolean"
+            },
+            "lavish_tab": {
+              "type": "boolean"
+            },
             "ci_pool_tab": {
               "type": "boolean",
               "description": "Deprecated, no effect, removed with #1187."
