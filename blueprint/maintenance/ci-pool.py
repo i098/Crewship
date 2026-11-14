@@ -366,11 +366,18 @@ def remove_tree(path):
 def seed_tool_cache(tool, image):
     """Copy the image's /opt/hostedtoolcache into the empty tool cache directory of a slot. The
     job mounts that directory over the image's own path, so without the copy a fresh slot finds
-    no preinstalled tool and actions/setup-node downloads Node again. Best effort: a failed copy
-    only costs that download."""
-    if quiet([*docker(), "run", "--rm", "--user", "0", "--volume", f"{tool}:/t",
+    no preinstalled tool and actions/setup-node downloads Node again. The copy goes to a sibling
+    directory that replaces `tool` only when complete, so an interrupted copy never leaves a
+    partial tool install behind. Best effort: a failed copy only costs that download."""
+    staging = tool.with_name(tool.name + ".seed")
+    quiet(["sudo", "-n", "rm", "-rf", "--one-file-system", str(staging)])
+    staging.mkdir()
+    if quiet([*docker(), "run", "--rm", "--user", "0", "--volume", f"{staging}:/t",
               "--entrypoint", "cp", image, "-a", "/opt/hostedtoolcache/.", "/t/"]):
+        quiet(["sudo", "-n", "rm", "-rf", "--one-file-system", str(staging)])
         print(f"seed {tool} failed: actions/setup-node downloads Node", file=sys.stderr, flush=True)
+        return
+    staging.rename(tool)
 
 
 def systemctl(*args):

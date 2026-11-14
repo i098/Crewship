@@ -825,8 +825,29 @@ def test_an_empty_tool_cache_is_seeded_from_the_image_before_the_job_starts(star
     argv = start("o-kept-1")
 
     [seed] = seed_calls(ran)
-    assert f"{tool}:/t" in seed and "/opt/hostedtoolcache/." in seed
+    assert f"{tool}.seed:/t" in seed and "/opt/hostedtoolcache/." in seed
     assert ran.index(seed) < ran.index(argv)
+
+
+def test_a_failed_seed_leaves_the_tool_cache_empty_for_the_next_start(start_job, monkeypatch):
+    # A half-copied cache would look filled and hide a truncated tool from setup-node for good.
+    data, start, ran = start_job
+    tool = data / "ci-pool/cache/o-kept-1/tool"
+    ok = pool_script.quiet
+
+    def failing_seed(argv):
+        if argv[-1] == "/t/":
+            ran.append(argv)
+            (tool.parent / "tool.seed/node").mkdir()
+            return 1
+        return ok(argv)
+
+    monkeypatch.setattr(pool_script, "quiet", failing_seed)
+
+    start("o-kept-1")
+
+    assert list(tool.iterdir()) == []
+    assert not (tool.parent / "tool.seed").exists()
 
 
 def test_a_filled_tool_cache_keeps_its_own_tools(start_job):
