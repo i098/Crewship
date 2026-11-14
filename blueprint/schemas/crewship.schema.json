@@ -923,6 +923,26 @@
                   "label": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9_.-]+$"
+                  },
+                  "kvz": {
+                    "description": "Run this repository's jobs on a shared Kubernetes cluster while it is idle, else on this host. Linux jobs only.",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "os": { "description": "Only Linux jobs run on the cluster.", "enum": ["linux"] },
+                      "ssh": { "description": "user@host that runs `kvz kubectl`.", "type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.@-]*$" },
+                      "ssh_key": { "type": "string", "pattern": "^/[A-Za-z0-9_./-]+$" },
+                      "path": { "description": "Directory put in front of PATH on the cluster host.", "type": "string", "pattern": "^/[A-Za-z0-9_./-]+$" },
+                      "node": { "description": "Nodes that may take a job, in order.", "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" } },
+                      "image": { "description": "Runner image; it needs /home/runner/run.sh.", "type": "string", "pattern": "^[A-Za-z0-9_./:@-]+$" },
+                      "namespace": { "description": "The one namespace of ours; created when missing.", "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                      "max": { "description": "Most jobs in the cluster at one time.", "type": "integer", "minimum": 1 },
+                      "cpu": { "type": "string", "pattern": "^[0-9]+m?$" },
+                      "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" },
+                      "cpu_pct": { "description": "Busy above this share of the node's CPU requested.", "type": "integer", "minimum": 1, "maximum": 100 },
+                      "mem_pct": { "description": "Busy above this share of the node's memory requested.", "type": "integer", "minimum": 1, "maximum": 100 }
+                    },
+                    "required": ["ssh", "node", "image"]
                   }
                 },
                 "required": ["repo", "label"]
@@ -937,7 +957,7 @@
               "minimum": 5
             }
           },
-          "required": ["credentials_file", "repos"]
+          "required": ["repos"]
         },
         "signal": {
           "type": "object",

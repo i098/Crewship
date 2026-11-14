@@ -50,6 +50,42 @@ Credentials come from `credentials_file` and reach wrangler through its environm
 - The disk is ephemeral, so compile caches start cold.
 - Cost is what the containers use: about $0.40 an hour for `standard-4`, billed while the container runs.
 
+## Fill a shared cluster
+
+A repository entry may also carry a `kvz` block. Its jobs then run on a shared Kubernetes cluster ([kvz](https://github.com/kvz-platform/kvz)) while the cluster has spare capacity, and on this host otherwise. It is off unless the block is there, and it runs Linux jobs only (the schema accepts only `os: linux`).
+
+```yaml
+crewship:
+  cloudflare_runner:
+    repos:
+      - repo: owner/name
+        label: kvz-name                  # workflows use `runs-on: [self-hosted, kvz-name]`
+        kvz:
+          ssh: user@cluster-host         # runs `kvz kubectl`; key auth, no prompt
+          node: [node-a, node-b]         # nodes that may take a job, in order
+          image: ghcr.io/actions/actions-runner:latest
+  #       namespace: crewship-ci         # the one namespace of ours; created when missing
+  #       max: 1                         # most jobs in the cluster at one time
+  #       cpu: "2"  memory: 4Gi          # request and limit of each job
+  #       cpu_pct: 60  mem_pct: 60       # busy above this share of a node requested
+  #       path: /opt/homebrew/bin        # put in front of PATH on the cluster host
+```
+
+`credentials_file` is needed only while some repository has no `kvz` block.
+For each queued job the dispatcher registers one single-use runner, then decides where it starts:
+
+- **Cluster** only when the job is safe and `kvz-idle-check.sh` says `FREE` for a node. The script is read-only. It says `FREE` only when the node is Ready with no pressure condition, no pod of another user is pending, fewer than `max` jobs of ours are active, and the CPU and memory requests on the node are under `cpu_pct` and `mem_pct`.
+- **This host** (`docker run --rm`, the same image and command) in every other case: busy, any error reading the cluster, or a failed cluster start. The cluster never starts a job on a guess.
+
+Safety rules in the code:
+
+- A job of a fork pull request, or of a `pull_request_target` or `workflow_run` run, never goes to the cluster. A run with no head repository counts as a fork.
+- At most `max` jobs of ours run in the cluster (default 1), counted from the cluster's Job objects.
+- The Job and its Secret hold the runner config; the dispatcher deletes both, and the runner, once the Job has finished (the Job also expires 5 minutes after it ends), and at once when a cluster start fails. Nothing else of the cluster is changed: an existing namespace is not edited, and the dispatcher needs no cluster-wide object.
+- What the cluster's administrators can see: the job's source checkout, logs and runner config, because they can read any pod. Keep signing keys and deploy tokens out of these jobs.
+
+Roll back: remove the `kvz` block and apply, then restart the dispatcher. Delete what is left with `kvz kubectl delete namespace <namespace>` if you let the dispatcher create it.
+
 ## Roll back
 
 Change `runs-on` back to the runner-up label. Removing the block does not stop anything: an apply skips the feature, so the dispatcher keeps running. Stop it with `systemctl --user disable --now cf-runner-dispatch.service`. The Worker stays deployed until you delete it with `wrangler delete`.

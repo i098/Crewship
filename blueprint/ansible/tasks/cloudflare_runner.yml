@@ -34,6 +34,13 @@
         mode: "0755"
         remote_src: true
 
+    - name: Install the shared-cluster idle check
+      ansible.builtin.copy:
+        src: "{{ crewship_blueprint }}/maintenance/kvz-idle-check.sh"
+        dest: "{{ crewship_local_bin }}/kvz-idle-check.sh"
+        mode: "0755"
+        remote_src: true
+
     - name: Install the Worker and image sources
       ansible.builtin.copy:
         src: "{{ crewship_blueprint }}/containers/cf-runner/{{ item }}"

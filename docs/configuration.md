@@ -261,7 +261,7 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
 - `ci_pool` (deprecated: removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands) needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
 - `runner_up` needs `docker` and `runner_up.repos`. A `runner_up.repos` entry may not set `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
-- `cloudflare_runner` needs `repos` and `credentials_file`; no two entries may name the same repository, and a label may not be one that every runner has or a GitHub-hosted one.
+- `cloudflare_runner` needs `repos`, and `credentials_file` unless every repository has a `kvz` block ([shared cluster](cloudflare-runner.md#fill-a-shared-cluster)); no two entries may name the same repository, and a label may not be one that every runner has or a GitHub-hosted one.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.
 - `board` needs `firstmate` and `development`.
