@@ -106,6 +106,14 @@ GITHUB_LATEST = {
         "btop-{gnu}-unknown-linux-musl.tar.gz",
         {"btop-bin": "btop/bin/btop"},
     ),
+    # Terminal window manager whose control commands gather the machine TUIs in
+    # one session (blueprint/maintenance/machine-tuios.sh).
+    "tuios": (
+        "Gaurav-Gosain/tuios",
+        "v",
+        "tuios_{v}_Linux_{goreleaser}.tar.gz",
+        {"tuios": "tuios"},
+    ),
     "sentrux": ("sentrux/sentrux", "v", "sentrux-{key}", {"sentrux": "sentrux"}),
     # The grammars of the same sentrux release. sentrux downloads them itself,
     # unverified, when ~/.sentrux/plugins lacks them; link_grammars puts them there.
@@ -190,7 +198,7 @@ OPTIONAL = {"koncreet"}
 # Verified against the `<asset>.sha256` file of the release when it has one, else the GitHub digest.
 SHA256_FILE = {"gws", "pyrefly", "sccache"}
 # Verified against the line for the asset in the release's checksums.txt.
-CHECKSUMS_TXT = {"rtk"}
+CHECKSUMS_TXT = {"rtk", "tuios"}
 # npm-registry tools on the registry's latest version, each installed by bun into its own prefix.
 NPM_LATEST = {
     "omp": "@oh-my-pi/pi-coding-agent",
@@ -1083,7 +1091,9 @@ def omp_plugins(home, environment):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, required=True)
-    parser.add_argument("--tools", default="herdr,node,bun,uv,btop,sentrux,fallow,pyrefly,nvim")
+    parser.add_argument(
+        "--tools", default="herdr,node,bun,uv,btop,tuios,sentrux,fallow,pyrefly,nvim"
+    )
     parser.add_argument("--npm", action="store_true")
     parser.add_argument(
         "--check-ca", action="store_true", help="reject compromised system CA roots"
