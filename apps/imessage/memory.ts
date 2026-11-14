@@ -87,22 +87,25 @@ export class Budget {
 // due = (T - last) / 2^l: how long ago the pair ended, in its own line size; the oldest wins a tie.
 // With Taelin's rollback push's list length as the budget, this makes exactly the merges push makes.
 export function shrink(view: Line[], T: number, target: number, size: (x: Line) => number, built: (x: Line) => boolean): Line[] {
-  let total = view.reduce((s, x) => s + size(x), 0);
+  const sizes = view.map(size); // each line's size once; a merge replaces two entries with the parent's
+  let total = sizes.reduce((s, n) => s + n, 0);
   while (total > target) {
     let best = -1;
     let bestDue = -Infinity;
     for (let k = 0; k + 1 < view.length; k++) {
       const [l, i] = view[k];
       const [l2, i2] = view[k + 1];
-      if (l !== l2 || i % 2 || i2 !== i + 1 || !built([l + 1, i / 2])) continue;
+      if (l !== l2 || i % 2 || i2 !== i + 1) continue;
       const due = (T - last([l, i2])) / 2 ** l;
-      if (due > bestDue) [best, bestDue] = [k, due];
+      if (due > bestDue && built([l + 1, i / 2])) [best, bestDue] = [k, due];
     }
     if (best < 0) break;
     const [l, i] = view[best];
     const parent: Line = [l + 1, i / 2];
-    total += size(parent) - size(view[best]) - size(view[best + 1]);
+    const merged = size(parent);
+    total += merged - sizes[best] - sizes[best + 1];
     view.splice(best, 2, parent);
+    sizes.splice(best, 2, merged);
   }
   return view;
 }
