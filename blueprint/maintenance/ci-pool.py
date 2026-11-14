@@ -368,8 +368,9 @@ def seed_tool_cache(tool, image):
     job mounts that directory over the image's own path, so without the copy a fresh slot finds
     no preinstalled tool and actions/setup-node downloads Node again. Best effort: a failed copy
     only costs that download."""
-    quiet([*docker(), "run", "--rm", "--user", "0", "--volume", f"{tool}:/t",
-           "--entrypoint", "cp", image, "-a", "/opt/hostedtoolcache/.", "/t/"])
+    if quiet([*docker(), "run", "--rm", "--user", "0", "--volume", f"{tool}:/t",
+              "--entrypoint", "cp", image, "-a", "/opt/hostedtoolcache/.", "/t/"]):
+        print(f"seed {tool} failed: actions/setup-node downloads Node", file=sys.stderr, flush=True)
 
 
 def systemctl(*args):
