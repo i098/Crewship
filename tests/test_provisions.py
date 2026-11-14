@@ -655,6 +655,7 @@ RELEASES = {
     "kunchenguid/treehouse": ("v9.9.9", "treehouse-v9.9.9-linux-amd64.tar.gz"),
     "astral-sh/uv": ("9.9.9", "uv-x86_64-unknown-linux-gnu.tar.gz"),
     "aristocratos/btop": ("v9.9.9", "btop-x86_64-unknown-linux-musl.tar.gz"),
+    "Gaurav-Gosain/tuios": ("v9.9.9", "tuios_9.9.9_Linux_x86_64.tar.gz", "checksums.txt"),
     "sentrux/sentrux": ("v9.9.9", "sentrux-linux-x86_64", "grammars-linux-x86_64.tar.gz"),
     "fallow-rs/fallow": ("v9.9.9", "fallow-linux-x64-musl"),
     "cloudflare/cloudflared": ("9.9.9", "cloudflared-linux-amd64"),
@@ -764,11 +765,18 @@ def upstream(monkeypatch, unverified=None, seen=None):
             checksum = "" if unverified == "googleworkspace/cli" else "f" * 64
             return Download(f"{checksum}  google-workspace-cli.tar.gz\n".encode())
         elif url == "https://github.com/checksums.txt":
-            # rtk lists every asset of the release in one checksums.txt, which wins over the digest.
-            checksum = "" if unverified == "rtk-ai/rtk" else "f" * 64
+            # rtk and tuios list every asset of their release in one checksums.txt,
+            # which wins over the digest.
+
+            def listed(repo, name, checksum):
+                return f"{'' if unverified == repo else checksum}  {name}\n"
+
             return Download(
-                f"{'0' * 64}  rtk-oss-x86_64-unknown-linux-musl.tar.gz\n"
-                f"{checksum}  rtk-x86_64-unknown-linux-musl.tar.gz\n".encode()
+                (
+                    listed("rtk-ai/rtk", "rtk-oss-x86_64-unknown-linux-musl.tar.gz", "0" * 64)
+                    + listed("rtk-ai/rtk", "rtk-x86_64-unknown-linux-musl.tar.gz", "f" * 64)
+                    + listed("Gaurav-Gosain/tuios", "tuios_9.9.9_Linux_x86_64.tar.gz", "f" * 64)
+                ).encode()
             )
         elif url.endswith(".sha256") and url.startswith(tuple(SHA256_FILE_ASSETS)):
             # Pyrefly and sccache publish their own .sha256 file.
@@ -1562,7 +1570,12 @@ def rate_limited_github(monkeypatch):
         if url.endswith(".sha256"):
             return Download(b"f" * 64 + b"  asset")
         if url.endswith("/checksums.txt"):
-            return Download(b"f" * 64 + b"  rtk-x86_64-unknown-linux-musl.tar.gz\n")
+            return Download(
+                b"f" * 64
+                + b"  rtk-x86_64-unknown-linux-musl.tar.gz\n"
+                + b"f" * 64
+                + b"  tuios_9.9.9_Linux_x86_64.tar.gz\n"
+            )
         if not url.startswith("https://github.com/"):
             return api(request, **kwargs)
         repo = "/".join(url.split("/")[3:5])
