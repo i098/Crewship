@@ -11,8 +11,8 @@ node=${1:?node}; ns=${2:?namespace}; max=${3:?max_jobs}; cpu_max=${4:?cpu_pct}; 
 verdict=$(jq -r --arg n "$node" --arg ns "$ns" --argjson max "$max" --argjson cpu "$cpu_max" --argjson mem "$mem_max" '
   def cpu: if . == null then 0 elif endswith("m") then (.[:-1] | tonumber) else (tonumber * 1000) end;
   def mem: if . == null then 0
-    elif endswith("Gi") then (.[:-2] | tonumber * 1024) elif endswith("Mi") then (.[:-2] | tonumber)
-    elif endswith("Ki") then (.[:-2] | tonumber / 1024) else (tonumber / 1048576) end;
+    else (capture("^(?<n>[0-9.]+(e[0-9]+)?)(?<u>Ki|Mi|Gi|Ti|k|K|M|G|T)?$") | (.n | tonumber) *
+      ({"Ki":1024,"Mi":1048576,"Gi":1073741824,"Ti":1099511627776,"k":1000,"K":1000,"M":1000000,"G":1000000000,"T":1000000000000}[.u // ""] // 1)) / 1048576 end;
   def finished: .status.completionTime != null or ((.status.conditions // []) | any(.type == "Failed" and .status == "True"));
   (.items | map(select(.kind == "Node" and .metadata.name == $n)) | first) as $nd
   | (.items | map(select(.kind == "Pod"))) as $pods
@@ -24,7 +24,7 @@ verdict=$(jq -r --arg n "$node" --arg ns "$ns" --argjson max "$max" --argjson cp
       ($pods[] | select(.status.phase == "Pending" and .metadata.namespace != $ns and .metadata.deletionTimestamp == null
           and ((.spec.nodeName // "") == $n or (.spec.nodeName // "") == "")) | "other pod pending: " + .metadata.namespace + "/" + .metadata.name),
       (if $active >= $max then "\($active) of \($max) own jobs active" else empty end),
-      (([$on[].spec.containers[].resources.requests.cpu | cpu] | add // 0) as $c | (($nd.status.allocatable.cpu | tonumber) * 1000) as $a
+      (([$on[].spec.containers[].resources.requests.cpu | cpu] | add // 0) as $c | ($nd.status.allocatable.cpu | cpu) as $a
         | if $c * 100 / $a > $cpu then "cpu requested \($c)m of \($a)m, over \($cpu)%" else empty end),
       (([$on[].spec.containers[].resources.requests.memory | mem] | add // 0) as $m | ($nd.status.allocatable.memory | mem) as $a
         | if $m * 100 / $a > $mem then "memory requested \($m | floor)Mi of \($a | floor)Mi, over \($mem)%" else empty end)

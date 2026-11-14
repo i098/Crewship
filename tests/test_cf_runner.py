@@ -444,3 +444,26 @@ def test_credentials_file_is_needed_only_for_repositories_without_kvz():
     plain = {"cloudflare_runner": {"repos": [{"repo": "o/a", "label": "cf-a"}]}}
     with pytest.raises(ValueError, match="credentials_file"):
         ship.validate_cloudflare_runner(plain)
+
+
+def idle_verdict(request_mem):
+    snapshot = {"items": [
+        {"kind": "Node", "metadata": {"name": "n"},
+         "status": {"conditions": [{"type": "Ready", "status": "True"}],
+                    "allocatable": {"cpu": "3920m", "memory": "16Gi"}}},
+        {"kind": "Pod", "metadata": {"namespace": "other", "name": "p"}, "status": {"phase": "Running"},
+         "spec": {"nodeName": "n", "containers": [
+             {"resources": {"requests": {"cpu": "100m", "memory": mem}}} for mem in request_mem]}},
+    ]}
+    return subprocess.run(
+        ["bash", str(ROOT / "blueprint/maintenance/kvz-idle-check.sh"), "n", "ci", "3", "80", "80"],
+        input=json.dumps(snapshot), capture_output=True, text=True)
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq missing")
+def test_idle_check_reads_millicores_and_decimal_memory_units():
+    free = idle_verdict(["512M", "1G"])
+    assert free.stdout.strip() == "FREE" and free.returncode == 0
+    busy = idle_verdict(["2Ti"])
+    assert busy.returncode != 0
+    assert busy.stdout.startswith("BUSY: memory requested") and "unreadable" not in busy.stdout
