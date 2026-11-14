@@ -41,7 +41,7 @@ START_ATTEMPTS = 2
 HTTP_TIMEOUT = 60
 BASE_LABELS = ["self-hosted", "linux"]
 # Per-repository `kvz` block defaults (the schema allows only Linux jobs).
-KVZ_DEFAULTS = {"namespace": "crewship-ci", "max": 1, "cpu": "2", "memory": "4Gi", "cpu_pct": 60, "mem_pct": 60, "docker": "docker"}
+KVZ_DEFAULTS = {"namespace": "crewship-ci", "max": 1, "cpu": "2", "memory": "4Gi", "cpu_pct": 60, "mem_pct": 60}
 # Jobs of these events run someone else's code or read secrets: never on the shared cluster.
 KVZ_NEVER_EVENTS = {"pull_request_target", "workflow_run"}
 IDLE_CHECK = Path(__file__).with_name("kvz-idle-check.sh")
@@ -283,7 +283,7 @@ def delete_cluster_objects(kvz, name):
 
 def start_local(kvz, name, jit):
     """Run the same single-use runner as a throwaway container on this host."""
-    command = [kvz["docker"], "run", "--rm", "-d", "--name", name, "-e", "JITCONFIG", "--entrypoint", RUNNER_COMMAND[0], kvz["image"], *RUNNER_COMMAND[1:]]
+    command = ["docker", "run", "--rm", "-d", "--name", name, "-e", "JITCONFIG", "--entrypoint", RUNNER_COMMAND[0], kvz["image"], *RUNNER_COMMAND[1:]]
     try:
         subprocess.run(command, env={**os.environ, "JITCONFIG": jit}, check=True, capture_output=True, timeout=HTTP_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as error:

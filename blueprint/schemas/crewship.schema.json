@@ -940,8 +940,7 @@
                       "cpu": { "type": "string", "pattern": "^[0-9]+m?$" },
                       "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" },
                       "cpu_pct": { "description": "Busy above this share of the node's CPU requested.", "type": "integer", "minimum": 1, "maximum": 100 },
-                      "mem_pct": { "description": "Busy above this share of the node's memory requested.", "type": "integer", "minimum": 1, "maximum": 100 },
-                      "docker": { "description": "Docker command of the local fallback.", "type": "string", "pattern": "^[A-Za-z0-9_./-]+$" }
+                      "mem_pct": { "description": "Busy above this share of the node's memory requested.", "type": "integer", "minimum": 1, "maximum": 100 }
                     },
                     "required": ["ssh", "node", "image"]
                   }

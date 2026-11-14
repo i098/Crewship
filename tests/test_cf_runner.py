@@ -312,9 +312,8 @@ def test_dispatch_starts_on_the_cluster_only_when_idle(monkeypatch):
     assert backend.calls == ["register", "idle", "cluster"]
 
 
-@pytest.mark.parametrize("node", [None])
-def test_dispatch_falls_back_to_this_host_when_busy_or_unreadable(monkeypatch, node):
-    backend = Backend(monkeypatch, node=node)  # cluster_idle returns None for both busy and error
+def test_dispatch_falls_back_to_this_host_when_busy_or_unreadable(monkeypatch):
+    backend = Backend(monkeypatch, node=None)  # cluster_idle returns None for both busy and error
     assert cf.dispatch_kvz(ENTRY, kjob_in(), 1) == (7, "local")
     assert "cluster" not in backend.calls
 
