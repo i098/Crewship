@@ -1197,15 +1197,11 @@ def test_send_commands_carry_the_local_header(tmp_path, args):
 
 
 def test_location_carries_the_local_header(tmp_path):
-<<<<<<< Updated upstream
     # Stub curl like the real one: write the body to the -o file and print the status code (-w).
     (tmp_path / "curl").write_text(
         f'#!/bin/bash\necho "$*" >> {tmp_path / "calls"}\n'
         'while [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\nprintf 200\n'
     )
-=======
-    (tmp_path / "curl").write_text(f'#!/bin/bash\necho "$*" >> {tmp_path / "calls"}\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\necho 200\n')
->>>>>>> Stashed changes
     (tmp_path / "curl").chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
     result = subprocess.run(
