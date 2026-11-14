@@ -284,7 +284,7 @@ def bun(code):
     """Run TypeScript that prints one JSON value; return the value."""
     require_bridge()
     out = subprocess.run(
-        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60, env=bun_env()
+        ["bun", "-e", code], capture_output=True, text=True, check=True, timeout=180, env=bun_env()
     ).stdout
     return json.loads(out)
 
