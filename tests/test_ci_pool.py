@@ -738,7 +738,8 @@ def test_image_refresh_builds_the_dockerfile_for_the_default_and_pulls_any_other
 
 @pytest.fixture
 def start_job(tmp_path, monkeypatch):
-    """(data dir, start): start(instance) runs one slot start and returns its `docker create` argv."""
+    """(data dir, start, docker calls): start(instance) runs one slot start and returns its
+    `docker create` argv; the calls list holds every docker argv in order."""
     monkeypatch.setattr(pool_script, "CONFIG", tmp_path / "pool.json")
     data = tmp_path / "data"
     (tmp_path / "pool.json").write_text(json.dumps({
@@ -749,6 +750,7 @@ def start_job(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "docker", lambda: ["docker"])
 
     def fake_quiet(argv):
+        ran.append(argv)
         if argv[:4] == ["sudo", "-n", "rm", "-rf"]:  # the real one needs root for the job's uids
             shutil.rmtree(argv[-1], ignore_errors=True)
         return 0
@@ -756,12 +758,13 @@ def start_job(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_script, "quiet", fake_quiet)
     monkeypatch.setattr(pool_script.signal, "signal", lambda *args: None)
     monkeypatch.setattr(pool_script.time, "sleep", lambda seconds: None)
-    created = []
+    created, ran = [], []
 
     def fake_run(argv, **kwargs):
         if argv[0] == "gh":
             out = json.dumps({"runner": {"id": 7}, "encoded_jit_config": "jit"})
             return subprocess.CompletedProcess(argv, 0, out, "")
+        ran.append(argv)
         if "create" in argv:
             created.append(argv)
         return subprocess.CompletedProcess(argv, 0)
@@ -772,11 +775,11 @@ def start_job(tmp_path, monkeypatch):
         pool_script.run(instance)
         return created[-1]
 
-    return data, start
+    return data, start, ran
 
 
 def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(start_job):
-    data, start = start_job
+    data, start, _ = start_job
     scratch = data / "ci-pool/scratch/o-kept-1"
     (scratch / "tmp").mkdir(parents=True)
     (scratch / "tmp/left-by-the-last-job").touch()
@@ -798,7 +801,7 @@ def test_job_container_mounts_the_package_caches_and_points_the_tools_at_them(st
 def test_two_slots_of_one_repository_share_no_writable_directory(start_job):
     # A job's tools delete files they do not use (rust-cache's registry cleanup), so a directory
     # that two slots mount loses files under the other slot's running build.
-    data, start = start_job
+    data, start, _ = start_job
 
     def writable(argv):
         return {Path(a.split(":")[0]) for a in argv if a.startswith(str(data)) and not a.endswith(":ro")}
@@ -807,6 +810,35 @@ def test_two_slots_of_one_repository_share_no_writable_directory(start_job):
 
     assert first and second
     assert not [(a, b) for a in first for b in second if a == b or a in b.parents or b in a.parents]
+
+
+def seed_calls(ran):
+    return [argv for argv in ran if "--entrypoint" in argv and argv[-1] == "/t/"]
+
+
+def test_an_empty_tool_cache_is_seeded_from_the_image_before_the_job_starts(start_job):
+    # The mount over /opt/hostedtoolcache hides the image's tools, so a fresh slot would have
+    # actions/setup-node download Node again.
+    data, start, ran = start_job
+    tool = data / "ci-pool/cache/o-kept-1/tool"
+
+    argv = start("o-kept-1")
+
+    [seed] = seed_calls(ran)
+    assert f"{tool}:/t" in seed and "/opt/hostedtoolcache/." in seed
+    assert ran.index(seed) < ran.index(argv)
+
+
+def test_a_filled_tool_cache_keeps_its_own_tools(start_job):
+    data, start, ran = start_job
+    installed = data / "ci-pool/cache/o-kept-1/tool/node/20.0.0/x64"
+    installed.mkdir(parents=True)
+    (installed / "1.complete").touch()
+
+    start("o-kept-1")
+
+    assert seed_calls(ran) == []
+    assert (installed / "1.complete").exists()
 
 
 @pytest.mark.parametrize("userns", [False, True])
