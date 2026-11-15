@@ -2,6 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "test-affected"
 
 
@@ -115,3 +117,17 @@ def test_stale_own_data_dir_survives_and_is_seeded(tmp_path):
     assert Path(run()) == datafile
     assert datafile.parent.is_dir()
     assert datafile.read_text() == "seed"
+
+
+@pytest.mark.parametrize(("exit_code", "published"), [(0, True), (1, False), (137, False)])
+def test_seed_published_only_after_successful_run(tmp_path, exit_code, published):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text(f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(home)}
+    proc = subprocess.run([str(SCRIPT)], cwd=_repo(tmp_path), env=env)
+    assert proc.returncode == exit_code
+    assert (home / ".cache" / "crewship-testmon" / "seed").exists() is published

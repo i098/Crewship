@@ -33,7 +33,7 @@ fi
 
 rc=0
 cf-sandbox -- uv run pytest -n 4 --dist worksteal "$mode" "$@" tests || rc=$?
-if [ -z "${CF_TESTMON_DIR:-}" ] && [ -f "$data_dir/testmondata" ]; then
-    cp "$data_dir/testmondata" "$cache/seed.$$" && mv -f "$cache/seed.$$" "$cache/seed" || true
+if [ "$rc" -eq 0 ] && [ -z "${CF_TESTMON_DIR:-}" ] && [ -f "$data_dir/testmondata" ]; then
+    cp "$data_dir/testmondata" "$cache/seed.$$" && mv -f "$cache/seed.$$" "$cache/seed" || rm -f "$cache/seed.$$"
 fi
 exit "$rc"
