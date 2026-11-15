@@ -93,3 +93,25 @@ def test_default_data_dir_is_per_checkout(tmp_path):
         files.append(out.stdout.strip())
     assert files[0] != files[1]
     assert all(f.startswith(str(tmp_path / "home")) for f in files)
+
+
+def test_stale_own_data_dir_survives_and_is_seeded(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text('#!/bin/sh\necho "$TESTMON_DATAFILE"\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(home)}
+    repo = _repo(tmp_path)
+    run = lambda: subprocess.run(  # noqa: E731
+        [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    datafile = Path(run())
+    cache = home / ".cache" / "crewship-testmon"
+    (cache / "seed").write_text("seed")
+    datafile.unlink(missing_ok=True)
+    subprocess.run(["touch", "-d", "20 days ago", str(datafile.parent)], check=True)
+    assert Path(run()) == datafile
+    assert datafile.parent.is_dir()
+    assert datafile.read_text() == "seed"
