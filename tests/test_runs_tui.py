@@ -1,8 +1,11 @@
+import getpass
+import grp
 import json
 import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -328,3 +331,57 @@ def test_json_anonymize_has_no_postmortems_or_private_names(host, tmp_path):
     assert doc["unmatched"] == [] and all(r["postmortems"] == [] for r in doc["runs"])
     assert "flaky" not in out and "fix-widgets" not in out
     assert "github.com" not in out and "widgets" not in out
+
+
+def test_installed_layout_shows_the_repo_postmortem_notes(host, tmp_path):
+    """The recipe's own copy tasks lay the tool and the notes out as an install does."""
+    import yaml
+
+    root = TOOL.parents[2]
+    ansible = Path(sys.executable).parent / "ansible-playbook"
+    if not ansible.exists():
+        pytest.skip("needs ansible-playbook")
+    wanted = {
+        "Install the terminal pane sources",
+        "Install the validation post-mortem notes for runs-tui",
+    }
+    tasks = [
+        t
+        for t in yaml.safe_load((root / "blueprint/ansible/tasks/tools.yml").read_text())
+        if t["name"] in wanted
+    ]
+    assert len(tasks) == len(wanted)
+    playbook = tmp_path / "install.yml"
+    playbook.write_text(
+        yaml.safe_dump(
+            [{"hosts": "localhost", "connection": "local", "gather_facts": False, "tasks": tasks}]
+        )
+    )
+    share = tmp_path / "share"
+    for sub in ("docs", "tui"):  # the layout task creates these
+        (share / sub).mkdir(parents=True)
+    variables = {
+        "crewship_repo": str(root),
+        "crewship_share_dir": str(share),
+        "crewship_cfg": {"user": getpass.getuser()},
+        "crewship_group": grp.getgrgid(os.getgid()).gr_name,
+        "crewship_tuis": [{"dir": "runs-tui"}],
+    }
+    subprocess.run(
+        [str(ansible), "-i", "localhost,", str(playbook), "-e", json.dumps(variables)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    installed = share / "tui/runs-tui/runs-tui.ts"
+    out = subprocess.run(
+        ["bun", str(installed), "--json", "--all"],
+        env={**os.environ, **host},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    doc = json.loads(out)
+    noted = [p for r in doc["runs"] for p in r["postmortems"]] + doc["unmatched"]
+    assert noted
