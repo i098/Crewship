@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Validation test step: run only the tests that the change affects (pytest-testmon).
-# The testmon database is keyed by file content, so every worktree on the host shares one file.
+# One testmon database per checkout: concurrent runs must not write the same SQLite file (FOREIGN KEY failures).
 # The first run on a host has no data and runs the whole suite. GitHub CI stays on the full suite.
 # testmon sees only Python that runs in the pytest process. Any changed non-.py file (playbook, shell, .ts, ...)
 # or an unknown merge base runs the full suite; testmon still records data (--testmon-noselect).
 set -euo pipefail
 
-data_dir=${CF_TESTMON_DIR:-$HOME/.cache/crewship-testmon}
+top=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+data_dir=${CF_TESTMON_DIR:-$HOME/.cache/crewship-testmon/$(printf %s "$top" | sha1sum | cut -c1-12)}
 mkdir -p "$data_dir"
 export TESTMON_DATAFILE="$data_dir/testmondata"
 export CF_SANDBOX_RW="$data_dir${CF_SANDBOX_RW:+:$CF_SANDBOX_RW}"

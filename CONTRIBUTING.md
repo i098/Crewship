@@ -101,7 +101,7 @@ uv run pytest -n auto --dist worksteal
 
 # Only the tests that your change affects (pytest-testmon; the validation step runs this in cf-sandbox).
 # The first run on a host has no data and runs everything. A change that touches any non-.py file
-# (compared with the merge base, untracked files included), or an unknown merge base, also runs everything. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon.
+# (compared with the merge base, untracked files included), or an unknown merge base, also runs everything. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon/<hash of the checkout path> (one database per checkout, so parallel runs do not collide).
 scripts/test-affected
 
 # Ansible syntax check

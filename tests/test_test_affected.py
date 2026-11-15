@@ -74,3 +74,22 @@ def test_git_failure_runs_everything(tmp_path):
     (repo / "a.py").write_text("x = 2\n")
     (repo / ".git" / "index").write_text("corrupt")
     assert _mode(repo) == "--testmon-noselect"
+
+
+def test_default_data_dir_is_per_checkout(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text('#!/bin/sh\necho "$TESTMON_DATAFILE"\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(tmp_path / "home")}
+    files = []
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+        repo = _repo(tmp_path / name)
+        out = subprocess.run(
+            [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
+        )
+        files.append(out.stdout.strip())
+    assert files[0] != files[1]
+    assert all(f.startswith(str(tmp_path / "home")) for f in files)
