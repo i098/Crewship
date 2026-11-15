@@ -343,6 +343,7 @@ def test_installed_layout_shows_the_repo_postmortem_notes(host, tmp_path):
         pytest.skip("needs ansible-playbook")
     wanted = {
         "Install the terminal pane sources",
+        "Create the directory for the runs-tui post-mortem notes",
         "Install the validation post-mortem notes for runs-tui",
     }
     tasks = [
@@ -358,8 +359,7 @@ def test_installed_layout_shows_the_repo_postmortem_notes(host, tmp_path):
         )
     )
     share = tmp_path / "share"
-    for sub in ("docs", "tui"):  # the layout task creates these
-        (share / sub).mkdir(parents=True)
+    (share / "tui").mkdir(parents=True)  # the layout task creates it
     variables = {
         "crewship_repo": str(root),
         "crewship_share_dir": str(share),

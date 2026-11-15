@@ -195,6 +195,14 @@
   loop: "{{ ['tui-theme'] + crewship_tuis | map(attribute='dir') | list }}"
 
 # runs-tui reads docs/validation-postmortems.md two directories above its script: <share>/docs once installed.
+- name: Create the directory for the runs-tui post-mortem notes
+  ansible.builtin.file:
+    path: "{{ crewship_share_dir }}/docs"
+    state: directory
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0755"
+
 - name: Install the validation post-mortem notes for runs-tui
   ansible.builtin.copy:
     src: "{{ crewship_repo }}/docs/validation-postmortems.md"
