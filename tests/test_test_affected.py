@@ -2,6 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "test-affected"
 
 
@@ -74,3 +76,58 @@ def test_git_failure_runs_everything(tmp_path):
     (repo / "a.py").write_text("x = 2\n")
     (repo / ".git" / "index").write_text("corrupt")
     assert _mode(repo) == "--testmon-noselect"
+
+
+def test_default_data_dir_is_per_checkout(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text('#!/bin/sh\necho "$TESTMON_DATAFILE"\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(tmp_path / "home")}
+    files = []
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+        repo = _repo(tmp_path / name)
+        out = subprocess.run(
+            [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
+        )
+        files.append(out.stdout.strip())
+    assert files[0] != files[1]
+    assert all(f.startswith(str(tmp_path / "home")) for f in files)
+
+
+def test_stale_own_data_dir_survives_and_is_seeded(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text('#!/bin/sh\necho "$TESTMON_DATAFILE"\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(home)}
+    repo = _repo(tmp_path)
+    run = lambda: subprocess.run(  # noqa: E731
+        [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    datafile = Path(run())
+    cache = home / ".cache" / "crewship-testmon"
+    (cache / "seed").write_text("seed")
+    datafile.unlink(missing_ok=True)
+    subprocess.run(["touch", "-d", "20 days ago", str(datafile.parent)], check=True)
+    assert Path(run()) == datafile
+    assert datafile.parent.is_dir()
+    assert datafile.read_text() == "seed"
+
+
+@pytest.mark.parametrize(("exit_code", "published"), [(0, True), (1, False), (137, False)])
+def test_seed_published_only_after_successful_run(tmp_path, exit_code, published):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "cf-sandbox").write_text(f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n')
+    (fake / "cf-sandbox").chmod(0o755)
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
+    env |= {"PATH": f"{fake}:{os.environ['PATH']}", "HOME": str(home)}
+    proc = subprocess.run([str(SCRIPT)], cwd=_repo(tmp_path), env=env)
+    assert proc.returncode == exit_code
+    assert (home / ".cache" / "crewship-testmon" / "seed").exists() is published
