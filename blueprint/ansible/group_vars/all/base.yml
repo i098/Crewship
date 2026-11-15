@@ -135,6 +135,7 @@ crewship_home_layout_paths: >-
       crewship_cfg.home ~ '/.local/state',
       crewship_share_dir,
       crewship_share_dir ~ '/cli',
+      crewship_share_dir ~ '/docs',
       crewship_share_dir ~ '/schedules',
       crewship_share_dir ~ '/tui',
       crewship_user_units,

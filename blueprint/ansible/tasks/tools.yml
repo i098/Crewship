@@ -194,6 +194,16 @@
     remote_src: true
   loop: "{{ ['tui-theme'] + crewship_tuis | map(attribute='dir') | list }}"
 
+# runs-tui reads docs/validation-postmortems.md two directories above its script: <share>/docs once installed.
+- name: Install the validation post-mortem notes for runs-tui
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/docs/validation-postmortems.md"
+    dest: "{{ crewship_share_dir }}/docs/validation-postmortems.md"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+
 - name: Install the locked terminal pane dependencies
   ansible.builtin.command:
     argv: ["{{ crewship_local_bin }}/bun", install, --frozen-lockfile, --production, --ignore-scripts]
