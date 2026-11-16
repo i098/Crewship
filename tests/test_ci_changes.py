@@ -119,12 +119,13 @@ def test_missing_base_fails_without_skip_output(tmp_path):
     assert output == ""
 
 
-def workflow_context(event, changes, code, *, python="success", runtime="success"):
+def workflow_context(event, changes, code, *, python="success", smokes="success", runtime="success"):
     return {
         "github": SimpleNamespace(event_name=event),
         "needs": SimpleNamespace(
             changes=SimpleNamespace(result=changes, outputs=SimpleNamespace(code=code)),
             python_checks=SimpleNamespace(result=python),
+            config_smokes=SimpleNamespace(result=smokes),
             runtime_smoke=SimpleNamespace(result=runtime),
         ),
         "always": lambda: True,
@@ -176,7 +177,7 @@ def test_required_check_rejects_prerequisite_failure(changes, code):
 def test_heavy_job_event_policy(event, code):
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
     context = workflow_context(event, "success", code)
-    for name in ["config-and-python", "python_checks", "runtime_smoke",
+    for name in ["config-and-python", "python_checks", "config_smokes", "runtime_smoke",
                  "crewboard", "harbor-webkit", "container-smoke"]:
         assert job_runs(jobs[name], context) == (code == "true")
     assert job_runs(jobs["quality-gate"], context) == (
@@ -185,10 +186,11 @@ def test_heavy_job_event_policy(event, code):
 
 
 @pytest.mark.parametrize("python", ["success", "failure", "cancelled", "skipped"])
+@pytest.mark.parametrize("smokes", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("runtime", ["success", "failure", "cancelled", "skipped"])
-def test_required_gate_preserves_both_workload_results(python, runtime):
+def test_required_gate_preserves_all_workload_results(python, smokes, runtime):
     jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
-    context = workflow_context("pull_request", "success", "true", python=python, runtime=runtime)
+    context = workflow_context("pull_request", "success", "true", python=python, smokes=smokes, runtime=runtime)
     gate = jobs["config-and-python"]
     assert job_runs(gate, context)
-    assert (run_gate(gate, context) == 0) == (python == runtime == "success")
+    assert (run_gate(gate, context) == 0) == (python == smokes == runtime == "success")
