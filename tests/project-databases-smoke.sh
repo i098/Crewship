@@ -9,7 +9,8 @@ trap '"${docker[@]}" rm -f "$lab" >/dev/null 2>&1 || true' EXIT
 "${docker[@]}" run --detach --rm --privileged --name "$lab" \
   --env DOCKER_TLS_CERTDIR= --volume "$root:/src:ro" \
   docker:dind --storage-driver=vfs >/dev/null
-"${docker[@]}" exec "$lab" sh -ec '
+# CREWSHIP_TEST_SHARD=K/N runs one slice; each slice has its own lab, so fixed container names and ports never collide.
+"${docker[@]}" exec ${CREWSHIP_TEST_SHARD:+--env CREWSHIP_TEST_SHARD="$CREWSHIP_TEST_SHARD"} "$lab" sh -ec '
   timeout 90 sh -c "until docker info >/dev/null 2>&1; do sleep 1; done"
   apk add --no-cache python3 py3-pip bash nodejs postgresql-client
   python3 -m venv /lab-venv
