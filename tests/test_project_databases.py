@@ -797,6 +797,7 @@ def test_ansible_on_off_and_idempotence(service, tmp_path):
 
 @lab
 def test_readiness_waits_for_final_tcp_server(tmp_path, monkeypatch):
+    assert False, "deliberate break: proves a lab test failure turns the shard red"
     module = load(tmp_path, monkeypatch)
     module.SECRETS.mkdir(parents=True)
     document = module.compose_document("hold", {"engine": "postgres", "image": "postgres:alpine", "port": 25499})
