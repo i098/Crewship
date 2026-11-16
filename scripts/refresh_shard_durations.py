@@ -30,8 +30,11 @@ def main(junit):
     for case in ET.parse(junit).getroot().iter("testcase"):
         key = nodeid(case)
         seconds[key] = round(seconds.get(key, 0) + float(case.get("time", 0)), 3)
-    OUT.write_text(json.dumps(dict(sorted(seconds.items())), indent=0) + "\n")
-    print(f"{len(seconds)} tests, {sum(seconds.values()):.0f} s -> {OUT}")
+    # Keep the file small: a test under 0.3 s is unmeasured and goes round-robin. Drop failed tests
+    # by hand first: their seconds are timeouts, not durations.
+    kept = {k: round(v, 1) for k, v in sorted(seconds.items()) if v >= 0.3}
+    OUT.write_text(json.dumps(kept, indent=0) + "\n")
+    print(f"{len(kept)} of {len(seconds)} tests, {sum(kept.values()):.0f} s -> {OUT}")
 
 
 if __name__ == "__main__":
