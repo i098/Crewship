@@ -80,7 +80,7 @@ jobs:
 
   config-and-python:
     name: configuration and python checks
-    needs: [changes, python_checks, runtime_smoke]
+    needs: [changes, python_checks, config_smokes, runtime_smoke]
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -93,17 +93,19 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           PYTHON_RESULT: ${{ needs.python_checks.result }}
+          SMOKES_RESULT: ${{ needs.config_smokes.result }}
           RUNTIME_RESULT: ${{ needs.runtime_smoke.result }}
         run: |
           [[ "$CHANGES_RESULT" == success ]] &&
           [[ "$CODE" == true ]] &&
           [[ "$PYTHON_RESULT" == success ]] &&
+          [[ "$SMOKES_RESULT" == success ]] &&
           [[ "$RUNTIME_RESULT" == success ]]
 
   # The suite is sharded over four runners, one 4-vCPU machine each, because the audit of 100 runs
   # showed 1031 s of pytest on one runner was the critical path (waiting and setup were under 15 s).
   # The required "configuration and python checks" gate reads this job's aggregate result, so every
-  # shard must pass. Shard 1 also runs the checks that are not pytest.
+  # shard must pass. Shard 1 also runs lint; the other checks are in config_smokes.
   python_checks:
     name: python and configuration tests (${{ matrix.shard }}/4)
     needs: changes
@@ -177,8 +179,48 @@ jobs:
           fi
           uv run pytest -n auto --dist worksteal "${tests[@]}"
 
+  # The checks that are not pytest ran in shard 1 and made it 188 s longer than the others.
+  config_smokes:
+    name: configuration and smoke checks
+    needs: changes
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.code != 'false')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Check prerequisite results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]] &&
+          [[ "$CODE" == true || "$CODE" == false ]]
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install latest uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Sync locked dependencies
+        run: uv sync --locked --group dev
+
+      - name: Install latest Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
       - name: Token suggestion installation and runtime smoke
-        if: matrix.shard == 1 && needs.changes.outputs.scope != 'imessage'
+        if: needs.changes.outputs.scope != 'imessage'
         run: |
           user=crewship-token-proof
           home=/home/$user
@@ -203,20 +245,16 @@ jobs:
 
       # herdr-patch also runs on the operator's computer: macOS ships Python 3.9.
       - name: herdr-patch tests on Python 3.9
-        if: matrix.shard == 1
         run: uvx --python 3.9 pytest tests/test_herdr_patch.py
 
       # Offline: a stub omp records the argv omp-as-pi builds.
       - name: omp-as-pi tests
-        if: matrix.shard == 1
         run: bash blueprint/config/omp-as-pi/test.sh
 
       - name: Validate default configuration
-        if: matrix.shard == 1
         run: ./ship.sh inspect --config blueprint/config/default.yml
 
       - name: Validate container configuration
-        if: matrix.shard == 1
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
 
   # The lab tests use fixed container names and ports, so they cannot share one Docker daemon.
