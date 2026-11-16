@@ -219,12 +219,18 @@ jobs:
         if: matrix.shard == 1
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
 
+  # The lab tests use fixed container names and ports, so they cannot share one Docker daemon.
+  # Each shard runs its own docker-in-docker lab on its own runner; the gate needs every shard.
   runtime_smoke:
-    name: project database runtime smoke
+    name: project database runtime smoke (${{ matrix.shard }}/4)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     permissions:
       contents: read
     steps:
@@ -234,6 +240,8 @@ jobs:
           persist-credentials: false
 
       - name: Project database disposable service smoke
+        env:
+          CREWSHIP_TEST_SHARD: ${{ matrix.shard }}/4
         run: bash tests/project-databases-smoke.sh
 
   # apps/crewboard/ is a Rust crate; its Cargo.lock stays locked like uv.lock.
