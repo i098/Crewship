@@ -24,3 +24,11 @@ def test_shards_partition_the_suite_exactly():
     assert len(everything) >= 3
     assert sorted(sum(shards, [])) == sorted(everything)
     assert all(shards)
+
+
+def test_assign_balances_known_tests_and_keeps_unknown_ones():
+    from sharding import assign
+
+    ids = ["a", "b", "c", "d", "new1", "new2", "new3"]
+    owners = assign(ids, {"a": 9, "b": 5, "c": 4, "d": 4}, 2)
+    assert owners == [0, 1, 1, 0, 0, 1, 0]

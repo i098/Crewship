@@ -9,6 +9,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from sharding import assign, load_durations
+
 REFUSE = Path(tempfile.mkdtemp(prefix="crewship-no-herdr-")) / "herdr"
 REFUSE.write_text(
     "#!/bin/sh\n"
@@ -22,13 +24,14 @@ for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
 
 
 def pytest_collection_modifyitems(config, items):
-    """CI shards the suite: CREWSHIP_TEST_SHARD=K/N keeps every Nth collected test, starting at K."""
+    """CI shards the suite: CREWSHIP_TEST_SHARD=K/N keeps the tests assigned to shard K of N (see tests/sharding.py)."""
     shard = os.environ.get("CREWSHIP_TEST_SHARD")
     if not shard:
         return
     index, count = (int(part) for part in shard.split("/"))
     assert 1 <= index <= count, f"CREWSHIP_TEST_SHARD={shard} is not K/N with 1 <= K <= N"
-    items[:] = items[index - 1 :: count]
+    owners = assign([item.nodeid for item in items], load_durations(), count)
+    items[:] = [item for item, owner in zip(items, owners) if owner == index - 1]
 
 
 try:
