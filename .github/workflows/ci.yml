@@ -249,7 +249,7 @@ jobs:
 
       # Offline: a stub omp records the argv omp-as-pi builds.
       - name: omp-as-pi tests
-        run: bash blueprint/config/omp-as-pi/test.sh
+        run: bash blueprint/config/omp-as-pi/test.sh && false # deliberate failure proof
 
       - name: Validate default configuration
         run: ./ship.sh inspect --config blueprint/config/default.yml
