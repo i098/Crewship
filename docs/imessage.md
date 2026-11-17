@@ -974,9 +974,9 @@ The code is `apps/imessage/webchat.ts`.
 
 ### Publish the web chat on the tailnet
 
-The page can send text as the owner and has no sign-in.
-Publish it on the tailnet only.
-Do not use `tailscale funnel`, a tunnel or a public reverse proxy for this port.
+The page can send text as the owner and has no sign-in of its own.
+Never serve it without `tailscale serve` or an access gateway that does the sign-in in front.
+Do not point `tailscale funnel`, a tunnel or a public reverse proxy straight at this port.
 Each device and user that the tailnet access rules let reach this host can read the thread and send text.
 
 1. Add the `web` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
