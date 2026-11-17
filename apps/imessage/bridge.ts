@@ -608,7 +608,7 @@ if (cards || igWebhook) {
   if (cards) console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
   if (igWebhook) console.log(`fm-imessage: Instagram webhook on 127.0.0.1:${CARD_PORT}/instagram/webhook`);
 }
-// The web chat (docs/imessage.md#web-chat): loopback only; the operator publishes this port on the tailnet, never in public.
+// The web chat (docs/imessage.md#web-chat): loopback only, no sign-in of its own; the operator publishes this port only with `tailscale serve` or behind an access gateway that enforces sign-in on public requests.
 if (WEB_PORT) {
   const web = webchatRoutes({ port: WEB_PORT, host: env.FM_IMESSAGE_WEB_HOST, msgs: () => memory.msgs, send: webSend, attachDir: ATTACH_DIR, sentDir: SENT_DIR });
   Bun.serve({ hostname: "127.0.0.1", port: WEB_PORT, maxRequestBodySize: 16384, development: false,

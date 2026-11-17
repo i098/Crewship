@@ -1,5 +1,6 @@
 // The web chat (docs/imessage.md#web-chat): one page that shows the thread from the desk memory and files typed text
-// as an inbox note. The bridge serves it on its own loopback port; the operator publishes that port on the tailnet.
+// as an inbox note. The bridge serves it on its own loopback port; the operator publishes that port with `tailscale serve`
+// or behind an access gateway that enforces sign-in. The page has no sign-in of its own.
 // The page can send text as the owner, so every request must name an allowed Host, and a send must come from the
 // page itself (its Origin is that Host).
 import { existsSync } from "node:fs";
@@ -15,7 +16,7 @@ const plain = (status: number, text: string) => new Response(`${text}\n`, { stat
 
 export type WebChat = {
   port: number;
-  host?: string; // the tailnet name that `tailscale serve` publishes the port under
+  host?: string; // the hostname that `tailscale serve` or the access gateway publishes the port under
   msgs: () => Msg[];
   send: (text: string) => boolean; // routes the text to Firstmate; false when the bridge is stopping
   attachDir: string; // the owner's saved attachments

@@ -951,7 +951,7 @@ Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which 
 
 ## Web chat
 
-The bridge can serve one private page that shows this thread and sends typed text to Firstmate.
+The bridge can serve one page that shows this thread and sends typed text to Firstmate.
 Use it on a device that has a browser but no Messages app, for example XR glasses.
 The code is `apps/imessage/webchat.ts`.
 
@@ -972,28 +972,31 @@ The code is `apps/imessage/webchat.ts`.
   A send must also carry the page's own `Origin`.
   A standby slot does not serve the page.
 
-### Publish the web chat on the tailnet
+### Publish the web chat
 
 The page can send text as the owner and has no sign-in of its own.
-Never serve it without `tailscale serve` or an access gateway that does the sign-in in front.
-Do not point `tailscale funnel`, a tunnel or a public reverse proxy straight at this port.
-Each device and user that the tailnet access rules let reach this host can read the thread and send text.
+Never expose its port directly.
+Publish it only with `tailscale serve`, or through an access gateway that enforces sign-in on public requests and forwards to this port.
+With `tailscale serve`, each device and user that the tailnet access rules let reach this host can read the thread and send text.
+The listener allows one outside name: `host` (`FM_IMESSAGE_WEB_HOST`).
+With an access gateway, set `host` to the public hostname of the gateway, or make the gateway forward `Host` and `Origin` as that name; any other name gets 403.
+One `host` name serves one route, so the tailnet name and a gateway name do not work together.
 
 1. Add the `web` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
 
    ```yaml
        web:
-         host: agent.example.ts.net   # this machine's tailnet name
+         host: agent.example.ts.net   # the hostname that tailscale serve or the access gateway publishes the page under
          port: 8768                   # optional; this is the default
    ```
 
-2. Publish the port on the tailnet:
+2. Publish the port with `tailscale serve` (skip this step when an access gateway publishes the page):
 
    ```bash
    tailscale serve --bg http://127.0.0.1:8768
    ```
 
-3. Open `https://agent.example.ts.net/` on a device in the tailnet.
+3. Open `https://agent.example.ts.net/` on a device in the tailnet, or the gateway's public hostname.
 
 If you publish on an HTTPS port other than 443 (`tailscale serve --bg --https=8443 ...`), add that port to `host`, for example `agent.example.ts.net:8443`.
 To turn the web chat off, run `tailscale serve reset`, remove the block, and run `./ship.sh launch`.
