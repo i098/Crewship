@@ -849,11 +849,14 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
   return true;
 }
 
-// A text typed on the web chat page: the inbox note of an iMessage, marked with its source, and the memory entry.
+// A text typed on the web chat page: received like an iMessage, so it is routed, retried and followed up, but always for
+// Firstmate (the desk has no message to answer or react to). Its ref is a synthetic id in the owner's chat, so a plain
+// send to the owner answers it; the note and the memory entry keep the web mark.
 function webSend(text: string): boolean {
-  const note = `${WEB_MARK}${text}`;
-  if (!fileNote(`web-${crypto.randomUUID()}`, note)) return false;
-  remember("owner", note);
+  if (stopping) return false;
+  const id = `web-${crypto.randomUUID()}`;
+  receive(id, `${WEB_MARK}${text}`, { ...(proactiveRef ?? { space: `iMessage;-;${OWNER}` }), id }, true);
+  if (!DESK_V2) handoffPending();
   return true;
 }
 

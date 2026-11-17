@@ -17,7 +17,7 @@ export type WebChat = {
   port: number;
   host?: string; // the tailnet name that `tailscale serve` publishes the port under
   msgs: () => Msg[];
-  send: (text: string) => boolean; // files the note; false when the inbox did not take it
+  send: (text: string) => boolean; // routes the text to Firstmate; false when the bridge is stopping
   attachDir: string; // the owner's saved attachments
   sentDir: string; // photos sent to him, named <memory index>-<name>
 };

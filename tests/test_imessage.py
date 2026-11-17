@@ -3834,9 +3834,6 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
         assert web("/send", "POST", "[test] forged", origin="https://evil.example")[0] == 403
         assert web("/send", "POST", "[test] forged", origin=None)[0] == 403
         assert web("/file/a/..%2Frouting.jsonl")[0] == 404
-        (fake / "inbox-fail").touch()
-        assert web("/send", "POST", "[test] refused by the inbox")[0] == 503
-        (fake / "inbox-fail").unlink()
         assert web("/send", "POST", "[test] typed on the glasses")[0] == 200
         assert "[web chat] [test] typed on the glasses" in text(notes).splitlines()[-1]
         assert "forged" not in text(notes)
@@ -3848,6 +3845,37 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
         assert status == 200 and picture == shot.read_bytes()
         assert web(f"/messages?after={messages[1]['i']}")[1].count(b'"kind"') == 1
         assert b"<title>Firstmate</title>" in web("/")[1]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_web_chat_text_is_routed_and_retried_when_the_inbox_refuses_it(tmp_path, monkeypatch):
+    port, tailnet = free_port(), "agent.example.ts.net"
+    monkeypatch.setenv("FM_IMESSAGE_WEB_PORT", str(port))
+    monkeypatch.setenv("FM_IMESSAGE_WEB_HOST", tailnet)
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    bridge = start(1)
+    try:
+        inbound("m1", text="[test] hello from the phone")
+        (fake / "inbox-fail").touch()
+        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("POST", "/send", body="[test] typed on the glasses", headers={"Host": tailnet, "Origin": f"https://{tailnet}"})
+        assert conn.getresponse().status == 200
+        routes = [json.loads(line) for line in text(state / "routing.jsonl").splitlines()]
+        received = [e["received"] for e in routes if "received" in e and e["received"]["requestId"].startswith("web-")]
+        assert len(received) == 1 and received[0]["text"] == "[web chat] [test] typed on the glasses" and received[0]["firstmate"]
+        request_id = received[0]["requestId"]
+        attempts = lambda: sum(request_id in line for line in text(notes).splitlines())
+        wait_for(lambda: attempts() >= 2, "the bridge tried the refused note again")
+        (fake / "inbox-fail").unlink()
+        done = lambda: any(e.get("route") == "done" and request_id in e.get("ids", []) for e in
+                           (json.loads(line) for line in text(state / "routing.jsonl").splitlines()))
+        wait_for(done, "the accepted retry closing the route")
+        settled = attempts()
+        time.sleep(2.5)
+        assert attempts() == settled
     finally:
         bridge.terminate()
         bridge.wait(10)

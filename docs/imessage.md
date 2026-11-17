@@ -963,8 +963,9 @@ The code is `apps/imessage/webchat.ts`.
   The bridge does not delete these copies.
 - **Send.** The text box files an inbox note the same way an incoming iMessage does.
   The note and the memory entry start with `[web chat]`, so that the reader can tell the text from an iMessage.
-  The answer goes out with `fm-imessage`, so it shows in Messages and on the page.
-  If the inbox refuses the note, the page says so and keeps the text.
+  The bridge saves the text first, as it does for an iMessage, and always gives it to Firstmate, never to the desk.
+  If the inbox refuses the note, the bridge tries again and adds the "still unanswered" note when no answer follows.
+  The answer goes out with `fm-imessage` as a plain send with no thread target, so it shows in Messages and on the page.
 - **Listener.** The page has its own listener on `127.0.0.1`, apart from the command port and the card port.
   The web chat is off until `FM_IMESSAGE_WEB_PORT` is set.
   The listener answers only a request whose `Host` is `127.0.0.1:<port>` or the name in `FM_IMESSAGE_WEB_HOST`.
