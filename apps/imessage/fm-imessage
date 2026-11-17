@@ -55,10 +55,16 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
+find_bun() { # cron and systemd run with PATH=/usr/bin:/bin, so also look beside this script and in the usual install dirs
+  local b
+  command -v bun && return
+  for b in "$here/bun" "$HOME/.local/bin/bun" "$HOME/.bun/bin/bun"; do [ -x "$b" ] && { echo "$b"; return; }; done
+  return 1
+}
 clean() { # filter stdin; send it unchanged with a warning when bun or clean.ts is missing or fails
-  local buf out
+  local buf out bun
   buf=$(cat; echo x); buf=${buf%x}
-  if command -v bun >/dev/null && [ -f "$here/clean.ts" ] && out=$(printf '%s' "$buf" | bun "$here/clean.ts" || exit 1; echo x); then
+  if bun=$(find_bun) && [ -f "$here/clean.ts" ] && out=$(printf '%s' "$buf" | "$bun" "$here/clean.ts" || exit 1; echo x); then
     out=${out%x}; printf '%s' "$out"
   else
     echo "fm-imessage: filter unavailable or failed, sending text unfiltered" >&2; printf '%s' "$buf"
