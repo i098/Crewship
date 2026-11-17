@@ -230,6 +230,9 @@ crewship:
   #     url: https://cards.example.com   # the public hostname of the named card tunnel
   #     port: 8767                       # the default; the card-only loopback port
   #     tunnel_token_env: CARDS_TUNNEL_TOKEN   # the default; a variable name in ~/super.env
+  #   web:                           # Optional: the private web chat; see imessage.md#web-chat
+  #     host: <machine>.<tailnet>.ts.net   # the tailnet name that `tailscale serve` publishes the page under
+  #     port: 8768                       # the default; the web chat loopback port
   # github_board:         # Optional, off when absent; set only in .local/host.yml. See github-board.md
   #   repo: owner/board
   #   project: 3

@@ -3807,6 +3807,53 @@ def test_card_listener_serves_only_open_cards_by_their_token(tmp_path):
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_path, monkeypatch):
+    port, tailnet = free_port(), "agent.example.ts.net"
+    monkeypatch.setenv("FM_IMESSAGE_WEB_PORT", str(port))
+    monkeypatch.setenv("FM_IMESSAGE_WEB_HOST", tailnet)
+    fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(png(40, 30))
+
+    def web(path, method="GET", body=None, host=tailnet, origin=f"https://{tailnet}"):
+        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(method, path, body=body, headers={"Host": host, **({"Origin": origin} if origin else {})})
+        response = conn.getresponse()
+        return response.status, response.read()
+
+    def thread():
+        return json.loads(web("/messages")[1])["messages"]
+
+    bridge = start(1)
+    try:
+        inbound("m1", text="[test] hello from the phone")
+        cli("--image", str(shot), "[test] a photo for you")
+        wait_for(lambda: len(thread()) == 2, "his text and the photo in the thread")
+        # Nothing is filed without an allowed Host and the page's own Origin.
+        assert web("/", host="evil.example")[0] == 403
+        assert web("/send", "POST", "[test] forged", origin="https://evil.example")[0] == 403
+        assert web("/send", "POST", "[test] forged", origin=None)[0] == 403
+        assert web("/file/a/..%2Frouting.jsonl")[0] == 404
+        (fake / "inbox-fail").touch()
+        assert web("/send", "POST", "[test] refused by the inbox")[0] == 503
+        (fake / "inbox-fail").unlink()
+        assert web("/send", "POST", "[test] typed on the glasses")[0] == 200
+        assert "[web chat] [test] typed on the glasses" in text(notes).splitlines()[-1]
+        assert "forged" not in text(notes)
+        messages = thread()
+        assert [(m["kind"], m["text"]) for m in messages] == [
+            ("owner", "[test] hello from the phone"), ("supervisor", "[image: shot.png]\n\n[test] a photo for you"),
+            ("owner", "[web chat] [test] typed on the glasses")]
+        status, picture = web(messages[1]["images"][0], host=f"127.0.0.1:{port}")
+        assert status == 200 and picture == shot.read_bytes()
+        assert web(f"/messages?after={messages[1]['i']}")[1].count(b'"kind"') == 1
+        assert b"<title>Firstmate</title>" in web("/")[1]
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_a_refused_card_files_a_note_and_the_texts_behind_it_go_on(tmp_path):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
     (fake / "card-refused").touch()

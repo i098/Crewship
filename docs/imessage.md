@@ -949,6 +949,54 @@ The bubble opens on his phone, so the page listener needs a public HTTPS address
 
 Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which runs the tunnel with the token from `~/super.env`, and sets the card variables in the bridge unit. The tunnel reaches only the page listener. To turn cards off, remove the block, run `./ship.sh launch`, then run `systemctl --user disable --now fm-cards-tunnel` and delete its unit.
 
+## Web chat
+
+The bridge can serve one private page that shows this thread and sends typed text to Firstmate.
+Use it on a device that has a browser but no Messages app, for example XR glasses.
+The code is `apps/imessage/webchat.ts`.
+
+- **Thread.** The page shows the last 200 entries of the [desk memory](#desk-memory): owner, supervisor and desk entries.
+  It asks for new entries every 2 seconds.
+  Times are in the browser's local zone.
+- **Images.** The page shows the owner's saved attachments that are a png, jpg, gif or webp file.
+  It shows a photo that Firstmate sends after the web chat is on: the bridge then keeps the sent file in `~/.local/state/fm-imessage/sent/`.
+  The bridge does not delete these copies.
+- **Send.** The text box files an inbox note the same way an incoming iMessage does.
+  The note and the memory entry start with `[web chat]`, so that the reader can tell the text from an iMessage.
+  The answer goes out with `fm-imessage`, so it shows in Messages and on the page.
+  If the inbox refuses the note, the page says so and keeps the text.
+- **Listener.** The page has its own listener on `127.0.0.1`, apart from the command port and the card port.
+  The web chat is off until `FM_IMESSAGE_WEB_PORT` is set.
+  The listener answers only a request whose `Host` is `127.0.0.1:<port>` or the name in `FM_IMESSAGE_WEB_HOST`.
+  A send must also carry the page's own `Origin`.
+  A standby slot does not serve the page.
+
+### Publish the web chat on the tailnet
+
+The page can send text as the owner and has no sign-in.
+Publish it on the tailnet only.
+Do not use `tailscale funnel`, a tunnel or a public reverse proxy for this port.
+Each device and user that the tailnet access rules let reach this host can read the thread and send text.
+
+1. Add the `web` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
+
+   ```yaml
+       web:
+         host: agent.example.ts.net   # this machine's tailnet name
+         port: 8768                   # optional; this is the default
+   ```
+
+2. Publish the port on the tailnet:
+
+   ```bash
+   tailscale serve --bg http://127.0.0.1:8768
+   ```
+
+3. Open `https://agent.example.ts.net/` on a device in the tailnet.
+
+If you publish on an HTTPS port other than 443 (`tailscale serve --bg --https=8443 ...`), add that port to `host`, for example `agent.example.ts.net:8443`.
+To turn the web chat off, run `tailscale serve reset`, remove the block, and run `./ship.sh launch`.
+
 ## Outbound text filter
 
 `fm-imessage` cleans each text and photo caption before it sends (`apps/imessage/clean.ts`, run with bun). The bridge refuses a text that is only a PR link, and any paragraph that starts with a task or mate id, has `key=` or `corr=` tokens, or has two or more commit hashes after a colon (hex inside a URL does not count as a hash). It answers HTTP 422 and queues nothing. Sub-agent answers pass the same filter in `subagent.ts`.

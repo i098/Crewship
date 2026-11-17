@@ -34,6 +34,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
+import { WEB_MARK, webchatRoutes } from "./webchat.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
@@ -132,6 +133,8 @@ const DOWNLOADS_DIR = `${STATE}/downloads`; // his messages with an attachment n
 const OUTGOING_DIR = `${STATE}/outgoing`; // photos for the outbox, until every bubble of their item is sent
 const CARD_URL = env.FM_IMESSAGE_CARD_URL?.replace(/\/+$/, ""); // cards are off without it
 const CARD_PORT = Number(env.FM_IMESSAGE_CARD_PORT || 8767);
+const WEB_PORT = Number(env.FM_IMESSAGE_WEB_PORT || 0); // the web chat is off without it (webchat.ts)
+const SENT_DIR = `${STATE}/sent`; // photos sent to him, kept for the web chat to show
 const listen = listenFrom(env, track); // voice memos and audio attachments are transcribed here (transcribe.ts)
 // See docs/imessage.md#mute for the mute contract.
 const muted = () => existsSync(`${STATE}/muted`);
@@ -147,7 +150,7 @@ const igWebhook = env.INSTAGRAM_DM_BACKEND === "graph" && !IG_MISSING.length ? i
   notify: (env.INSTAGRAM_DM_NOTIFY || "").split(/\s+/).filter(Boolean),
   say: (line) => console.log(`fm-imessage: ${line}`),
 }) : undefined;
-for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+for (const dir of [STATE, DESK_DIR, ATTACH_DIR, OUTGOING_DIR, SENT_DIR]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 const recent: Ref[] = []; // his last texts, newest last, for a threaded reply to one a few bubbles up
 const said = new Map<string, string>(); // his last 100 texts by message id, for the "was:" part of an edit note
 // One line for a transient upstream failure; the whole error, with its stack, for anything else.
@@ -605,6 +608,13 @@ if (cards || igWebhook) {
   if (cards) console.log(`fm-imessage: card pages on 127.0.0.1:${CARD_PORT} for ${CARD_URL}`);
   if (igWebhook) console.log(`fm-imessage: Instagram webhook on 127.0.0.1:${CARD_PORT}/instagram/webhook`);
 }
+// The web chat (docs/imessage.md#web-chat): loopback only; the operator publishes this port on the tailnet, never in public.
+if (WEB_PORT) {
+  const web = webchatRoutes({ port: WEB_PORT, host: env.FM_IMESSAGE_WEB_HOST, msgs: () => memory.msgs, send: webSend, attachDir: ATTACH_DIR, sentDir: SENT_DIR });
+  Bun.serve({ hostname: "127.0.0.1", port: WEB_PORT, maxRequestBodySize: 16384, development: false,
+    fetch: (req) => stopping ? new Response("stopping\n", { status: 503 }) : web(req) });
+  console.log(`fm-imessage: web chat on 127.0.0.1:${WEB_PORT}`);
+}
 // Alerts from herdr agent status (herdr-watch.ts); off unless FM_IMESSAGE_HERDR_ALERTS=true. Read-only: only `herdr agent list` runs.
 if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
   const list = (name: string, fallback: string) => (env[name] || fallback).split(/[\s,]+/).filter(Boolean);
@@ -735,9 +745,12 @@ async function deliver(o: Out, save: (o: Out) => void) {
     recordResponse(o);
   }
   const text = deliveredText(o);
-  if (text !== undefined) remember(kind, text, `outbox-text-${o.guid}`);
+  const at = text === undefined ? undefined : remember(kind, text, `outbox-text-${o.guid}`);
   if (o.react) return deliverReaction(o, save);
-  if (o.image) rmSync(o.image.path, { force: true });
+  if (!o.image) return;
+  // shortcut: the web chat's copies are never pruned, add a retention sweep when the directory grows large
+  if (WEB_PORT && at !== undefined && existsSync(o.image.path)) renameSync(o.image.path, `${SENT_DIR}/${at}-${o.image.name}`);
+  else rmSync(o.image.path, { force: true });
 }
 
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
@@ -829,6 +842,14 @@ function picked(card: Extract<Stored, { kind: "choice" }>, choice: number): bool
   if (!fileNote(`card-${card.key}-${card.expires}-pick`, text)) return false;
   remember("owner", text);
   if (card.chat && card.app) put({ ...card.chat, card: card.token, requests: [] });
+  return true;
+}
+
+// A text typed on the web chat page: the inbox note of an iMessage, marked with its source, and the memory entry.
+function webSend(text: string): boolean {
+  const note = `${WEB_MARK}${text}`;
+  if (!fileNote(`web-${crypto.randomUUID()}`, note)) return false;
+  remember("owner", note);
   return true;
 }
 

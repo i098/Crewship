@@ -43,6 +43,11 @@ Environment="FM_BLUEBUBBLES_WEBHOOK={{ crewship_cfg.imessage.bluebubbles.webhook
 Environment="FM_IMESSAGE_CARD_URL={{ crewship_cfg.imessage.cards.url }}"
 Environment="FM_IMESSAGE_CARD_PORT={{ crewship_imessage_card_port }}"
 {% endif %}
+{% if crewship_cfg.imessage.web is defined %}
+# The web chat (docs/imessage.md#web-chat): a loopback port that the operator publishes on the tailnet only.
+Environment="FM_IMESSAGE_WEB_PORT={{ crewship_cfg.imessage.web.port | default(8768) }}"
+Environment="FM_IMESSAGE_WEB_HOST={{ crewship_cfg.imessage.web.host }}"
+{% endif %}
 {% if crewship_instagram_dm_backend == 'graph' %}
 # The Instagram DM webhook on the card-page listener (docs/architecture.md#official-instagram-api). The app secret
 # and the verify token come from dm.env.
