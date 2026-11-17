@@ -15,6 +15,7 @@ crewship_storage_guard_image_age_hours: 168
 crewship_storage_guard_fill_horizon_hours: 6
 crewship_storage_guard_fill_min_pct: 70
 crewship_storage_guard_repeat_min: 30
+crewship_storage_guard_crit_remind_min: 1440
 # CRIT also removes gitignored build output (node_modules, .venv, target, dist,
 # .next, ...) in Treehouse pool worktrees that nothing changed for this many
 # days, through blueprint/fleet/doctor/worktree-prune.sh (found with find; sizes from fdu when installed).
