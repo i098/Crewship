@@ -22,47 +22,50 @@ export type WebChat = {
   sentDir: string; // photos sent to him, named <memory index>-<name>
 };
 
+// The pictures of one message, as page paths: his saved attachments, and the photo of an `[image: name]` entry.
+function images(o: WebChat, m: Msg): string[] {
+  if (m.kind === "owner") {
+    return [...m.text.matchAll(/saved for Firstmate at (\S+?)\)/g)].map((x) => x[1]!)
+      .filter((path) => path === `${o.attachDir}/${basename(path)}` && typeOf(path))
+      .map((path) => `/file/a/${encodeURIComponent(basename(path))}`);
+  }
+  const name = /^\[image: ([^\]\n]+)\]/.exec(m.text)?.[1];
+  return name && existsSync(`${o.sentDir}/${m.i}-${name}`) ? [`/file/s/${encodeURIComponent(`${m.i}-${name}`)}`] : [];
+}
+
 export function webchatRoutes(o: WebChat) {
   const hosts = new Set([`127.0.0.1:${o.port}`, ...(o.host ? [o.host.toLowerCase()] : [])]);
-  // The pictures of one message, as page paths: his saved attachments, and the photo of an `[image: name]` entry.
-  const images = (m: Msg): string[] => {
-    if (m.kind === "owner") {
-      return [...m.text.matchAll(/saved for Firstmate at (\S+?)\)/g)].map((x) => x[1]!)
-        .filter((path) => path === `${o.attachDir}/${basename(path)}` && typeOf(path))
-        .map((path) => `/file/a/${encodeURIComponent(basename(path))}`);
-    }
-    const name = /^\[image: ([^\]\n]+)\]/.exec(m.text)?.[1];
-    return name && existsSync(`${o.sentDir}/${m.i}-${name}`) ? [`/file/s/${encodeURIComponent(`${m.i}-${name}`)}`] : [];
+  const messages = (url: URL): Response => {
+    const all = o.msgs();
+    const after = Number(url.searchParams.get("after") ?? -1); // no `after`: a fresh page
+    const from = Number.isInteger(after) && after >= 0 ? after + 1 : Math.max(0, all.length - FIRST_PAGE);
+    return Response.json({ messages: all.slice(from).map((m) => ({ i: m.i, kind: m.kind, text: m.text, date: m.date, images: images(o, m) })) }, { headers: HEADERS });
+  };
+  const file = async (dir: string, name: string): Promise<Response> => {
+    const type = typeOf(name);
+    const body = Bun.file(`${dir}/${name}`);
+    // The name is one path segment with an image extension, so it cannot leave its directory.
+    if (name !== basename(name) || !type || !await body.exists()) return plain(404, "not found");
+    return new Response(body, { headers: { ...HEADERS, "cache-control": "private, max-age=86400", "content-type": type } });
+  };
+  const send = async (req: Request, host: string): Promise<Response> => {
+    let origin: string | undefined;
+    try { origin = new URL(req.headers.get("origin") ?? "").host.toLowerCase(); } catch { /* no Origin: not the page */ }
+    if (origin !== host) return plain(403, "forbidden");
+    const text = (await req.text()).trim();
+    if (!text) return plain(400, "empty message");
+    return o.send(text) ? plain(200, "sent") : plain(503, "Firstmate did not get it. Try again.");
   };
   return async (req: Request): Promise<Response> => {
     const host = (req.headers.get("host") ?? "").toLowerCase();
     if (!hosts.has(host)) return plain(403, "forbidden");
     const url = new URL(req.url);
-    if (req.method === "GET" && url.pathname === "/") return page();
-    if (req.method === "GET" && url.pathname === "/messages") {
-      const all = o.msgs();
-      const after = Number(url.searchParams.get("after") ?? -1); // no `after`: a fresh page
-      const from = Number.isInteger(after) && after >= 0 ? after + 1 : Math.max(0, all.length - FIRST_PAGE);
-      return Response.json({ messages: all.slice(from).map((m) => ({ i: m.i, kind: m.kind, text: m.text, date: m.date, images: images(m) })) }, { headers: HEADERS });
-    }
-    const file = req.method === "GET" && /^\/file\/([as])\/([^/]+)$/.exec(url.pathname);
-    if (file) {
-      const name = decodeURIComponent(file[2]!);
-      const type = typeOf(name);
-      const body = Bun.file(`${file[1] === "a" ? o.attachDir : o.sentDir}/${name}`);
-      // The name is one path segment with an image extension, so it cannot leave its directory.
-      if (name !== basename(name) || !type || !await body.exists()) return plain(404, "not found");
-      return new Response(body, { headers: { ...HEADERS, "cache-control": "private, max-age=86400", "content-type": type } });
-    }
-    if (req.method === "POST" && url.pathname === "/send") {
-      let origin: string | undefined;
-      try { origin = new URL(req.headers.get("origin") ?? "").host.toLowerCase(); } catch { /* no Origin: not the page */ }
-      if (origin !== host) return plain(403, "forbidden");
-      const text = (await req.text()).trim();
-      if (!text) return plain(400, "empty message");
-      return o.send(text) ? plain(200, "sent") : plain(503, "Firstmate did not get it. Try again.");
-    }
-    return plain(404, "not found");
+    if (req.method === "POST") return url.pathname === "/send" ? send(req, host) : plain(404, "not found");
+    if (req.method !== "GET") return plain(404, "not found");
+    if (url.pathname === "/") return page();
+    if (url.pathname === "/messages") return messages(url);
+    const path = /^\/file\/([as])\/([^/]+)$/.exec(url.pathname);
+    return path ? file(path[1] === "a" ? o.attachDir : o.sentDir, decodeURIComponent(path[2]!)) : plain(404, "not found");
   };
 }
 

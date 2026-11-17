@@ -747,10 +747,14 @@ async function deliver(o: Out, save: (o: Out) => void) {
   const text = deliveredText(o);
   const at = text === undefined ? undefined : remember(kind, text, `outbox-text-${o.guid}`);
   if (o.react) return deliverReaction(o, save);
-  if (!o.image) return;
+  if (o.image) settleSent(o.image, at);
+}
+
+// A sent photo's staged file: kept for the web chat under its memory index, deleted otherwise.
+function settleSent(image: { path: string; name: string }, at: number | undefined) {
   // shortcut: the web chat's copies are never pruned, add a retention sweep when the directory grows large
-  if (WEB_PORT && at !== undefined && existsSync(o.image.path)) renameSync(o.image.path, `${SENT_DIR}/${at}-${o.image.name}`);
-  else rmSync(o.image.path, { force: true });
+  if (WEB_PORT && at !== undefined && existsSync(image.path)) renameSync(image.path, `${SENT_DIR}/${at}-${image.name}`);
+  else rmSync(image.path, { force: true });
 }
 
 async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
