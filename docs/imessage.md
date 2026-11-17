@@ -949,6 +949,58 @@ The bubble opens on his phone, so the page listener needs a public HTTPS address
 
 Apply then installs `cloudflared` and the unit `fm-cards-tunnel.service`, which runs the tunnel with the token from `~/super.env`, and sets the card variables in the bridge unit. The tunnel reaches only the page listener. To turn cards off, remove the block, run `./ship.sh launch`, then run `systemctl --user disable --now fm-cards-tunnel` and delete its unit.
 
+## Web chat
+
+The bridge can serve one page that shows this thread and sends typed text to Firstmate.
+Use it on a device that has a browser but no Messages app, for example XR glasses.
+The code is `apps/imessage/webchat.ts`.
+
+- **Thread.** The page shows the last 200 entries of the [desk memory](#desk-memory): owner, supervisor and desk entries.
+  It asks for new entries every 2 seconds.
+  Times are in the browser's local zone.
+- **Images.** The page shows the owner's saved attachments that are a png, jpg, gif or webp file.
+  It shows a photo that Firstmate sends after the web chat is on: the bridge then keeps the sent file in `~/.local/state/fm-imessage/sent/`.
+  The bridge does not delete these copies.
+- **Send.** The text box files an inbox note the same way an incoming iMessage does.
+  The note and the memory entry start with `[web chat]`, so that the reader can tell the text from an iMessage.
+  The bridge saves the text first, as it does for an iMessage, and always gives it to Firstmate, never to the desk.
+  If the inbox refuses the note, the bridge tries again and adds the "still unanswered" note when no answer follows.
+  The answer goes out with `fm-imessage` as a plain send with no thread target, so it shows in Messages and on the page.
+- **Listener.** The page has its own listener on `127.0.0.1`, apart from the command port and the card port.
+  The web chat is off until `FM_IMESSAGE_WEB_PORT` is set.
+  The listener answers only a request whose `Host` is `127.0.0.1:<port>` or the name in `FM_IMESSAGE_WEB_HOST`.
+  A send must also carry the page's own `Origin`.
+  A standby slot does not serve the page.
+
+### Publish the web chat
+
+The page can send text as the owner and has no sign-in of its own.
+Never expose its port directly.
+Publish it only with `tailscale serve`, or through an access gateway that enforces sign-in on public requests and forwards to this port.
+With `tailscale serve`, each device and user that the tailnet access rules let reach this host can read the thread and send text.
+The listener allows one outside name: `host` (`FM_IMESSAGE_WEB_HOST`).
+With an access gateway, set `host` to the public hostname of the gateway, or make the gateway forward `Host` and `Origin` as that name; any other name gets 403.
+One `host` name serves one route, so the tailnet name and a gateway name do not work together.
+
+1. Add the `web` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
+
+   ```yaml
+       web:
+         host: agent.example.ts.net   # the hostname that tailscale serve or the access gateway publishes the page under
+         port: 8768                   # optional; this is the default
+   ```
+
+2. Publish the port with `tailscale serve` (skip this step when an access gateway publishes the page):
+
+   ```bash
+   tailscale serve --bg http://127.0.0.1:8768
+   ```
+
+3. Open `https://agent.example.ts.net/` on a device in the tailnet, or the gateway's public hostname.
+
+If you publish on an HTTPS port other than 443 (`tailscale serve --bg --https=8443 ...`), add that port to `host`, for example `agent.example.ts.net:8443`.
+To turn the web chat off, run `tailscale serve reset`, remove the block, and run `./ship.sh launch`.
+
 ## Outbound text filter
 
 `fm-imessage` cleans each text and photo caption before it sends (`apps/imessage/clean.ts`, run with bun). The bridge refuses a text that is only a PR link, and any paragraph that starts with a task or mate id, has `key=` or `corr=` tokens, or has two or more commit hashes after a colon (hex inside a URL does not count as a hash). It answers HTTP 422 and queues nothing. Sub-agent answers pass the same filter in `subagent.ts`.
