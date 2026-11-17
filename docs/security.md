@@ -198,6 +198,17 @@ mosh <alias> -- herdr-patch
 
 [Over mosh](herdr.md#over-mosh) explains `herdr-patch`. Keep the alias, the host's address and the account name out of this repository.
 
+### Reach a Mac without SSH
+
+Use Rex when the Mac has no SSH. The host runs commands in a Rex session on the Mac, so it can drive the Mac's signed-in Aside CLI locally without Aside Pro Remote Control.
+
+1. On the host, join the tailnet: `tailscale up`.
+2. On the Mac, use the built-in Tailscale support in Rex (Serve over Tailscale). It is limited to the owner's own account.
+3. On the host, add the Mac as a Rex host: `rex hosts add mac https://<mac-device>.<tailnet>.ts.net`.
+4. Run commands in a Rex session on that host with `rex -S mac`: `send`, `send-key`, and `capture`.
+
+`rex run --wait` output vanishes with its block. Read results with `capture` on a session, or write them to a file. Keep the device and tailnet names out of this repository.
+
 ## Test sandbox
 
 A test must never reach the live Herdr or TUIOS session or a host daemon. A no-mistakes test step once ran `tuios kill-session` against the live socket and ended the owner's session. The `agents` profile installs `~/.local/bin/cf-sandbox` (from [`blueprint/maintenance/cf-sandbox`](../blueprint/maintenance/cf-sandbox)) and the `bubblewrap` package, and it runs a command like this:
