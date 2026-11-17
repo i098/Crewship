@@ -3867,11 +3867,16 @@ def test_web_chat_text_is_routed_and_retried_when_the_inbox_refuses_it(tmp_path,
         received = [e["received"] for e in routes if "received" in e and e["received"]["requestId"].startswith("web-")]
         assert len(received) == 1 and received[0]["text"] == "[web chat] [test] typed on the glasses" and received[0]["firstmate"]
         request_id = received[0]["requestId"]
-        attempts = lambda: sum(request_id in line for line in text(notes).splitlines())
+        def attempts():
+            return sum(request_id in line for line in text(notes).splitlines())
+
         wait_for(lambda: attempts() >= 2, "the bridge tried the refused note again")
         (fake / "inbox-fail").unlink()
-        done = lambda: any(e.get("route") == "done" and request_id in e.get("ids", []) for e in
-                           (json.loads(line) for line in text(state / "routing.jsonl").splitlines()))
+
+        def done():
+            lines = text(state / "routing.jsonl").splitlines()
+            return any(e.get("route") == "done" and request_id in e.get("ids", []) for e in map(json.loads, lines))
+
         wait_for(done, "the accepted retry closing the route")
         settled = attempts()
         time.sleep(2.5)
