@@ -224,20 +224,20 @@ def test_crit_that_reclaim_cannot_fix_alerts_loudly_rate_limited(guard):
     assert verbs <= {"info -f", "system df", "builder prune", "image prune"}
 
 
-def _crit_state(guard, **fields):
+def _age_crit_alert(guard, hours):
     path = guard.doctor / ".storage-guard/_"
-    t, used, warn, crit, fill, seq = path.read_text().split()
-    path.write_text(f"{t} {used} {warn} {fields.get('crit', crit)} {fill} {seq}\n")
+    t, used, warn, _crit, fill, seq = path.read_text().split()
+    path.write_text(f"{t} {used} {warn} {int(time.time()) - hours * 3600} {fill} {seq}\n")
 
 
 def test_open_crit_episode_alerts_once_then_reminds_after_the_interval(guard):
     guard.fs({"/": 97})
     guard.run()
     for hours in (1, 6, 23):  # each used to re-file: the old gap was REPEAT_MIN (30m)
-        _crit_state(guard, crit=int(time.time()) - hours * 3600)
+        _age_crit_alert(guard, hours)
         guard.run()
         assert len(guard.alerts()) == 1
-    _crit_state(guard, crit=int(time.time()) - 25 * 3600)
+    _age_crit_alert(guard, 25)
     guard.run()
     assert len(guard.alerts()) == 2
 
