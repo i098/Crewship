@@ -132,6 +132,13 @@ test("an idle pane with unread notes is read, so a rate-limit stop is detected",
   expect(sessions).toMatchObject([{ id: "main", blocked: false, limited: true }]);
 });
 
+test("with a live limit, an idle pane without notes is read and found limited", async () => {
+  const home = tmp();
+  const run = (limited: boolean) => collectSessions({ home, mates: [], agentsJson: agents(pane("p1", home, "idle")), limited, readPane: async () => "429 rate_limit_error" });
+  expect(await run(true)).toMatchObject([{ id: "main", notes: 0, limited: true }]);
+  expect(await run(false)).toMatchObject([{ id: "main", notes: 0, limited: false }]);
+});
+
 test("the prompt text keeps the last lines and the question at the end, without glyphs, and hides token-like strings", () => {
   const screen = `old chat\n\n\u{f0e8} status \n──────\nEnter token ghp_abcdefghijklmnop1234 or ${"a1".repeat(20)}\n❯ 1. Yes\n  2. No\n`;
   expect(promptOf(screen)).toBe("old chat | status | Enter token [hidden] or [hidden] | ❯ 1. Yes | 2. No");
