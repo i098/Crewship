@@ -356,7 +356,7 @@ If the missed chat since the last session turn is longer than 8,000 characters, 
 
 The desk can answer the owner at once while the work goes on in the background.
 The session calls `delegate_task` with the target `helper:install`, `helper:lookup`, `helper:read-link`, `firstmate` or the id of one mate in `data/secondmates.md`, and with no text: the model writes none.
-The bridge records the owner's texts as answered at once, sends the owner "Your text is queued for Firstmate" or "Your text is queued for <mate> mate: <summary>" (the [relay notice](#relay-notices) form), and then starts one background job. The ack never says that a send happened, and a new owner text during the send cannot start the same task again.
+The bridge records the owner's texts as answered at once, sends the owner "Your text is queued for Firstmate" or "Your text is queued for <mate>: <summary>" (the [relay notice](#relay-notices) form), and then starts one background job. The ack never says that a send happened, and a new owner text during the send cannot start the same task again.
 
 - The bridge sends the owner's verbatim text to the target. The model never writes the task.
 - `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.
