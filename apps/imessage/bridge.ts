@@ -1182,9 +1182,9 @@ function queueAck(pending: Routing[], bubble: string) {
 
 // One short text tells the owner who got which of his texts. Only a desk's own relays notify: desk-only answers send none.
 // It is a fixed line, so it skips the model rewrite (`ste`), and its guid keeps a newer owner text from cancelling it.
-function noticeRelay(items: Routing[], to: Secondmate | "firstmate") {
+function noticeRelay(items: Routing[], to: Secondmate) {
   const last = items.at(-1);
-  if (!last || !DESK_VETTED || muted() || !directChat.test(last.ref.space)) return;
+  if (!last || !deskSafe || !DESK_VETTED || muted() || !directChat.test(last.ref.space)) return;
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
   outbox.add({ ...last.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), deskGeneration, deskSession, ste: true,
     bubbles: [relayNotice(to, items.map((r) => r.authored ?? r.text), deskSafe)] });
@@ -1672,7 +1672,6 @@ function flushRoutes() {
   if (stopping) return;
   clearTimeout(routingRetry);
   let failed = false;
-  const toMain: Routing[] = [];
   for (const item of routing.values()) {
     try {
       if (mateDeliveries.has(item.requestId)) continue;
@@ -1684,7 +1683,6 @@ function flushRoutes() {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
         if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
-        toMain.push(item);
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
       recordRoute({ ids: [item.requestId], route: "done", out: item.out });
@@ -1693,7 +1691,6 @@ function flushRoutes() {
       failed = true;
     }
   }
-  noticeRelay(toMain, "firstmate");
   if (failed) routingRetry = setTimeout(flushRoutes, RETRY_MS);
 }
 
