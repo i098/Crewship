@@ -46,6 +46,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
+import { type Action, collectSessions, StuckWatch } from "./stuck-watch.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -640,6 +641,50 @@ if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
     }
   }, Number(env.FM_IMESSAGE_HERDR_POLL_MS || 15_000));
   console.log("fm-imessage: herdr status alerts on");
+}
+// Stuck supervisors (stuck-watch.ts): bump the main session or a second mate that sits on a prompt or leaves its notes unread, then text the owner once.
+// Read-only except the bump: it runs `herdr agent list` and `herdr pane read`. FM_IMESSAGE_STUCK_MS=0 turns it off.
+const stuckMs = Number(env.FM_IMESSAGE_STUCK_MS ?? 900_000);
+if (stuckMs > 0 && !Bun.which(env.FM_IMESSAGE_HERDR_BIN || "herdr")) console.log("fm-imessage: stuck supervisor check off, herdr not found");
+else if (stuckMs > 0) {
+  const watch = new StuckWatch({ stuckMs, graceMs: Number(env.FM_IMESSAGE_STUCK_GRACE_MS || 300_000), file: `${STATE}/stuck-watch.json` });
+  const herdr = async (...args: string[]) => {
+    const proc = track(Bun.spawn([env.FM_IMESSAGE_HERDR_BIN || "herdr", ...args], { stdout: "pipe", stderr: "ignore", timeout: 10_000 }));
+    const out = await new Response(proc.stdout).text();
+    if (await proc.exited !== 0) throw new Error(`herdr ${args[0]} failed`);
+    return out;
+  };
+  let polling = false;
+  setInterval(async () => {
+    if (polling || stopping) return;
+    polling = true;
+    try {
+      const mates = secondmates(FM_HOME);
+      const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"),
+        readPane: (pane) => herdr("pane", "read", pane, "--source", "visible", "--lines", "40", "--format", "text").catch(() => undefined) });
+      for (const a of watch.poll(sessions, Date.now())) a.done(await runStuckAction(a, mates));
+    } catch (e) {
+      log("stuck check")(e);
+    } finally {
+      polling = false;
+    }
+  }, Number(env.FM_IMESSAGE_STUCK_POLL_MS || 60_000));
+  console.log(`fm-imessage: stuck supervisor check on, after ${Math.round(stuckMs / 60_000)} min`);
+}
+
+// Runs one bump or owner text of the stuck watch; false when it did not go through (a bump comes again each poll until one goes through or the grace ends, an owner text on every poll).
+async function runStuckAction(a: Action, mates: Secondmate[]): Promise<boolean> {
+  try {
+    if (a.kind === "owner") return !!proactiveRef && put({ ...proactiveRef, bubbles: [a.text], requests: [] });
+    if (a.id === "main") return await noteMain(`stuck-${a.key}`, a.text, "desk");
+    const mate = mates.find((m) => m.id === a.id);
+    // A bump to a mate is fire-and-forget (a stable id per incident): the desk text is the escalation, not a reply wait.
+    const id = new Bun.CryptoHasher("sha256").update(a.key).digest("hex").slice(0, 16);
+    return !!mate && await spawnSender(mate, `[from desk] ${a.text}`, id).exited === 0;
+  } catch (e) {
+    log("stuck check action")(e);
+    return false;
+  }
 }
 // Tells the owner once when the omp extension had to wake an idle main (herdr-watch.ts).
 const strandedWake = watchStrandedWake(`${FM_HOME}/state/.stranded-wake.log`, (text) => !!proactiveRef && put({ ...proactiveRef, bubbles: [text], requests: [] }));
@@ -1462,9 +1507,9 @@ async function draftHandoff(pending: Routing[], mates: Secondmate[], current: ()
   return handoffTarget(ok, drafted, mates);
 }
 
-function spawnSender(mate: Secondmate, text: string) {
+function spawnSender(mate: Secondmate, text: string, deliveryId?: string) {
   const sender = join(dirname(realpathSync(Bun.which(INBOX) ?? INBOX)), "fm-send.sh");
-  return track(Bun.spawn([sender, mate.id, text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
+  return track(Bun.spawn([sender, mate.id, ...(deliveryId ? ["--fire-and-forget", deliveryId] : []), text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
 }
 
 async function deliverToMate(item: Routing, mate: Secondmate) {
@@ -1638,10 +1683,10 @@ async function noteText(message: LineMessage) {
   return { text, failed };
 }
 
-// A background desk task for Firstmate: an inbox note that waits for the answer file, not for fm-imessage.
-async function noteMain(requestId: string, text: string): Promise<boolean> {
+// An inbox note for Firstmate. The default sender is a background desk task, which waits for the answer file, not for fm-imessage.
+async function noteMain(requestId: string, text: string, from = "captain via desk"): Promise<boolean> {
   if (stopping) return false;
-  const proc = track(Bun.spawn([INBOX, "note", "--request-id", requestId, "--", `[from captain via desk] ${text}`],
+  const proc = track(Bun.spawn([INBOX, "note", "--request-id", requestId, "--", `[from ${from}] ${text}`],
     { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
   return await proc.exited === 0;
 }

@@ -397,6 +397,36 @@ When a pane closes while a new status is held but not yet confirmed, the bridge 
 | `FM_IMESSAGE_HERDR_SKIP` | `firstmate` | Project folders that are not workers. |
 | `FM_IMESSAGE_HERDR_BIN` | `herdr` | The herdr executable. |
 
+## Stuck supervisors
+
+The bridge watches the sessions it feeds: the main session and each second mate. The code is `apps/imessage/stuck-watch.ts`.
+It is on by default and runs inside the bridge, beside the [self-healing](#self-healing) watchdog. Set `FM_IMESSAGE_STUCK_MS=0` to turn it off.
+It runs `herdr agent list` and `herdr pane read`, which only read, and it needs the same herdr as the status alerts above.
+
+A session counts as stuck when either of these holds for `FM_IMESSAGE_STUCK_MS` (default 15 minutes):
+
+- **Prompt.** Every herdr pane in its home is `blocked`, which means it waits on an interactive prompt. If several panes share the home and one is not `blocked`, the session is not stuck by this test.
+- **Unread notes.** The oldest unread inbox note is older than the limit. The main inbox is `state/inbox/*.note`, and a mate's is `state/<id>.inbox/*.msg`. A note counts as read when it moves to `handled/`.
+
+Each incident goes through these steps, once:
+
+1. **Bump (unread notes only).** The bridge files one inbox note marked `[desk stuck-check]`. For the main session it uses `fm-inbox.sh note`. For a mate it uses `fm-send.sh --fire-and-forget`, which rings the doorbell and arms no reply wait. The bump is not counted as an unread note. A bump that fails is tried again on each poll until one goes through or the grace period ends.
+2. **Text.** If the session is still stuck `FM_IMESSAGE_STUCK_GRACE_MS` (default 5 minutes) after the bump, the owner gets one text. It names the session, the time it has been stuck since (UTC), the number of unread notes, whether the bump went through, and the last lines of the prompt when the pane shows one. Long token-like strings in the prompt text are hidden.
+3. **Recovery.** When the session has moved for two polls in a row, the owner gets one more text. A text that cannot be queued (no chat yet, or muted) is tried again on the next poll.
+
+The bridge never bumps a session that sits on a prompt, and it never types an answer to any prompt. The doorbell line goes into the pane, and a prompt can take it as its answer, so a keyword list for credentials, payments or public posts would not be safe enough. For a prompt the owner gets the text at once, after the limit, with the last lines of the prompt, and no bump goes out.
+
+The check turns itself off with one log line when the herdr executable is not found.
+
+The bridge keeps the incident state in `stuck-watch.json` in its state directory, so a restart does not repeat a text.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_IMESSAGE_STUCK_MS` | `900000` | Time a session must be stuck before it is bumped. `0` turns the check off. |
+| `FM_IMESSAGE_STUCK_GRACE_MS` | `300000` | Time after the bump before the owner is texted. |
+| `FM_IMESSAGE_STUCK_POLL_MS` | `60000` | Time between polls. |
+| `FM_IMESSAGE_HERDR_BIN` | `herdr` | The herdr executable, shared with the status alerts. |
+
 ## Guarded front modules
 
 The repository also contains a separate front, worker, dispatch policy, and relay validator.

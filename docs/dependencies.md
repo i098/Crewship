@@ -259,6 +259,7 @@ See the [`koncreet` profile](configuration.md#profiles) for selection and existi
 `crewship.imessage` set ([iMessage bridge](imessage.md)).
 
 - spectrum-ts, the npm registry's latest release, installed with `bun add --exact` into `~/.local/share/crewship/imessage` (`blueprint/ansible/tasks/imessage.yml`). bun is a core tool.
+- The stuck-watch mate bump needs an `fm-send.sh` that accepts `--fire-and-forget <id>`; without it every mate bump fails.
 
 ## Crew board
 

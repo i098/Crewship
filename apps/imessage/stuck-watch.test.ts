@@ -1,0 +1,131 @@
+import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { BUMP_MARK, collectSessions, pendingNotes, promptOf, type Session, StuckWatch } from "./stuck-watch.ts";
+
+const MIN = 60_000;
+const tmp = () => mkdtempSync(join(process.env.TMPDIR || "/tmp", "stuck-"));
+const watch = (file?: string) => new StuckWatch({ stuckMs: 15 * MIN, graceMs: 5 * MIN, file });
+const mainSession = (over: Partial<Session> = {}): Session => ({ id: "main", label: "Firstmate (main)", notes: 0, blocked: false, ...over })
+const T0 = Date.UTC(2026, 10, 17, 6, 0);
+
+test("a prompt that stays open is texted once with its text, never bumped, and a recovery is texted once", () => {
+  const w = watch();
+  const s = mainSession({ blocked: true, prompt: "Pick a model: 1. Opus 2. Sonnet" });
+  expect(w.poll([s], T0)).toEqual([]);
+  expect(w.poll([s], T0 + 14 * MIN)).toEqual([]);
+  const [text] = w.poll([s], T0 + 15 * MIN);
+  expect(text!.kind).toBe("owner");
+  expect(text!.text).toContain("Firstmate (main) is stuck: it sits on a prompt since 11-17 06:00 UTC (15 min)");
+  expect(text!.text).toContain("I did not nudge it");
+  expect(text!.text).toContain("Prompt: Pick a model");
+  text!.done(true);
+  expect(w.poll([s], T0 + 30 * MIN)).toEqual([]);
+  expect(w.poll([mainSession()], T0 + 31 * MIN)).toEqual([]);
+  const [clear] = w.poll([mainSession()], T0 + 32 * MIN);
+  expect(clear!.text).toContain("is moving again after 32 min");
+  clear!.done(true);
+  expect(w.poll([mainSession()], T0 + 40 * MIN)).toEqual([]);
+});
+
+test("no prompt is ever bumped, whatever it asks or even when it cannot be read", () => {
+  for (const prompt of ["Spend a saved Claude rate-limit reset? 1. Yes 2. No", "Paste your API key:", "Delete 40 files? 1. Yes 2. No", undefined]) {
+    const w = watch();
+    const s = mainSession({ blocked: true, prompt, notes: 5, oldest: T0 - MIN });
+    w.poll([s], T0);
+    const out = w.poll([s], T0 + 15 * MIN);
+    expect(out.map((a) => a.kind)).toEqual(["owner"]);
+  }
+});
+
+test("a failed bump comes again each poll until the grace ends, then one text; a good bump is not repeated", () => {
+  const stuckNotes = mainSession({ notes: 2, oldest: T0 });
+  const w = watch();
+  w.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(false);
+  const again = w.poll([stuckNotes], T0 + 17 * MIN);
+  expect(again.map((a) => a.kind)).toEqual(["bump"]);
+  again[0]!.done(false);
+  expect(w.poll([stuckNotes], T0 + 19 * MIN).map((a) => a.kind)).toEqual(["bump"]);
+  const retry = w.poll([stuckNotes], T0 + 20 * MIN);
+  expect(retry.map((a) => a.kind)).toEqual(["owner"]);
+  expect(retry[0]!.text).toContain("My nudge did not go through.");
+  retry[0]!.done(false);
+  expect(w.poll([stuckNotes], T0 + 21 * MIN)).toHaveLength(1);
+
+  const w3 = watch();
+  w3.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(true);
+  expect(w3.poll([stuckNotes], T0 + 17 * MIN)).toEqual([]);
+  expect(w3.poll([stuckNotes], T0 + 20 * MIN)[0]!.text).toContain("I nudged it, and it is still stuck.");
+
+  const w2 = watch();
+  w2.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(true);
+  expect(w2.poll([mainSession()], T0 + 16 * MIN)).toEqual([]);
+  expect(w2.poll([mainSession()], T0 + 17 * MIN)).toEqual([]);
+  expect(w2.poll([mainSession({ notes: 1, oldest: T0 + 17 * MIN })], T0 + 18 * MIN)).toEqual([]);
+});
+
+test("unread notes count from the oldest one, and the bump is not counted as a note", () => {
+  const dir = tmp();
+  const ago = (name: string, min: number, body = "note") => {
+    writeFileSync(`${dir}/${name}`, body);
+    utimesSync(`${dir}/${name}`, (T0 - min * MIN) / 1000, (T0 - min * MIN) / 1000);
+  };
+  ago("a.note", 40);
+  ago("b.note", 10);
+  ago("c.note", 5, `${BUMP_MARK} You look stuck`);
+  mkdirSync(`${dir}/handled`);
+  ago("handled/old.note", 900);
+  expect(pendingNotes(dir, ".note")).toEqual({ count: 2, oldest: T0 - 40 * MIN });
+
+  const w = watch();
+  const s = mainSession({ notes: 59, oldest: T0 - 40 * MIN });
+  const [bump] = w.poll([s], T0);
+  expect(bump!.text).toContain("59 notes wait since 11-17 05:20 UTC");
+  bump!.done(true);
+  const [text] = w.poll([s], T0 + 5 * MIN);
+  expect(text!.text).toContain("it has not read its inbox since 11-17 05:20 UTC (45 min). 59 notes wait.");
+});
+
+test("an incident already texted is not texted again after a restart", () => {
+  const file = `${tmp()}/stuck.json`;
+  const s = mainSession({ notes: 3, oldest: T0 - 30 * MIN });
+  const w = watch(file);
+  w.poll([s], T0)[0]!.done(true);
+  w.poll([s], T0 + 5 * MIN)[0]!.done(true);
+  const again = watch(file);
+  expect(again.poll([s], T0 + 6 * MIN)).toEqual([]);
+  expect(again.poll([mainSession()], T0 + 7 * MIN)).toEqual([]);
+  expect(again.poll([mainSession()], T0 + 8 * MIN)[0]!.text).toContain("is moving again");
+});
+
+const agents = (...list: object[]) => JSON.stringify({ result: { agents: list } });
+const pane = (id: string, dir: string, status: string) => ({ pane_id: id, agent_status: status, foreground_cwd: dir, cwd: dir });
+
+test("sessions join the inboxes with the panes of their homes; a spare pane that is not blocked clears the prompt", async () => {
+  const home = tmp();
+  mkdirSync(`${home}/state/inbox`, { recursive: true });
+  mkdirSync(`${home}/state/web-mate.inbox`, { recursive: true });
+  writeFileSync(`${home}/state/inbox/n1.note`, "hello");
+  writeFileSync(`${home}/state/web-mate.inbox/001.msg`, "task");
+  const reads: string[] = [];
+  const sessions = await collectSessions({
+    home, mates: [{ id: "web-mate", home: "/work/web", scope: "web" }],
+    agentsJson: agents(pane("p1", home, "blocked"), pane("p2", "/work/web", "blocked"), pane("p3", "/work/web", "idle"), pane("p4", "/elsewhere", "blocked")),
+    readPane: async (id) => (reads.push(id), "Trust this folder? ❯ 1. Yes"),
+  });
+  expect(reads).toEqual(["p1"]);
+  expect(sessions).toMatchObject([
+    { id: "main", notes: 1, blocked: true, prompt: "Trust this folder? ❯ 1. Yes" },
+    { id: "web-mate", label: "web-mate (second mate)", notes: 1, blocked: false },
+  ]);
+  await expect(collectSessions({ home, mates: [], agentsJson: "{}", readPane: async () => "" })).rejects.toThrow("no agents array");
+});
+
+test("the prompt text keeps the last lines and the question at the end, without glyphs, and hides token-like strings", () => {
+  const screen = `old chat\n\n\u{f0e8} status \n──────\nEnter token ghp_abcdefghijklmnop1234 or ${"a1".repeat(20)}\n❯ 1. Yes\n  2. No\n`;
+  expect(promptOf(screen)).toBe("old chat | status | Enter token [hidden] or [hidden] | ❯ 1. Yes | 2. No");
+  expect(promptOf("\n \n──\n")).toBeUndefined();
+  const long = `${Array.from({ length: 11 }, () => "chat ".repeat(20)).join("\n")}\nSpend a saved reset? 1. Yes 2. No`;
+  expect(promptOf(long)!.endsWith("Spend a saved reset? 1. Yes 2. No")).toBe(true);
+  expect(promptOf(long)!.length).toBeLessThanOrEqual(500);
+});
