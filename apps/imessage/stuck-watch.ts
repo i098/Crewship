@@ -1,0 +1,142 @@
+// Stuck supervisors (docs/imessage.md#stuck-supervisors). A supervisor session (the main one or a second mate) is stuck
+// when its herdr pane sits on an interactive prompt (status "blocked") or its oldest inbox note stays unread, for
+// `stuckMs`. Unread notes get one bump through the inbox path the desk already uses, and the owner is texted once per
+// incident if the session is still stuck `graceMs` later, then once more when it moves again. A prompt is never
+// bumped: the doorbell line is typed into the pane and could answer it, so the owner is told at once. The core is free
+// of the bridge so tests run on recorded JSON and plain files.
+import { readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { cleanText } from "./clean.ts";
+import type { Secondmate } from "./desk.ts";
+
+export const BUMP_MARK = "[desk stuck-check]"; // the bump note carries it, so it is not counted as an unread note
+const CALM_POLLS = 2; // an incident ends after this many polls in a row that find the session moving
+const PROMPT_LINES = 12;
+
+export type Session = { id: string; label: string; notes: number; oldest?: number; blocked: boolean; prompt?: string };
+type Incident = { since: number; bumpedAt?: number; nudged?: boolean; texted?: boolean; calm: number };
+export type Action = { kind: "bump" | "owner"; id: string; key: string; text: string; done(ok: boolean): void };
+
+const span = (ms: number) => ms >= 3_600_000 ? `${Math.floor(ms / 3_600_000)} h ${Math.floor(ms % 3_600_000 / 60_000)} min` : `${Math.max(1, Math.floor(ms / 60_000))} min`;
+const clock = (t: number) => `${new Date(t).toISOString().slice(5, 16).replace("T", " ")} UTC`;
+const notes = (n: number) => `${n} note${n === 1 ? "" : "s"}`;
+
+export class StuckWatch {
+  private blockedAt = new Map<string, number>();
+  private incidents = new Map<string, Incident>();
+  private saved = "";
+
+  constructor(private config: { stuckMs: number; graceMs: number; file?: string }) {
+    try {
+      const state = JSON.parse(readFileSync(config.file ?? "", "utf8"));
+      this.blockedAt = new Map(state.blockedAt);
+      this.incidents = new Map(state.incidents);
+      this.saved = JSON.stringify(state);
+    } catch { /* no state yet */ }
+  }
+
+  private save() {
+    if (!this.config.file) return;
+    const json = JSON.stringify({ blockedAt: [...this.blockedAt], incidents: [...this.incidents] });
+    if (json === this.saved) return;
+    writeFileSync(`${this.config.file}.tmp`, json, { mode: 0o600 });
+    renameSync(`${this.config.file}.tmp`, this.config.file);
+    this.saved = json;
+  }
+
+  // Persists the state once the caller has reported what happened to an action.
+  private persisted(fn: (ok: boolean) => unknown) {
+    return (ok: boolean) => { fn(ok); this.save(); };
+  }
+
+  // Takes the sessions seen now; returns the bumps and owner texts due. A text that was not sent (`done(false)`) comes again next poll.
+  poll(sessions: Session[], now: number): Action[] {
+    const out: Action[] = [];
+    const ids = new Set(sessions.map((s) => s.id));
+    for (const id of [...this.blockedAt.keys(), ...this.incidents.keys()]) {
+      if (ids.has(id)) continue;
+      this.blockedAt.delete(id);
+      this.incidents.delete(id);
+    }
+    for (const s of sessions) {
+      if (!s.blocked) this.blockedAt.delete(s.id);
+      else if (!this.blockedAt.has(s.id)) this.blockedAt.set(s.id, now);
+      const since = Math.min(this.blockedAt.get(s.id) ?? Infinity, s.oldest ?? Infinity);
+      const stuck = now - since >= this.config.stuckMs;
+      let inc = this.incidents.get(s.id);
+      if (!stuck) {
+        if (!inc || ++inc.calm < CALM_POLLS) continue;
+        if (!inc.texted) { this.incidents.delete(s.id); continue; }
+        const text = `${s.label} is moving again after ${span(now - inc.since)}. ${s.notes ? `${notes(s.notes)} still wait.` : "No notes wait."}`;
+        out.push({ kind: "owner", id: s.id, key: `${s.id}-${inc.since}`, text, done: this.persisted((ok) => ok && this.incidents.delete(s.id)) });
+        continue;
+      }
+      if (!inc) this.incidents.set(s.id, inc = { since, calm: 0 });
+      inc.calm = 0;
+      if (inc.texted) continue;
+      const incident = inc;
+      const key = `${s.id}-${inc.since}`;
+      if (!s.blocked && inc.bumpedAt === undefined) {
+        out.push({ kind: "bump", id: s.id, key, text: `${BUMP_MARK} You look stuck: ${notes(s.notes)} wait since ${clock(s.oldest!)}. Read and act on your inbox notes now.`,
+          done: this.persisted((ok) => { incident.bumpedAt = now; incident.nudged = ok; }) });
+        continue;
+      }
+      if (!s.blocked && now - inc.bumpedAt! < this.config.graceMs) continue;
+      const body = [`${s.label} is stuck: ${s.blocked ? "it sits on a prompt" : "it has not read its inbox"} since ${clock(inc.since)} (${span(now - inc.since)}).`,
+        s.notes ? `${notes(s.notes)} wait.` : "No notes wait.",
+        incident.nudged ? "I nudged it, and it is still stuck."
+          : s.blocked ? "I did not nudge it: a prompt may take the nudge as its answer."
+          : "My nudge did not go through."].join(" ");
+      out.push({ kind: "owner", id: s.id, key, text: s.blocked && s.prompt ? `${body}\nPrompt: ${s.prompt}` : body, done: this.persisted((ok) => { if (ok) incident.texted = true; }) });
+    }
+    this.save();
+    return out;
+  }
+}
+
+// Unread notes in a steering inbox: files with `ext` directly in `dir` (an acknowledged one moved to handled/), not our own bump.
+export function pendingNotes(dir: string, ext: string): { count: number; oldest?: number } {
+  let count = 0, oldest: number | undefined;
+  let names: string[];
+  try { names = readdirSync(dir); } catch { return { count }; }
+  for (const name of names) {
+    if (!name.endsWith(ext)) continue;
+    try {
+      if (readFileSync(`${dir}/${name}`, "utf8").includes(BUMP_MARK)) continue;
+      const at = statSync(`${dir}/${name}`).mtimeMs;
+      count++;
+      oldest = Math.min(oldest ?? at, at);
+    } catch { /* acknowledged while reading */ }
+  }
+  return { count, oldest };
+}
+
+const SECRET = /\b(?:sk|pk|ghp|gho|ghs|xox[a-z]|AKIA)[-_A-Za-z0-9]{12,}|[A-Za-z0-9+/_=-]{32,}/g;
+
+// The last lines of a pane as one plain line: where a prompt sits. Glyphs, box lines, blank rows, paths, ids and long token-like strings are dropped.
+export function promptOf(screen: string): string | undefined {
+  const lines = screen.split("\n").map((l) => l.replace(/[\p{Co}\u2500-\u259f]/gu, "").trim()).filter((l) => /[\p{L}\p{N}]/u.test(l));
+  const text = cleanText(lines.slice(-PROMPT_LINES).join(" | ").replace(SECRET, "[hidden]")).slice(-500);
+  return text || undefined;
+}
+
+const dirs = (home: string) => new Set([home.replace(/\/+$/, ""), (() => { try { return realpathSync(home); } catch { return home; } })()]);
+
+// Joins the inboxes with `herdr agent list`: the sessions of the main home and each second mate's home.
+export async function collectSessions(o: { home: string; mates: readonly Secondmate[]; agentsJson: string; readPane(pane: string): Promise<string | undefined> }): Promise<Session[]> {
+  const list: unknown = JSON.parse(o.agentsJson)?.result?.agents;
+  if (!Array.isArray(list)) throw new Error("herdr agent list: no agents array");
+  const targets = [
+    { id: "main", label: "Firstmate (main)", home: o.home, inbox: pendingNotes(`${o.home}/state/inbox`, ".note") },
+    ...o.mates.map((m) => ({ id: m.id, label: `${m.id} (second mate)`, home: m.home, inbox: pendingNotes(`${o.home}/state/${m.id}.inbox`, ".msg") })),
+  ];
+  const sessions: Session[] = [];
+  for (const t of targets) {
+    const here = dirs(t.home);
+    const panes = list.filter((a) => typeof a?.pane_id === "string" && here.has(String(a.foreground_cwd ?? a.cwd ?? "").replace(/\/+$/, "")));
+    // Several panes in one home: only all of them waiting on input counts, so a spare pane cannot raise the alarm.
+    const blocked = panes.length > 0 && panes.every((a) => a.agent_status === "blocked");
+    const screen = blocked ? await o.readPane(panes[0].pane_id) : undefined;
+    sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: screen === undefined ? undefined : promptOf(screen) });
+  }
+  return sessions;
+}
