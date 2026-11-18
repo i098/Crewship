@@ -7,11 +7,12 @@ import { createHelper, spawnHelper, type HelperKind } from "./desk-helper.ts";
 import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
-import { deskMayAct, type RelayRequest } from "./relay.ts";
+import { deskMayAct, relayNotice, type RelayRequest } from "./relay.ts";
 
 export { ACK_GUID_PREFIX, TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
+
 
 // The ack, when given, is queued before the slow handoff so the owner is not left waiting; it is a plain desk text with no task behind it.
 function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
@@ -62,6 +63,7 @@ export type SessionHost<R extends TurnRequest> = {
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
   record(key: string | undefined, text: string): void;
   report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
+  notice(origin: R | undefined, mate: Secondmate, texts: readonly string[]): void; // the fixed "Sent to" line: direct chat only, never rewritten
 } & Pick<ActionHost, "pane" | "press" | "scripts" | "script" | "remember">;
 
 // The newest status lines of a mate: where a marked reply returns to the desk's home.
@@ -173,8 +175,13 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     const replied = threadReplyMate(pending, mates);
     if (replied) return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
     const actions = createActions({
-      requests: pending, current, muted: host.muted, mates: () => mates, safe, message: host.message, sent: host.sent, log: host.record,
+      requests: pending, current, muted: host.muted, mates: () => mates, safe, sent: host.sent, log: host.record,
       pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,
+      message: async (mate, text) => {
+        const sent = await host.message(mate, text);
+        if (sent) host.notice(pending.at(-1), mate, [text]);
+        return sent;
+      },
       replies: (mate) => safe(readStatusTail(host.fmHome, mate.id)),
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),
       react: (emoji) => host.react(pending, emoji),
@@ -187,7 +194,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       helperBusy: helper.busy,
       delegate: (mate, target) => {
         // The ack is the bridge's own text and claims only that the text is queued: whether the send worked is reported later.
-        const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : `Your text is queued for the ${mate.id} mate`;
+        const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : relayNotice(mate, pending.map((r) => r.authored ?? r.text), safe, "Your text is queued for");
         host.answer(pending, [ack], pending[target - 1], true);
         delegate(mate, original.join("\n"), pending.at(-1)!, pending.map((r) => r.requestId));
       },

@@ -87,7 +87,34 @@ def test_session_relays_to_a_listed_mate(tmp_path):
         wait_for(lambda: any(e.get("handoffNote") == "routed to mate1" and e.get("route") == "done" for e in events(rig)),
                  "the mate delivery", timeout=120)
         assert read_text(sent).splitlines() == ["mate1 [from captain via desk] RELAY mate1", "[desk request bluebubbles-m1]"]
-        assert texts(rig) == []
+        wait_for(lambda: len(texts(rig)) == 1, "the relay notice", timeout=120)
+        assert texts(rig)[0].split(" ", 1)[1] == "Sent to mate1 mate: RELAY mate1"
+
+
+def mate_rig(tmp_path, **extra):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")
+    vale = tmp_path / "fake-vale"  # records each text the STE pass lints, and finds no violation
+    vale.write_text(f'#!/bin/bash\ncat >> {shlex.quote(str(tmp_path / "vale-seen"))}; echo\necho "{{}}"\n')
+    vale.chmod(0o755)
+    return session_rig(tmp_path, FM_STE_VALE=str(vale), **extra)
+
+
+def install_sender(tmp_path):
+    sender = tmp_path / "bin" / "fm-send.sh"
+    sender.write_text(f'#!/bin/bash\nprintf "%s\\n" "$*" >> {shlex.quote(str(tmp_path / "mate-sent"))}\n')
+    sender.chmod(0o755)
+
+
+def test_message_mate_sends_the_owner_one_unrewritten_notice(tmp_path):
+    with mate_rig(tmp_path) as rig:
+        install_sender(tmp_path)
+        deliver(rig, "m1", "MESSAGE mate1")
+        wait_for(lambda: len(texts(rig)) == 2, "the notice and the answer", timeout=120)
+        assert [t.split(" ", 1)[1] for t in texts(rig)][0] == "Sent to mate1 mate: Please check the footer."
+        seen = read_text(tmp_path / "vale-seen")
+        assert "Asked." in seen  # the desk answer goes through the STE pass, so the fake linter is wired
+        assert "Sent to" not in seen  # the fixed notice skips it
 
 
 def test_fleet_status_names_the_listed_mates_so_the_session_can_pick_one(tmp_path):
@@ -210,7 +237,7 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         script.chmod(0o755)
         deliver(rig, "m1", f"DELEGATE {target}")
         wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
-        assert texts(rig)[0].split(" ", 1)[1] == ("Your text is queued for the mate1 mate" if target == "mate1" else "Your text is queued for Firstmate")
+        assert texts(rig)[0].split(" ", 1)[1] == ("Your text is queued for mate1 mate: DELEGATE mate1" if target == "mate1" else "Your text is queued for Firstmate")
         wait_for(message.exists, "the task delivery", timeout=120)
         assert not finished.exists()  # the reply was sent while the delivery was still open
         release.touch()
@@ -326,7 +353,8 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
             + f"(this message is a thread reply to an earlier message from a sender the bridge did not record, whose untrusted quoted text is: {json.dumps('The engram checks are green.')})\n"
             + "[desk request bluebubbles-m3]"
         )
-        assert len(texts(rig)) == 2  # no model reply to the owner
+        wait_for(lambda: len(texts(rig)) == 3, "the relay notice", timeout=120)
+        assert [t.split(" ", 1)[1] for t in texts(rig)][2:] == ["Sent to engram mate: nice, thanks"]  # the notice, no model reply
 
 
 def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_is_a_desk_turn(tmp_path):
@@ -366,5 +394,5 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
             )
         message.unlink()
         reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")  # no id match and two senders: a desk turn
-        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        wait_for(lambda: len(texts(rig)) == 6, "the session reply", timeout=120)  # the reply, two bubbles, two mate notices, the desk reply
         assert not message.exists()

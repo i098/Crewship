@@ -39,7 +39,7 @@ import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN
 import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
-import { deskMayAct, deskRequestMarker, mateInboxHas, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { deskMayAct, deskRequestMarker, directChat, mateInboxHas, mayNotice, relayNotice, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -196,6 +196,7 @@ let inboxStatus: Promise<{ status: string; statusOk: boolean } | void>;
 const v2Jobs = new Map<string, AbortController>();
 const deskTurns = new Turns();
 const { models: v2Models, redact: v2Redact } = DESK_V2 ? await loadV2Context() : { models: [], redact: undefined };
+const deskSafe = v2Redact && ((text: string) => frontContextText(v2Redact, text)); // the redacting filter the desk acts through; none means it may not act
 
 
 // A message by its transport, conversation and message ids, which outlive a restart. An item queued before there
@@ -431,7 +432,6 @@ let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
 let proactiveAt = -1;
-const directChat = /^[^;]+;-;[^;]+$/;
 for (const name of TRANSPORTS) {
   for (const suffix of ["", "-direct"]) {
     const saved = Bun.file(`${latestFile(name)}${suffix}`);
@@ -1178,6 +1178,15 @@ function queueAck(pending: Routing[], bubble: string) {
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
   outbox.add({ ...pending.at(-1)!.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), bubbles: [bubble], deskGeneration, deskSession, ste: true });
 }
+
+// One short text tells the owner who got which of his texts. Only a desk's own relays notify: desk-only answers send none.
+// It is a fixed line, so it skips the model rewrite (`ste`), and its guid keeps a newer owner text from cancelling it.
+function noticeRelay(origin: Routing | undefined, to: Secondmate, texts: readonly string[]) {
+  if (!origin || !deskSafe || !mayNotice(origin.ref.space, { safe: deskSafe, vetted: DESK_VETTED, muted: muted() })) return;
+  const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+  outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), deskGeneration, deskSession, ste: true,
+    bubbles: [relayNotice(to, texts, deskSafe)] });
+}
 function timeOutV2(pending: Routing[], controller: AbortController, current: () => boolean) {
   log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
   timeOutTurn(pending, controller, current, () => handoffV2(pending), (bubble) => queueAck(pending, bubble));
@@ -1269,7 +1278,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
   memoryIndex: (r) => memoryByRequest.get(r.requestId) ?? r.memoryId,
-  safe: v2Redact && ((text) => frontContextText(v2Redact, text)),
+  safe: deskSafe,
   handoff: handoffV2, answer: commitV2Answer, react: commitV2Reaction, relay: handoffToMate, inbox: readInboxStatus,
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)), held: (mate, id) => mateInboxHas(FM_HOME, mate.id, id),
   send: sendDeskTask,
@@ -1278,6 +1287,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
   remember: (text) => void remember("desk", text),
   ...deskLog(STATE),
+  notice: noticeRelay,
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
     guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),
 });
@@ -1527,10 +1537,11 @@ function spawnSender(mate: Secondmate, text: string, deliveryId?: string) {
   return track(Bun.spawn([sender, mate.id, ...(deliveryId ? ["--fire-and-forget", deliveryId] : []), text], { cwd: FM_HOME, env: { ...env, FM_HOME }, stdout: "ignore", stderr: "ignore", timeout: 5000 }));
 }
 
-async function deliverToMate(item: Routing, mate: Secondmate) {
+// True when this call sent the text; false when the mate's inbox already held it or the send failed.
+async function deliverToMate(item: Routing, mate: Secondmate): Promise<boolean> {
   const text = `[from captain via desk] ${item.text}\n${deskRequestMarker(item.requestId)}`;
   const routed = `routed to ${mate.id}`;
-  if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return; }
+  if (mateInboxHas(FM_HOME, mate.id, item.requestId)) { recordRoute({ ids: [item.requestId], route: "done", handoffNote: routed }); return false; }
   // Save uncertainty before the send, once per request; a restart must not blindly repeat a delivery.
   let handoffNote: string | undefined = `Delivery to ${mate.id} may be incomplete; check its inbox before sending again.`;
   if (!routing.get(item.requestId)?.noted) recordRoute({ ids: [item.requestId], route: "handoff", handoffNote });
@@ -1548,19 +1559,22 @@ async function deliverToMate(item: Routing, mate: Secondmate) {
   // A failed send keeps the note already saved; a second row for the same request adds nothing.
   if (handoffNote === routed) recordRoute({ ids: [item.requestId], route: "done", handoffNote });
   else if (handoffNote === undefined) recordRoute({ ids: [item.requestId], route: "handoff" });
+  return handoffNote === routed;
 }
 
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
   recordRoute({ ids: pending.map((r) => r.requestId), route: "handoff" });
   for (const item of pending) mateDeliveries.add(item.requestId);
+  const sent: Routing[] = [];
   try {
     for (const item of pending) {
       if (stopping || !current()
         || !relayTargetCurrent(mate, secondmates(FM_HOME))) break;
-      await deliverToMate(item, mate);
+      if (await deliverToMate(item, mate)) sent.push(item);
     }
   } finally {
     for (const item of pending) mateDeliveries.delete(item.requestId);
+    if (sent.length) noticeRelay(sent.at(-1), mate, sent.map((r) => r.authored ?? r.text));
     flushRoutes();
   }
 }

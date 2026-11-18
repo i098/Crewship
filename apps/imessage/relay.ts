@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { cleanText } from "./clean.ts";
 import { type Secondmate, supervisorOnly } from "./desk.ts";
 
 export type RelayRequest = Readonly<{
@@ -47,4 +48,24 @@ export function mateInboxHas(fmHome: string, mateId: string, requestId: string, 
     }
   }
   return false;
+}
+
+export const directChat = /^[^;]+;-;[^;]+$/;
+
+// A group chat hands off to Firstmate before message_mate runs, so only a unit test reaches the directChat part of this guard.
+export function mayNotice(space: string, g: { safe: unknown; vetted: boolean; muted: boolean }): boolean {
+  return !!g.safe && g.vetted && !g.muted && directChat.test(space);
+}
+
+export const NOTICE_MAX = 80; // chars of the owner's text a relay notice shows
+
+// The owner's one-line notice of a relay: who got which text. Plain words, so the outbound filter keeps the mate's name (it strips ids like `x-mate-1`).
+// A text that looks sensitive is not echoed back.
+export function relayNotice(to: Secondmate, texts: readonly string[], safe: (text: string) => string, verb = "Sent to"): string {
+  const label = to.id.replace(/-/g, " ");
+  const name = /\bmate\b/.test(label) ? label : `${label} mate`;
+  const what = texts.join(" / ").replace(/\s+/g, " ").trim();
+  const held = supervisorOnly(what) || safe(what) !== what;
+  const short = what.length > NOTICE_MAX ? `${what.slice(0, NOTICE_MAX - 1).trimEnd()}…` : what;
+  return cleanText(`${verb} ${name}: ${held ? "(held back, it may be sensitive)" : short}`);
 }
