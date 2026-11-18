@@ -38,15 +38,24 @@ test("no prompt is ever bumped, whatever it asks or even when it cannot be read"
   }
 });
 
-test("a session that moves before the grace ends sends no text, and a text that was not sent comes again", () => {
+test("a failed bump comes again each poll until the grace ends, then one text; a good bump is not repeated", () => {
   const stuckNotes = mainSession({ notes: 2, oldest: T0 });
   const w = watch();
   w.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(false);
-  expect(w.poll([stuckNotes], T0 + 19 * MIN)).toEqual([]);
+  const again = w.poll([stuckNotes], T0 + 17 * MIN);
+  expect(again.map((a) => a.kind)).toEqual(["bump"]);
+  again[0]!.done(false);
+  expect(w.poll([stuckNotes], T0 + 19 * MIN).map((a) => a.kind)).toEqual(["bump"]);
   const retry = w.poll([stuckNotes], T0 + 20 * MIN);
+  expect(retry.map((a) => a.kind)).toEqual(["owner"]);
   expect(retry[0]!.text).toContain("My nudge did not go through.");
   retry[0]!.done(false);
   expect(w.poll([stuckNotes], T0 + 21 * MIN)).toHaveLength(1);
+
+  const w3 = watch();
+  w3.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(true);
+  expect(w3.poll([stuckNotes], T0 + 17 * MIN)).toEqual([]);
+  expect(w3.poll([stuckNotes], T0 + 20 * MIN)[0]!.text).toContain("I nudged it, and it is still stuck.");
 
   const w2 = watch();
   w2.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(true);

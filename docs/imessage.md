@@ -410,9 +410,9 @@ A session counts as stuck when either of these holds for `FM_IMESSAGE_STUCK_MS` 
 
 Each incident goes through these steps, once:
 
-1. **Bump (unread notes only).** The bridge files one inbox note marked `[desk stuck-check]`. For the main session it uses `fm-inbox.sh note`. For a mate it uses `fm-send.sh --fire-and-forget`, which rings the doorbell and arms no reply wait. The bump is not counted as an unread note.
+1. **Bump (unread notes only).** The bridge files one inbox note marked `[desk stuck-check]`. For the main session it uses `fm-inbox.sh note`. For a mate it uses `fm-send.sh --fire-and-forget`, which rings the doorbell and arms no reply wait. The bump is not counted as an unread note. A bump that fails is tried again on each poll until one goes through or the grace period ends.
 2. **Text.** If the session is still stuck `FM_IMESSAGE_STUCK_GRACE_MS` (default 5 minutes) after the bump, the owner gets one text. It names the session, the time it has been stuck since (UTC), the number of unread notes, whether the bump went through, and the last lines of the prompt when the pane shows one. Long token-like strings in the prompt text are hidden.
-3. **Recovery.** When the session has moved for two polls in a row, the owner gets one more text. A text that cannot be queued (no chat yet, or muted) is tried again on the next poll. An action that fails is logged and tried again on the next poll.
+3. **Recovery.** When the session has moved for two polls in a row, the owner gets one more text. A text that cannot be queued (no chat yet, or muted) is tried again on the next poll.
 
 The bridge never bumps a session that sits on a prompt, and it never types an answer to any prompt. The doorbell line goes into the pane, and a prompt can take it as its answer, so a keyword list for credentials, payments or public posts would not be safe enough. For a prompt the owner gets the text at once, after the limit, with the last lines of the prompt, and no bump goes out.
 

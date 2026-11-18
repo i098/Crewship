@@ -672,7 +672,7 @@ else if (stuckMs > 0) {
   console.log(`fm-imessage: stuck supervisor check on, after ${Math.round(stuckMs / 60_000)} min`);
 }
 
-// Runs one bump or owner text of the stuck watch; false when it did not go through (the watch tries again next poll).
+// Runs one bump or owner text of the stuck watch; false when it did not go through (a bump comes again each poll until one goes through or the grace ends, an owner text on every poll).
 async function runStuckAction(a: Action, mates: Secondmate[]): Promise<boolean> {
   try {
     if (a.kind === "owner") return !!proactiveRef && put({ ...proactiveRef, bubbles: [a.text], requests: [] });

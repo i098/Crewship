@@ -1,6 +1,6 @@
 // Stuck supervisors (docs/imessage.md#stuck-supervisors). A supervisor session (the main one or a second mate) is stuck
 // when its herdr pane sits on an interactive prompt (status "blocked") or its oldest inbox note stays unread, for
-// `stuckMs`. Unread notes get one bump through the inbox path the desk already uses, and the owner is texted once per
+// `stuckMs`. Unread notes get a bump (tried again each poll until it goes through or the grace ends) through the inbox path the desk already uses, and the owner is texted once per
 // incident if the session is still stuck `graceMs` later, then once more when it moves again. A prompt is never
 // bumped: the doorbell line is typed into the pane and could answer it, so the owner is told at once. The core is free
 // of the bridge so tests run on recorded JSON and plain files.
@@ -81,14 +81,15 @@ export class StuckWatch {
     return { kind: "owner", id: s.id, key: `${s.id}-${inc.since}`, text, done: this.persisted((ok) => ok && this.incidents.delete(s.id)) };
   }
 
-  // Unread notes get one bump; a prompt and a bump that did not help get the owner text.
+  // Unread notes get a bump, tried again each poll until one goes through or the grace ends; a prompt and a bump that did not help get the owner text.
   private escalate(s: Session, inc: Incident, now: number): Action | undefined {
     const key = `${s.id}-${inc.since}`;
-    if (!s.blocked && inc.bumpedAt === undefined) {
+    const waiting = inc.bumpedAt !== undefined && now - inc.bumpedAt < this.config.graceMs;
+    if (!s.blocked && !inc.nudged && (inc.bumpedAt === undefined || waiting)) {
       return { kind: "bump", id: s.id, key, text: `${BUMP_MARK} You look stuck: ${notes(s.notes)} wait since ${clock(s.oldest!)}. Read and act on your inbox notes now.`,
-        done: this.persisted((ok) => { inc.bumpedAt = now; inc.nudged = ok; }) };
+        done: this.persisted((ok) => { inc.bumpedAt ??= now; if (ok) inc.nudged = true; }) };
     }
-    if (!s.blocked && now - inc.bumpedAt! < this.config.graceMs) return;
+    if (!s.blocked && waiting) return;
     const body = [`${s.label} is stuck: ${s.blocked ? "it sits on a prompt" : "it has not read its inbox"} since ${clock(inc.since)} (${span(now - inc.since)}).`,
       s.notes ? `${notes(s.notes)} wait.` : "No notes wait.",
       inc.nudged ? "I nudged it, and it is still stuck."
