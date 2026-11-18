@@ -113,12 +113,23 @@ test("sessions join the inboxes with the panes of their homes; a spare pane that
     agentsJson: agents(pane("p1", home, "blocked"), pane("p2", "/work/web", "blocked"), pane("p3", "/work/web", "idle"), pane("p4", "/elsewhere", "blocked")),
     readPane: async (id) => (reads.push(id), "Trust this folder? ❯ 1. Yes"),
   });
-  expect(reads).toEqual(["p1"]);
+  expect(reads).toEqual(["p1", "p2"]);
   expect(sessions).toMatchObject([
     { id: "main", notes: 1, blocked: true, prompt: "Trust this folder? ❯ 1. Yes" },
-    { id: "web-mate", label: "web-mate (second mate)", notes: 1, blocked: false },
+    { id: "web-mate", label: "web-mate (second mate)", notes: 1, blocked: false, prompt: undefined },
   ]);
   await expect(collectSessions({ home, mates: [], agentsJson: "{}", readPane: async () => "" })).rejects.toThrow("no agents array");
+});
+
+test("an idle pane with unread notes is read, so a rate-limit stop is detected", async () => {
+  const home = tmp();
+  mkdirSync(`${home}/state/inbox`, { recursive: true });
+  writeFileSync(`${home}/state/inbox/n1.note`, "hello");
+  const sessions = await collectSessions({
+    home, mates: [], agentsJson: agents(pane("p1", home, "idle")),
+    readPane: async () => "429 rate_limit_error",
+  });
+  expect(sessions).toMatchObject([{ id: "main", blocked: false, limited: true }]);
 });
 
 test("the prompt text keeps the last lines and the question at the end, without glyphs, and hides token-like strings", () => {

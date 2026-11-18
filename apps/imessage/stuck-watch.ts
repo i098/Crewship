@@ -178,8 +178,8 @@ export async function collectSessions(o: { home: string; mates: readonly Secondm
     const panes = list.filter((a) => typeof a?.pane_id === "string" && here.has(String(a.foreground_cwd ?? a.cwd ?? "").replace(/\/+$/, "")));
     // Several panes in one home: only all of them waiting on input counts, so a spare pane cannot raise the alarm.
     const blocked = panes.length > 0 && panes.every((a) => a.agent_status === "blocked");
-    const screen = blocked ? await o.readPane(panes[0].pane_id) : undefined;
-    sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: screen === undefined ? undefined : promptOf(screen),
+    const screen = blocked || (panes.length > 0 && t.inbox.count > 0) ? await o.readPane(panes[0].pane_id) : undefined;
+    sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: blocked && screen !== undefined ? promptOf(screen) : undefined,
       limited: !!screen && /rate_limit_error|exceeds retry\.maxDelayMs/.test(screen) });
   }
   return sessions;
