@@ -132,11 +132,15 @@ test("an idle pane with unread notes is read, so a rate-limit stop is detected",
   expect(sessions).toMatchObject([{ id: "main", blocked: false, limited: true }]);
 });
 
-test("with a live limit, an idle pane without notes is read and found limited", async () => {
+test("with a live limit, an idle pane without notes is read and found limited; only the pane end counts, and only for the limit's model", async () => {
   const home = tmp();
-  const run = (limited: boolean) => collectSessions({ home, mates: [], agentsJson: agents(pane("p1", home, "idle")), limited, readPane: async () => "429 rate_limit_error" });
-  expect(await run(true)).toMatchObject([{ id: "main", notes: 0, limited: true }]);
-  expect(await run(false)).toMatchObject([{ id: "main", notes: 0, limited: false }]);
+  const limit = { model: "claude-fable-5-2", at: 0, resetAt: 1, cleared: false };
+  const run = (screen: string, l?: typeof limit) => collectSessions({ home, mates: [], agentsJson: agents(pane("p1", home, "idle")), limit: l, readPane: async () => screen });
+  expect(await run("429 rate_limit_error", limit)).toMatchObject([{ id: "main", notes: 0, limited: true }]);
+  expect(await run("429 rate_limit_error", undefined)).toMatchObject([{ id: "main", notes: 0, limited: false }]); // no limit: pane not read
+  expect(await run("429 rate_limit_error\n" + "ok\n".repeat(5), limit)).toMatchObject([{ limited: false }]); // stale error scrolled up
+  expect(await run("claude-sonnet-5-5 429 rate_limit_error", limit)).toMatchObject([{ limited: false }]); // another model
+  expect(await run("claude-fable-5-2 429 rate_limit_error", limit)).toMatchObject([{ limited: true }]);
 });
 
 test("the prompt text keeps the last lines and the question at the end, without glyphs, and hides token-like strings", () => {
@@ -165,6 +169,22 @@ test("a rate limit gives one fleet text with the reset in PT, no text for each s
   expect(w.poll(stopped, T0 + 22 * MIN, { ...limit, cleared: true })).toEqual([]); // rung once
   expect(w.poll(stopped, T0 + 23 * MIN, { ...limit, at: T0 + 22 * MIN, cleared: true })).toEqual([]); // a new 429 right after the ring: no ring loop
   expect(w.poll(stopped, T0 + 36 * MIN, { ...limit, cleared: true }).map((a) => a.text.slice(0, 26))).toEqual(Array(3).fill("Firstmate (main) is stuck:")); // the ring did not help
+});
+
+test("a blocked session on a real prompt with a stale 429 above is not rung; one whose pane ends in the 429 is", async () => {
+  const home = tmp();
+  mkdirSync(`${home}/state/inbox`, { recursive: true });
+  const limit = { model: "claude-fable-5-2", at: T0, resetAt: T0 + 3 * MIN, cleared: true };
+  const run = async (screen: string) => {
+    const sessions = await collectSessions({ home, mates: [], agentsJson: agents(pane("p1", home, "blocked")), limit, readPane: async () => screen });
+    return { sessions, actions: watch().poll(sessions, T0 + 10 * MIN, limit) };
+  };
+  const prompt = await run(`429 rate_limit_error\n${"work\n".repeat(5)}Trust this folder? ❯ 1. Yes`);
+  expect(prompt.sessions).toMatchObject([{ blocked: true, limited: false }]);
+  expect(prompt.actions.filter((a) => a.key.startsWith("limit-"))).toEqual([]);
+  const stop = await run("work\nclaude-fable-5-2 429 rate_limit_error");
+  expect(stop.sessions).toMatchObject([{ blocked: true, limited: true }]);
+  expect(stop.actions.filter((a) => a.kind === "bump")).toHaveLength(1);
 });
 
 test("the limit is read from a stats database", () => {

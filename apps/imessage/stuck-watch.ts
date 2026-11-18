@@ -165,7 +165,7 @@ export function promptOf(screen: string): string | undefined {
 const dirs = (home: string) => new Set([home.replace(/\/+$/, ""), (() => { try { return realpathSync(home); } catch { return home; } })()]);
 
 // Joins the inboxes with `herdr agent list`: the sessions of the main home and each second mate's home.
-export async function collectSessions(o: { home: string; mates: readonly Secondmate[]; agentsJson: string; limited?: boolean; readPane(pane: string): Promise<string | undefined> }): Promise<Session[]> {
+export async function collectSessions(o: { home: string; mates: readonly Secondmate[]; agentsJson: string; limit?: Limit; readPane(pane: string): Promise<string | undefined> }): Promise<Session[]> {
   const list: unknown = JSON.parse(o.agentsJson)?.result?.agents;
   if (!Array.isArray(list)) throw new Error("herdr agent list: no agents array");
   const targets = [
@@ -178,9 +178,12 @@ export async function collectSessions(o: { home: string; mates: readonly Secondm
     const panes = list.filter((a) => typeof a?.pane_id === "string" && here.has(String(a.foreground_cwd ?? a.cwd ?? "").replace(/\/+$/, "")));
     // Several panes in one home: only all of them waiting on input counts, so a spare pane cannot raise the alarm.
     const blocked = panes.length > 0 && panes.every((a) => a.agent_status === "blocked");
-    const screen = panes.length > 0 && (blocked || o.limited || t.inbox.count > 0) ? await o.readPane(panes[0].pane_id) : undefined;
+    const screen = panes.length > 0 && (blocked || o.limit || t.inbox.count > 0) ? await o.readPane(panes[0].pane_id) : undefined;
+    const tail = screen?.split("\n").filter((l) => l.trim()).slice(-5).join("\n") ?? "";
+    const models = tail.match(/\b(?:claude|gpt|deepseek|mercury)-[a-z0-9.-]*[a-z0-9]/g) ?? [];
+    const other = !!o.limit && models.length > 0 && !models.includes(o.limit.model);
     sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: blocked && screen !== undefined ? promptOf(screen) : undefined,
-      limited: !!screen && /rate_limit_error|exceeds retry\.maxDelayMs/.test(screen) });
+      limited: !other && /rate_limit_error|exceeds retry\.maxDelayMs/.test(tail) });
   }
   return sessions;
 }

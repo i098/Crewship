@@ -664,7 +664,7 @@ else if (stuckMs > 0) {
     try {
       const mates = secondmates(FM_HOME);
       const limit = rateLimit(`${env.HOME}/.omp/stats.db`, Date.now());
-      const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"), limited: !!limit,
+      const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"), limit,
         readPane: (pane) => herdr("pane", "read", pane, "--source", "visible", "--lines", "40", "--format", "text").catch(() => undefined) });
       for (const a of watch.poll(sessions, Date.now(), limit)) a.done(await runStuckAction(a, mates));
     } catch (e) {
