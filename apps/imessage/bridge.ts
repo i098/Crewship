@@ -47,6 +47,8 @@ import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { type Action, collectSessions, StuckWatch } from "./stuck-watch.ts";
+import { paneIO } from "./desk-pane.ts";
+import { listScripts, runScript } from "./desk-scripts.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -1253,6 +1255,16 @@ async function sendDeskTask(target: string | Secondmate, id: string, text: strin
   return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
 }
 
+// The desk's pane tools reuse the herdr binary the status alerts poll; its scripts come from one fixed directory (desk-scripts.ts).
+async function runHerdr(cmd: string[]): Promise<string> {
+  const proc = track(Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", timeout: 10_000 }));
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) throw new Error(`${cmd.slice(1, 3).join(" ")} failed: ${err.trim().slice(0, 200) || `exit ${code}`}`);
+  return out;
+}
+const deskPanes = paneIO(runHerdr, env.FM_IMESSAGE_HERDR_BIN || "herdr");
+const SCRIPTS_DIR = env.FM_IMESSAGE_DESK_SCRIPTS || `${FM_HOME}/desk-scripts`;
+
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
   stateDir: STATE, memoryDir: MEMORY_DIR, fmHome: FM_HOME, memory, track, log, muted,
@@ -1262,6 +1274,9 @@ const runSessionTurn = createSessionTurn<Routing>({
   stopping: () => stopping, listed: (mate) => relayTargetCurrent(mate, secondmates(FM_HOME)), held: (mate, id) => mateInboxHas(FM_HOME, mate.id, id),
   send: sendDeskTask,
   message: async (mate, text) => await spawnSender(mate, `[from desk] ${text}`).exited === 0,
+  pane: deskPanes.read, press: deskPanes.press,
+  scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
+  remember: (text) => void remember("desk", text),
   ...deskLog(STATE),
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
     guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),

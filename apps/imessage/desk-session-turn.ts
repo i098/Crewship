@@ -1,7 +1,7 @@
 // One turn of the desk's long chat: the bridge's checks, the child's start, and the prompt it gets.
 // The bridge passes its effects in (SessionHost); a turn that ends with no action gets one reminder, then its words go out as the reply or the text goes to Firstmate.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage } from "./desk-actions.ts";
+import { ACK_GUID_PREFIX, createActions, HOST_TOOLS, sessionPrompt, TASK_GUID_PREFIX, turnMessage, type ActionHost } from "./desk-actions.ts";
 import { createDelegator, WAIT_MS } from "./desk-delegate.ts";
 import { createHelper, spawnHelper, type HelperKind } from "./desk-helper.ts";
 import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
@@ -62,7 +62,7 @@ export type SessionHost<R extends TurnRequest> = {
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
   record(key: string | undefined, text: string): void;
   report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
-};
+} & Pick<ActionHost, "pane" | "press" | "scripts" | "script" | "remember">;
 
 // The newest status lines of a mate: where a marked reply returns to the desk's home.
 function readStatusTail(home: string, id: string) {
@@ -174,6 +174,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     if (replied) return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
     const actions = createActions({
       requests: pending, current, muted: host.muted, mates: () => mates, safe, message: host.message, sent: host.sent, log: host.record,
+      pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,
       replies: (mate) => safe(readStatusTail(host.fmHome, mate.id)),
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),
       react: (emoji) => host.react(pending, emoji),

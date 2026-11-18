@@ -23,6 +23,8 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     sent: (key) => key === "seen",
     log: (key, text) => void logged.push([key, text]),
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
+    pane: async () => "idle", press: async () => {}, scripts: () => [], script: async () => ({ code: 0, timedOut: false, output: "" }),
+    remember: (text) => void calls.push(["remember", text]),
     ...over,
   };
   return { calls, logged, ...createActions(stub) };
@@ -234,4 +236,91 @@ test("reply refuses text that speaks of the owner in the third person", async ()
   const h = host(["hello"]);
   await expect(h.run("reply", { text: "The captain asks for a fix." })).rejects.toThrow("third person");
   expect(h.calls).toEqual([]);
+});
+
+// A pane that shows one selector: arrow keys move the cursor, Enter closes it.
+function fakePane(title: string, options: string[]) {
+  let cursor = 0;
+  let open = true;
+  const pressed: string[] = [];
+  return {
+    pressed,
+    pane: async () => open ? ["", "", ` ${title}`, "", ...options.map((o, i) => (i === cursor ? ` ❯ ${o}` : `   ${o}`)), "", " ↑↓ navigate  enter select  esc cancel", "", "❯"].join("\n") : "idle",
+    press: async (_who: string, keys: string[]) => {
+      for (const key of keys) { pressed.push(key); if (key === "down") cursor++; if (key === "up") cursor--; if (key === "enter") open = false; }
+    },
+  };
+}
+const promptId = async (h: ReturnType<typeof host>, pane = "main") => /prompt (\w+) on/.exec(await h.run("pane_prompt", { pane }))![1]!;
+
+test("pane_choose moves the cursor, presses Enter once, logs the answer, and leaves the turn open", async () => {
+  const fake = fakePane("Spend a saved rate-limit reset?", ["Yes", "No"]);
+  const h = host(["main looks stuck"], fake);
+  const view = await h.run("pane_prompt", { pane: "main" });
+  expect(view).toContain("1. Yes\n2. No");
+  expect(await h.run("pane_choose", { pane: "main", prompt: await promptId(h), option: 2 })).toBe("answered; the prompt is gone");
+  expect(fake.pressed).toEqual(["down", "enter"]);
+  expect(h.calls).toEqual([["remember", 'desk answered the prompt on main: "Spend a saved rate-limit reset?" with option 2, "No"']]);
+  expect(h.acted()).toBe(false);
+});
+
+test("pane_choose never answers a prompt about payments: the owner gets the prompt and options and the turn ends", async () => {
+  const fake = fakePane("Pay $20 to continue?", ["Pay", "Cancel"]);
+  const h = host(["main looks stuck"], fake);
+  const view = await h.run("pane_prompt", { pane: "main" });
+  expect(view).toContain("you may not answer it (payments or purchases)");
+  const out = await h.run("pane_choose", { pane: "main", prompt: await promptId(h), option: 1 });
+  expect(out).toContain("your turn is over");
+  expect(fake.pressed).toEqual([]);
+  expect(h.calls[0]).toEqual(["reply", ["Main waits on a prompt. I may not answer it (payments or purchases).", "Pay $20 to continue?\n1. Pay\n2. Cancel"], 1]);
+  expect(h.calls[1]![0]).toBe("remember");
+  expect(h.acted()).toBe(true);
+  await expect(h.run("pane_choose", { pane: "main", prompt: "x", option: 1 })).rejects.toThrow("already ended");
+});
+
+test("pane_choose falls back to a plain text when the prompt text holds protected content", async () => {
+  const fake = fakePane("Use the password hunter2?", ["Yes", "No"]);
+  const h = host(["main looks stuck"], fake);
+  await h.run("pane_choose", { pane: "main", prompt: await promptId(h), option: 1 });
+  expect(h.calls[0]).toEqual(["reply", ["Main waits on a prompt. I may not answer it (credentials or logins). Open its pane to read it."], 1]);
+});
+
+test("pane_choose refuses a stale prompt id, a bad option, an unlisted pane and a protected request", async () => {
+  const h = host(["main looks stuck"], fakePane("Continue?", ["Yes", "No"]));
+  await expect(h.run("pane_choose", { pane: "main", prompt: "stale", option: 1 })).rejects.toThrow("prompt changed");
+  await expect(h.run("pane_choose", { pane: "main", prompt: await promptId(h), option: 3 })).rejects.toThrow("option must be 1 to 2");
+  await expect(h.run("pane_prompt", { pane: "robinhood" })).rejects.toThrow("not main or a listed mate");
+  await expect(host(["approve it"], fakePane("Continue?", ["Yes", "No"])).run("pane_prompt", { pane: "main" })).rejects.toThrow("protected");
+  expect(h.calls).toEqual([]);
+});
+
+test("pane_choose stops when the cursor does not reach the option, before Enter", async () => {
+  const fake = fakePane("Continue?", ["Yes", "No"]);
+  const h = host(["main looks stuck"], { ...fake, press: async (who, keys) => { await fake.press(who, keys.map(() => "up")); } });
+  await expect(h.run("pane_choose", { pane: "main", prompt: await promptId(h), option: 2 })).rejects.toThrow("cursor did not reach");
+  expect(fake.pressed).not.toContain("enter");
+});
+
+test("pane_prompt reports no prompt on a pane that shows none", async () => {
+  expect(await host(["hi"]).run("pane_prompt", { pane: "mate1" })).toBe("no selection prompt is open on mate1");
+});
+
+test("run_script lists scripts, runs one with its status and output, and logs the run", async () => {
+  const h = host(["run the disk report"], {
+    scripts: () => ["disk-report: Show the disk use."],
+    script: async (name) => { if (name !== "disk-report") throw new Error(`refused: ${name}: no such script`); return { code: 0, timedOut: false, output: "ok hunter2\n" }; },
+  });
+  expect(await h.run("run_script", {})).toBe("disk-report: Show the disk use.");
+  expect(await h.run("run_script", { name: "disk-report" })).toBe("exit 0\nok [REDACTED]\n");
+  await expect(h.run("run_script", { name: "rm" })).rejects.toThrow("refused");
+  expect(h.calls).toEqual([
+    ["remember", "desk ran script disk-report: exit 0; ok [REDACTED]"],
+    ["remember", "desk refused script rm: refused: rm: no such script"],
+  ]);
+});
+
+test("run_script reports a timeout and refuses a protected request", async () => {
+  const h = host(["run the slow job"], { script: async () => ({ code: null, timedOut: true, output: "" }) });
+  expect(await h.run("run_script", { name: "slow" })).toBe("timed out after 60 s\nno output");
+  await expect(host(["deploy now"]).run("run_script", { name: "x" })).rejects.toThrow("protected");
 });
