@@ -181,6 +181,7 @@ test("the limit is read from a stats database", () => {
   expect(rateLimit(file, T0 + 4 * MIN)!.cleared).toBe(false);
   add.run(T0 + 5 * MIN, "claude-fable-5-2", "toolUse", null);
   expect(rateLimit(file, T0 + 6 * MIN)!.cleared).toBe(true);
+  expect(rateLimit(file, T0 + 5 * MIN + 11 * MIN)).toBeUndefined(); // cleared early by a good call, long ago: no reads, no rings
   db.close();
 });
 

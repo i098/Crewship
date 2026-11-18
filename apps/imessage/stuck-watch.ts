@@ -194,8 +194,10 @@ export function rateLimit(file: string, now: number): Limit | undefined {
       .get(now - 7 * 86_400_000) as { at: number; model: string; m: string } | null;
     const wait = Number(e?.m.match(/retry-after-ms=(\d+)/)?.[1]);
     if (!e || !(wait > 60_000)) return;
-    const ok = db.query("select 1 from messages where model=? and timestamp>? and stop_reason not in ('error','aborted') limit 1").get(e.model, e.at);
-    return { model: e.model, at: e.at, resetAt: e.at + wait, cleared: !!ok || now >= e.at + wait };
+    const ok = db.query("select min(timestamp) t from messages where model=? and timestamp>? and stop_reason not in ('error','aborted')").get(e.model, e.at) as { t: number | null };
+    const clearedAt = Math.min(ok.t ?? Infinity, e.at + wait);
+    if (now >= clearedAt + RERING_MS) return;
+    return { model: e.model, at: e.at, resetAt: e.at + wait, cleared: now >= clearedAt };
   } catch {
     return; // a missing or unreadable stats.db must not stop the watch
   } finally {
