@@ -19,6 +19,13 @@ test("history and live polls serve each occurrence masked", async () => {
   expect(await get("/messages?after=0")).toEqual(["[hidden] and [hidden]"]);
 });
 
+test("the URL-encoded form is masked too", async () => {
+  process.env[KEY] = "test pass&123";
+  const route = webchatRoutes({ port: 1, msgs: () => [msg(0, "a test%20pass%26123 b test pass&123")], send: () => true, attachDir: "/nope", sentDir: "/nope" });
+  const res = await route(new Request("http://127.0.0.1:1/messages", { headers: { host: "127.0.0.1:1" } }));
+  expect(((await res.json()) as { messages: { text: string }[] }).messages[0]!.text).toBe("a [hidden] b [hidden]");
+});
+
 test("unset or short value changes nothing", async () => {
   delete process.env[KEY];
   expect((await get("/messages"))[0]).toBe("the key is test-pass-123 ok");

@@ -34,7 +34,7 @@ import { app as appCard, attachment, edit, Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { BlueBubbles } from "./bluebubbles.ts";
 import { cardLayout, cardRoutes, Cards, letter, type Layout, parseCard, type Stored } from "./cards.ts";
-import { WEB_MARK, webchatRoutes } from "./webchat.ts";
+import { MIN_SECRET, WEB_MARK, webchatRoutes } from "./webchat.ts";
 import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN_MAX_MS, timeOutTurn, typingOutlivesTurn, withDeadline, type BasicAnswer, basicAnswer, bubbles, compactChat, describe, type DeskProc, DeskTiming, deskInput, deskPrompt, failover, handoffPrompt, handoffTarget, inbound, type LineMessage, localCommand, notSent, type Route, readDesk, type Saveable, type Secondmate, mateStatusLines, secondmates, socialOnly, spawnDesk, supervisorOnly, typingPause, voiceAnswer, voicePrompt, type VoiceSource } from "./desk.ts";
 import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
@@ -617,6 +617,7 @@ if (WEB_PORT) {
   Bun.serve({ hostname: "127.0.0.1", port: WEB_PORT, maxRequestBodySize: 16384, development: false,
     fetch: (req) => stopping ? new Response("stopping\n", { status: 503 }) : web(req) });
   console.log(`fm-imessage: web chat on 127.0.0.1:${WEB_PORT}`);
+  if ((env.WEB_ACCESS_PASSWORD ?? "").length < MIN_SECRET) console.warn(`fm-imessage: WEB_ACCESS_PASSWORD is unset or shorter than ${MIN_SECRET} characters, so the web chat cannot hide the password`);
 }
 // Alerts from herdr agent status (herdr-watch.ts); off unless FM_IMESSAGE_HERDR_ALERTS=true. Read-only: only `herdr agent list` runs.
 if (env.FM_IMESSAGE_HERDR_ALERTS === "true") {
