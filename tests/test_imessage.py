@@ -2339,6 +2339,8 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         "FM_IMESSAGE_TEST_MAX_WAIT_MS": os.environ.get("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 6)),
         **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
     }
+    if probe:
+        env.pop("BUN_OPTIONS", None)  # the probe is shared by every test: a test's preload must not decide it
     out, err = tmp_path / "out", tmp_path / "err"
     text = lambda p: p.read_text() if p.exists() else ""  # noqa: E731
 
