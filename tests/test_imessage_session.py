@@ -91,6 +91,18 @@ def test_session_relays_to_a_listed_mate(tmp_path):
         assert texts(rig)[0].split(" ", 1)[1] == "Sent to mate1 mate: RELAY mate1"
 
 
+def test_message_mate_sends_the_owner_one_notice(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")
+    with session_rig(tmp_path) as rig:
+        sender = tmp_path / "bin" / "fm-send.sh"
+        sender.write_text("#!/bin/bash\nexit 0\n")
+        sender.chmod(0o755)
+        deliver(rig, "m1", "MESSAGE mate1")
+        wait_for(lambda: len(texts(rig)) == 2, "the notice and the answer", timeout=120)
+        assert [t.split(" ", 1)[1] for t in texts(rig)][0] == "Sent to mate1 mate: Please check the footer."
+
+
 def test_fleet_status_names_the_listed_mates_so_the_session_can_pick_one(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")

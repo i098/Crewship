@@ -13,11 +13,6 @@ export { ACK_GUID_PREFIX, TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
 
-// One text to the owner on the chat of `origin`; a failure is logged, never thrown, so it cannot stop the turn.
-function tellOwner<R extends TurnRequest>(host: SessionHost<R>, origin: R, text: string) {
-  try { host.report([text], `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, origin); }
-  catch (err) { host.log("desk notice")(`notice not queued: ${err instanceof Error ? err.message : err}`); }
-}
 
 // The ack, when given, is queued before the slow handoff so the owner is not left waiting; it is a plain desk text with no task behind it.
 function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
@@ -68,6 +63,7 @@ export type SessionHost<R extends TurnRequest> = {
   sent(key: string | undefined, text: string): boolean; // sender log of texts to the owner (sender-log.ts)
   record(key: string | undefined, text: string): void;
   report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
+  notice(origin: R | undefined, mate: Secondmate, texts: readonly string[]): void; // the fixed "Sent to" line: direct chat only, never rewritten
 } & Pick<ActionHost, "pane" | "press" | "scripts" | "script" | "remember">;
 
 // The newest status lines of a mate: where a marked reply returns to the desk's home.
@@ -183,7 +179,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,
       message: async (mate, text) => {
         const sent = await host.message(mate, text);
-        if (sent) tellOwner(host, pending.at(-1)!, relayNotice(mate, [text], safe));
+        if (sent) host.notice(pending.at(-1), mate, [text]);
         return sent;
       },
       replies: (mate) => safe(readStatusTail(host.fmHome, mate.id)),

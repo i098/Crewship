@@ -1182,12 +1182,11 @@ function queueAck(pending: Routing[], bubble: string) {
 
 // One short text tells the owner who got which of his texts. Only a desk's own relays notify: desk-only answers send none.
 // It is a fixed line, so it skips the model rewrite (`ste`), and its guid keeps a newer owner text from cancelling it.
-function noticeRelay(items: Routing[], to: Secondmate) {
-  const last = items.at(-1);
-  if (!last || !deskSafe || !DESK_VETTED || muted() || !directChat.test(last.ref.space)) return;
+function noticeRelay(origin: Routing | undefined, to: Secondmate, texts: readonly string[]) {
+  if (!origin || !deskSafe || !DESK_VETTED || muted() || !directChat.test(origin.ref.space)) return;
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
-  outbox.add({ ...last.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), deskGeneration, deskSession, ste: true,
-    bubbles: [relayNotice(to, items.map((r) => r.authored ?? r.text), deskSafe)] });
+  outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), deskGeneration, deskSession, ste: true,
+    bubbles: [relayNotice(to, texts, deskSafe)] });
 }
 function timeOutV2(pending: Routing[], controller: AbortController, current: () => boolean) {
   log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
@@ -1289,6 +1288,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
   remember: (text) => void remember("desk", text),
   ...deskLog(STATE),
+  notice: noticeRelay,
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
     guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),
 });
@@ -1575,7 +1575,7 @@ async function handoffToMate(pending: Routing[], mate: Secondmate, current: () =
     }
   } finally {
     for (const item of pending) mateDeliveries.delete(item.requestId);
-    noticeRelay(sent, mate);
+    if (sent.length) noticeRelay(sent.at(-1), mate, sent.map((r) => r.authored ?? r.text));
     flushRoutes();
   }
 }
