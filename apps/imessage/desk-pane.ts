@@ -15,6 +15,36 @@ const TITLE_LINES = 5;
 
 const idOf = (title: string, lines: string[]) => createHash("sha1").update(`${title}\n${lines.join("\n")}`).digest("hex").slice(0, 8);
 
+// The title: up to TITLE_LINES non-blank lines above the options, stopping at two blank lines in a row.
+function titleAbove(lines: string[], start: number): string[] {
+  const title: string[] = [];
+  for (let i = start - 1, blanks = 0; i >= 0 && title.length < TITLE_LINES && blanks < 2; i--) {
+    if (lines[i]) { title.unshift(lines[i]!.trim()); blanks = 0; } else blanks++;
+  }
+  return title;
+}
+
+// The option labels in the block and the index of the one under the cursor (-1 when no cursor shows).
+function optionsOf(block: string[]): { options: string[]; selected: number } {
+  const cursor = block.findIndex((line) => CURSOR.test(line));
+  if (cursor < 0) return { options: [], selected: -1 };
+  const label = CURSOR.exec(block[cursor]!)![0].length;
+  const options: string[] = [];
+  let selected = -1;
+  block.forEach((line, i) => {
+    if (i === cursor) { selected = options.length; options.push(line.slice(label).trim()); } else if (line.length - line.trimStart().length === label) options.push(line.trim());
+  });
+  return { options, selected };
+}
+
+function unclearReason(block: string[], options: string[], selected: number): string | undefined {
+  if (block.some((line) => COUNTER.test(line))) return "the list is scrolled";
+  if (selected < 0) return "no selected option is visible";
+  if (options.length < 2) return "fewer than two options";
+  if (options.some((option) => MARKED.test(option))) return "a multiple choice";
+  return undefined;
+}
+
 // The prompt open at the bottom of a pane's visible text, or undefined when no selector hint is there.
 // A prompt the bridge cannot read exactly (a scrolled list, no cursor, one option, checkboxes) comes back with `unclear` set.
 export function parsePrompt(screen: string): PanePrompt | undefined {
@@ -26,25 +56,10 @@ export function parsePrompt(screen: string): PanePrompt | undefined {
   let start = end;
   while (start > 0 && lines[start - 1]) start--;
   const block = lines.slice(start, end + 1);
-  const title: string[] = [];
-  for (let i = start - 1, blanks = 0; i >= 0 && title.length < TITLE_LINES && blanks < 2; i--) {
-    if (lines[i]) { title.unshift(lines[i]!.trim()); blanks = 0; } else blanks++;
-  }
-  const cursor = block.findIndex((line) => CURSOR.test(line));
-  const label = cursor < 0 ? 0 : CURSOR.exec(block[cursor]!)![0].length;
-  const options: string[] = [];
-  let selected = -1;
-  block.forEach((line, i) => {
-    if (i === cursor) { selected = options.length; options.push(line.slice(label).trim()); return; }
-    if (cursor >= 0 && line.length - line.trimStart().length === label) options.push(line.trim());
-  });
+  const title = titleAbove(lines, start);
+  const { options, selected } = optionsOf(block);
   const text = title.join("\n");
-  const unclear = block.some((line) => COUNTER.test(line)) ? "the list is scrolled"
-    : selected < 0 ? "no selected option is visible"
-    : options.length < 2 ? "fewer than two options"
-    : options.some((option) => MARKED.test(option)) ? "a multiple choice"
-    : undefined;
-  return { id: idOf(text, options.length ? options : block), title: text || block.join(" "), options, selected, raw: [...title, ...block].join("\n"), unclear };
+  return { id: idOf(text, options.length ? options : block), title: text || block.join(" "), options, selected, raw: [...title, ...block].join("\n"), unclear: unclearReason(block, options, selected) };
 }
 
 // Why the desk must not answer this prompt, or undefined. The title, every option and the descriptions count.

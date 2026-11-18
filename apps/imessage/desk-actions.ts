@@ -117,6 +117,29 @@ function mateTools(host: ActionHost, live: () => void, may: () => void): Record<
   };
 }
 
+// Moves the cursor to option `n`, checks that it got there, logs the answer, then sends Enter.
+async function steer(host: ActionHost, who: string, p: PanePrompt, n: number, read: (who: string) => Promise<PanePrompt | undefined>): Promise<void> {
+  const keys = keysTo(p, n);
+  if (keys.length) {
+    await host.press(who, keys);
+    const moved = await read(who);
+    if (moved?.id !== p.id || moved.selected !== n - 1) throw new Error("refused: the cursor did not reach the option, so nothing was chosen; call pane_prompt again");
+  }
+  host.remember(`desk answered the prompt on ${who}: "${clip(p.title.replaceAll("\n", " / "), 200)}" with option ${n}, "${p.options[n - 1]}"`);
+  await host.press(who, ["enter"]);
+}
+
+async function runNamedScript(host: ActionHost, name: string): Promise<string> {
+  const run = await host.script(name).catch((error: Error) => {
+    host.remember(`desk refused script ${name}: ${error.message}`);
+    throw error;
+  });
+  const status = run.timedOut ? `timed out after ${SCRIPT_MS / 1000} s` : `exit ${run.code}`;
+  const output = host.safe(run.output);
+  host.remember(`desk ran script ${name}: ${status}; ${clip(output.trim(), 200) || "no output"}`);
+  return `${status}\n${output || "no output"}`;
+}
+
 // The tools for a selection prompt on the supervisor pane or a mate's pane, and for operator scripts. The denials are here, in code:
 // a prompt or script about credentials or logins, payments or purchases, or public posts is never answered or run, and neither is a prompt
 // the bridge cannot read exactly. For such a prompt the owner gets its text and options. Every answer and every run goes to the memory log.
@@ -160,28 +183,12 @@ function opsTools(host: ActionHost, gate: { live(): void; open(): void; may(): v
       if (why) return textOwner(who, p, why);
       const n = Number(args.option);
       if (!Number.isInteger(n) || n < 1 || n > p.options.length) throw new Error(`option must be 1 to ${p.options.length}`);
-      const keys = keysTo(p, n);
-      if (keys.length) {
-        await host.press(who, keys);
-        const moved = await prompt(who);
-        if (moved?.id !== p.id || moved.selected !== n - 1) throw new Error("refused: the cursor did not reach the option, so nothing was chosen; call pane_prompt again");
-      }
-      host.remember(`desk answered the prompt on ${who}: "${clip(p.title.replaceAll("\n", " / "), 200)}" with option ${n}, "${p.options[n - 1]}"`);
-      await host.press(who, ["enter"]);
+      await steer(host, who, p, n, prompt);
       return (await prompt(who))?.id === p.id ? "enter sent; the prompt is still open" : "answered; the prompt is gone";
     },
     run_script: async (args) => {
       gate.live(); gate.may();
-      if (args.name === undefined) return host.scripts().join("\n") || "no scripts are installed";
-      const name = String(args.name);
-      const run = await host.script(name).catch((error: Error) => {
-        host.remember(`desk refused script ${name}: ${error.message}`);
-        throw error;
-      });
-      const status = run.timedOut ? `timed out after ${SCRIPT_MS / 1000} s` : `exit ${run.code}`;
-      const output = host.safe(run.output);
-      host.remember(`desk ran script ${name}: ${status}; ${clip(output.trim(), 200) || "no output"}`);
-      return `${status}\n${output || "no output"}`;
+      return args.name === undefined ? host.scripts().join("\n") || "no scripts are installed" : runNamedScript(host, String(args.name));
     },
   };
 }
