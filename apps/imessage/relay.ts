@@ -50,6 +50,13 @@ export function mateInboxHas(fmHome: string, mateId: string, requestId: string, 
   return false;
 }
 
+export const directChat = /^[^;]+;-;[^;]+$/;
+
+// A group chat hands off to Firstmate before message_mate runs, so only a unit test reaches the directChat part of this guard.
+export function mayNotice(space: string, g: { safe: unknown; vetted: boolean; muted: boolean }): boolean {
+  return !!g.safe && g.vetted && !g.muted && directChat.test(space);
+}
+
 export const NOTICE_MAX = 80; // chars of the owner's text a relay notice shows
 
 // The owner's one-line notice of a relay: who got which text. Plain words, so the outbound filter keeps the mate's name (it strips ids like `x-mate-1`).

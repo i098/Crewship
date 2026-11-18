@@ -117,19 +117,6 @@ def test_message_mate_sends_the_owner_one_unrewritten_notice(tmp_path):
         assert "Sent to" not in seen  # the fixed notice skips it
 
 
-def test_message_mate_text_from_a_group_chat_sends_no_notice(tmp_path):
-    with mate_rig(tmp_path) as rig:
-        install_sender(tmp_path)
-        relay_message = rig.relay_message
-        rig.relay_message = lambda guid, text, at: relay_message(guid, text, at, chats=[{"guid": "iMessage;+;chat0000"}])
-        deliver(rig, "m1", "MESSAGE mate1")
-        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m1" in e.get("ids", []) for e in events(rig)),
-                 "the firstmate handoff", timeout=120)
-        time.sleep(1)
-        assert not (tmp_path / "mate-sent").exists()
-        assert not any("Sent to" in t for t in texts(rig))
-
-
 def test_fleet_status_names_the_listed_mates_so_the_session_can_pick_one(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text(f"- mate1 - Repo mate (home: {tmp_path}/mate1; scope: repo checks; projects: none)\n")

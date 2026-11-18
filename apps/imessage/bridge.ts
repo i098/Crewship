@@ -39,7 +39,7 @@ import { authorizedWritePath, createBurst, FRONT_TIMEOUT_REPLY, steChecked, TURN
 import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
-import { deskMayAct, deskRequestMarker, mateInboxHas, relayNotice, relayTarget, relayTargetCurrent } from "./relay.ts";
+import { deskMayAct, deskRequestMarker, directChat, mateInboxHas, mayNotice, relayNotice, relayTarget, relayTargetCurrent } from "./relay.ts";
 import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
@@ -432,7 +432,6 @@ let latestRef: Ref | undefined; // the ids of `latest`, kept even when it cannot
 let latestAt = -1;
 let proactiveRef: Ref | undefined;
 let proactiveAt = -1;
-const directChat = /^[^;]+;-;[^;]+$/;
 for (const name of TRANSPORTS) {
   for (const suffix of ["", "-direct"]) {
     const saved = Bun.file(`${latestFile(name)}${suffix}`);
@@ -1183,7 +1182,7 @@ function queueAck(pending: Routing[], bubble: string) {
 // One short text tells the owner who got which of his texts. Only a desk's own relays notify: desk-only answers send none.
 // It is a fixed line, so it skips the model rewrite (`ste`), and its guid keeps a newer owner text from cancelling it.
 function noticeRelay(origin: Routing | undefined, to: Secondmate, texts: readonly string[]) {
-  if (!origin || !deskSafe || !DESK_VETTED || muted() || !directChat.test(origin.ref.space)) return;
+  if (!origin || !deskSafe || !mayNotice(origin.ref.space, { safe: deskSafe, vetted: DESK_VETTED, muted: muted() })) return;
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
   outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), deskGeneration, deskSession, ste: true,
     bubbles: [relayNotice(to, texts, deskSafe)] });

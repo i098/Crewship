@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Secondmate } from "./desk.ts";
-import { NOTICE_MAX, relayNotice } from "./relay.ts";
+import { mayNotice, NOTICE_MAX, relayNotice } from "./relay.ts";
 
 const mate = (id: string) => ({ id, home: "/srv/x", scope: "s" }) as Secondmate;
 const same = (text: string) => text;
@@ -30,4 +30,13 @@ test("a sensitive text holds the summary back", () => {
   const held = "Sent to web mate: (held back, it may be sensitive)";
   expect(relayNotice(mate("web-mate"), ["the password is hunter2"], same)).toBe(held);
   expect(relayNotice(mate("web-mate"), ["token abc123"], (t) => t.replace("abc123", "[REDACTED]"))).toBe(held);
+});
+
+test("a notice goes only to a direct chat, with a redactor, a vetted desk and no mute", () => {
+  const ok = { safe: same, vetted: true, muted: false };
+  expect(mayNotice("iMessage;-;+15550000000", ok)).toBe(true);
+  expect(mayNotice("iMessage;+;chat0000", ok)).toBe(false);
+  expect(mayNotice("iMessage;-;+15550000000", { ...ok, safe: undefined })).toBe(false);
+  expect(mayNotice("iMessage;-;+15550000000", { ...ok, vetted: false })).toBe(false);
+  expect(mayNotice("iMessage;-;+15550000000", { ...ok, muted: true })).toBe(false);
 });
