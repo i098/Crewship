@@ -7,11 +7,17 @@ import { createHelper, spawnHelper, type HelperKind } from "./desk-helper.ts";
 import { DeskSession, sessionConfig, type PromptResult, type ToolRunner } from "./desk-session.ts";
 import { mateStatusLines, modelArg, secondmates, supervisorOnly, writeDeskSecrets, type Secondmate } from "./desk.ts";
 import type { Memory } from "./memory.ts";
-import { deskMayAct, type RelayRequest } from "./relay.ts";
+import { deskMayAct, relayNotice, type RelayRequest } from "./relay.ts";
 
 export { ACK_GUID_PREFIX, TASK_GUID_PREFIX };
 
 type SessionEnv = Record<string, string | undefined>;
+
+// One text to the owner on the chat of `origin`; a failure is logged, never thrown, so it cannot stop the turn.
+function tellOwner<R extends TurnRequest>(host: SessionHost<R>, origin: R, text: string) {
+  try { host.report([text], `${ACK_GUID_PREFIX}${crypto.randomUUID()}`, origin); }
+  catch (err) { host.log("desk notice")(`notice not queued: ${err instanceof Error ? err.message : err}`); }
+}
 
 // The ack, when given, is queued before the slow handoff so the owner is not left waiting; it is a plain desk text with no task behind it.
 function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[], reason: string, ack?: { parts: string[]; target: number }) {
@@ -173,8 +179,13 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     const replied = threadReplyMate(pending, mates);
     if (replied) return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
     const actions = createActions({
-      requests: pending, current, muted: host.muted, mates: () => mates, safe, message: host.message, sent: host.sent, log: host.record,
+      requests: pending, current, muted: host.muted, mates: () => mates, safe, sent: host.sent, log: host.record,
       pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,
+      message: async (mate, text) => {
+        const sent = await host.message(mate, text);
+        if (sent) tellOwner(host, pending.at(-1)!, relayNotice(mate, [text], safe));
+        return sent;
+      },
       replies: (mate) => safe(readStatusTail(host.fmHome, mate.id)),
       reply: (parts, target) => host.answer(pending, parts, pending[target - 1]),
       react: (emoji) => host.react(pending, emoji),
@@ -187,7 +198,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       helperBusy: helper.busy,
       delegate: (mate, target) => {
         // The ack is the bridge's own text and claims only that the text is queued: whether the send worked is reported later.
-        const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : `Your text is queued for the ${mate.id} mate`;
+        const ack = relayNotice(typeof mate === "string" ? "firstmate" : mate, pending.map((r) => r.authored ?? r.text), safe, "Your text is queued for");
         host.answer(pending, [ack], pending[target - 1], true);
         delegate(mate, original.join("\n"), pending.at(-1)!, pending.map((r) => r.requestId));
       },

@@ -287,6 +287,17 @@ Firstmate activity still cancels an unfinished routing decision and sends pendin
 Direct short answers and social reactions stay unchanged, including evidence-backed questions about approval counts when a registry exists.
 Delayed handoffs follow the [deadline rules](#what-it-does).
 
+### Relay notices
+
+When the desk relays text to a second mate or to Firstmate, the bridge sends the owner one short iMessage that names the receiver and gives a one-line summary of what was sent. The code is `relayNotice` in `apps/imessage/relay.ts`.
+
+- A notice follows each of these: a text routed to a mate, a burst handed to Firstmate (one notice for the burst), a `message_mate` text, and a delegated task. The delegation ack is its notice: "Your text is queued for <receiver>: <summary>".
+- A desk-only answer or tapback sends no notice. A notice follows only a send that succeeded in this call, so a delivery found already in the mate's inbox, a failed send, and a restart replay add none. A failed mate send still hands the text to Firstmate, which sends the Firstmate notice.
+- The line reads `Sent to <receiver>: <summary>`. The mate name is its id with hyphens as spaces, plus "mate" when the id lacks it (`web-mate` reads "web mate"), because the outbound text filter strips ids of the form `x-mate-1`.
+- The summary is the owner's own text on one line, cut to 80 characters with "…". It passes the outbound text filter, so paths and similar detail are removed.
+- A text that fails the desk's approval and credential checks (decisions, passwords, secrets, redacted values), or any text when the desk has no redactor, is not echoed: the notice then reads "(held back, it may be sensitive)".
+- Notices go only to a direct chat, only while the desk is vetted and not [muted](#mute). Each uses a task-style guid, so a newer owner text does not cancel it.
+
 ## V2 front desk
 
 Set `crewship.imessage.desk_v2: true` in `.local/host.yml` to select the V2 front desk.
@@ -343,7 +354,7 @@ If the missed chat since the last session turn is longer than 8,000 characters, 
 
 The desk can answer the owner at once while the work goes on in the background.
 The session calls `delegate_task` with the target `helper:install`, `helper:lookup`, `helper:read-link`, `firstmate` or the id of one mate in `data/secondmates.md`, and with no text: the model writes none.
-The bridge records the owner's texts as answered at once, sends the owner "Your text is queued for Firstmate" or "Your text is queued for the <mate> mate", and then starts one background job. The ack never says that a send happened, and a new owner text during the send cannot start the same task again.
+The bridge records the owner's texts as answered at once, sends the owner "Your text is queued for Firstmate: <summary>" or "Your text is queued for <mate> mate: <summary>" (the [relay notice](#relay-notices) form), and then starts one background job. The ack never says that a send happened, and a new owner text during the send cannot start the same task again.
 
 - The bridge sends the owner's verbatim text to the target. The model never writes the task.
 - `deskMayAct` applies to every target, `firstmate` too. A protected request goes to Firstmate with `handoff_main`, once.

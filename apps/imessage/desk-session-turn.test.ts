@@ -94,7 +94,7 @@ test("delegate_task answers with a queued ack that names no send, then the task 
   const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
   for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
-  expect(events).toEqual([["answer", ["Your text is queued for Firstmate"], true], ["send", "firstmate", "DELEGATE firstmate"]]);
+  expect(events).toEqual([["answer", ["Your text is queued for Firstmate: DELEGATE firstmate"], true], ["send", "firstmate", "DELEGATE firstmate"]]);
 });
 
 test("a delegated thread reply sends the quoted parent bubble, not only the authored text", async () => {
@@ -138,10 +138,31 @@ test("a mate delegation acks synchronously with its own text, before the send fi
     send: async (target) => { await gate.promise; events.push(["send", typeof target === "string" ? target : target.id]); return true; }, report: () => {},
   });
   await turn([{ requestId: "r1", text: "DELEGATE mate1", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" }], new AbortController(), () => true);
-  expect(events).toEqual([["answer", ["Your text is queued for the mate1 mate"]]]);
+  expect(events).toEqual([["answer", ["Your text is queued for mate1 mate: DELEGATE mate1"]]]);
   gate.resolve();
   for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
-  expect(events).toEqual([["answer", ["Your text is queued for the mate1 mate"]], ["send", "mate1"]]);
+  expect(events).toEqual([["answer", ["Your text is queued for mate1 mate: DELEGATE mate1"]], ["send", "mate1"]]);
+});
+
+test("message_mate tells the owner which mate got the desk's text, in one ack-guid text", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "data"), { recursive: true });
+  writeFileSync(join(dir, "data", "secondmates.md"), "- web-mate - Website (home: /srv/web; scope: s; projects: none)\n");
+  const wrapper = join(dir, "omp");
+  writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
+  chmodSync(wrapper, 0o755);
+  const events: unknown[][] = [];
+  const turn = createSessionTurn<TurnRequest>({ sent: () => false, record: () => {}, message: async (mate, text) => { events.push(["message", mate.id, text]); return true; },
+    env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
+    stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
+    memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
+    log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts) => events.push(["answer", parts]),
+    react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, held: () => false,
+    send: async () => true, report: (parts, guid) => events.push(["report", parts, guid.startsWith("ack-")]),
+  });
+  await turn([{ requestId: "r1", text: "MESSAGE web-mate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" }], new AbortController(), () => true);
+  expect(events).toEqual([["message", "web-mate", "Please check the footer."], ["report", ["Sent to web mate: Please check the footer."], true], ["answer", ["Asked."]]]);
 });
 
 async function ownerInstruction(report: (events: unknown[][], parts: string[], guid: string) => void) {
