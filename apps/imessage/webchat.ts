@@ -28,10 +28,10 @@ function images(o: WebChat, m: Msg): string[] {
   if (m.kind === "owner") {
     return [...m.text.matchAll(/saved for Firstmate at (\S+?)\)/g)].map((x) => x[1]!)
       .filter((path) => path === `${o.attachDir}/${basename(path)}` && typeOf(path))
-      .map((path) => `/file/a/${encodeURIComponent(basename(path))}`);
+      .map((path) => `file/a/${encodeURIComponent(basename(path))}`);
   }
   const name = /^\[image: ([^\]\n]+)\]/.exec(m.text)?.[1];
-  return name && existsSync(`${o.sentDir}/${m.i}-${name}`) ? [`/file/s/${encodeURIComponent(`${m.i}-${name}`)}`] : [];
+  return name && existsSync(`${o.sentDir}/${m.i}-${name}`) ? [`file/s/${encodeURIComponent(`${m.i}-${name}`)}`] : [];
 }
 
 export function webchatRoutes(o: WebChat) {
@@ -174,7 +174,7 @@ function show(m, stick) {
 
 async function refresh() {
   try {
-    const r = await fetch("/messages?after=" + last, { cache: "no-store" });
+    const r = await fetch("messages?after=" + last, { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
     const stick = last < 0 || atEnd();
     const fresh = (await r.json()).messages.filter((m) => m.i > last);
@@ -201,7 +201,7 @@ form.addEventListener("submit", async (e) => {
   if (!text || busy) return;
   busy = true; fit();
   try {
-    const r = await fetch("/send", { method: "POST", body: text });
+    const r = await fetch("send", { method: "POST", body: text });
     if (!r.ok) throw new Error((await r.text()).trim());
     box.value = "";
     state.textContent = "";
