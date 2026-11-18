@@ -213,9 +213,9 @@ type Ref = { line?: string; space: string; id: string };
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true; probe?: true; lane?: string };
 type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
-type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true; notified?: true };
+type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
-type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { ids: string[]; notified: true } | { replyTarget: string; space: string; by: "id" | "position" };
+type RouteEvent = { received: Received } | { ids: string[]; route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true } | { deskCancelled: true } | { ids: string[]; v2: V2Plan } | { ids: string[]; responded: true | string } | { ids: string[]; stale: true } | { replyTarget: string; space: string; by: "id" | "position" };
 // Rolling deploy confirm (ownership.ts): one item through the outbox that reads from the transport and sends no text.
 // It has its own lane, so a retrying text never holds it, and it reads the owner's latest text back from the transport.
 const probe = probeKit<Ref, Out>(
@@ -1182,7 +1182,7 @@ function queueAck(pending: Routing[], bubble: string) {
 
 // One short text tells the owner who got which of his texts. Only a desk's own relays notify: desk-only answers send none.
 // It is a fixed line, so it skips the model rewrite (`ste`), and its guid keeps a newer owner text from cancelling it.
-function noticeRelay(items: Routing[], to: Secondmate | "firstmate") {
+function noticeRelay(items: Routing[], to: Secondmate) {
   const last = items.at(-1);
   if (!last || !deskSafe || !DESK_VETTED || muted() || !directChat.test(last.ref.space)) return;
   const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
@@ -1605,8 +1605,6 @@ function applyRoute(event: RouteEvent) {
     for (const id of event.ids) routing.get(id)!.v2 = event.v2;
   } else if ("stale" in event) {
     for (const id of event.ids) routing.get(id)!.stale = true;
-  } else if ("notified" in event) {
-    for (const id of event.ids) routing.get(id)!.notified = true;
   } else if ("responded" in event) {
     for (const id of event.ids) routing.get(id)!.responded = event.responded;
   } else if ("route" in event) for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
@@ -1674,7 +1672,6 @@ function flushRoutes() {
   if (stopping) return;
   clearTimeout(routingRetry);
   let failed = false;
-  const toMain: Routing[] = [];
   for (const item of routing.values()) {
     try {
       if (mateDeliveries.has(item.requestId)) continue;
@@ -1686,7 +1683,6 @@ function flushRoutes() {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
         if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
-        if (!item.notified) toMain.push(item);
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
       recordRoute({ ids: [item.requestId], route: "done", out: item.out });
@@ -1694,10 +1690,6 @@ function flushRoutes() {
       log("route delivery")(e);
       failed = true;
     }
-  }
-  if (toMain.length) {
-    noticeRelay(toMain, "firstmate");
-    recordRoute({ ids: toMain.map((r) => r.requestId), notified: true }); // a restart replay of these handoffs sends no second notice
   }
   if (failed) routingRetry = setTimeout(flushRoutes, RETRY_MS);
 }

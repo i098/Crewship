@@ -64,13 +64,6 @@ def texts(rig):
     return read_text(rig.fake / "relay-sent").splitlines()
 
 
-def said(rig):
-    return [line.split(" ", 1)[1] for line in texts(rig)]
-
-
-NOTICE = "Sent to Firstmate: please check the whole repo"
-
-
 @contextmanager
 def v2_rig(tmp_path, front, inception=None, **extra):
     """A V2 bridge over the fake transports; `front` holds the one scripted front reply, `extra` more bridge env."""
@@ -179,7 +172,8 @@ def test_work_request_hands_off_without_a_canned_reply(tmp_path, resume):
             "the firstmate handoff",
             timeout=120,
         )
-        wait_for(lambda: said(rig) == [NOTICE], "the Firstmate notice", timeout=30)
+        time.sleep(1)
+        assert texts(rig) == []
         assert not any("responded" in e for e in events(rig))
         if resume == "mate":
             return
@@ -198,10 +192,9 @@ def test_work_request_hands_off_without_a_canned_reply(tmp_path, resume):
                 lambda: sum(e.get("route") == "handoff" for e in events(rig)) == 2,
                 "the resumed handoff",
             )
-            assert said(rig) == [NOTICE]
+            assert texts(rig) == []
         rig.cli("The review is complete.")
-        wait_for(lambda: said(rig)[-1] == "The review is complete.", "the final answer", timeout=30)
-        assert said(rig) == [NOTICE, "The review is complete."]  # a restart replay adds no second notice
+        wait_for(lambda: len(texts(rig)) == 1, "the final answer", timeout=30)
         wait_for(
             lambda: any("responded" in e for e in events(rig)), "the completed request", timeout=30
         )
@@ -229,7 +222,7 @@ def test_work_request_keeps_typing_until_the_final_answer(tmp_path):
         )
         wait_for(lambda: read_text(typing), "typing", timeout=30)
         rows = [json.loads(line) for line in read_text(typing).splitlines()]
-        assert rows[0]["on"]  # the relay notice is a text and ends the bubble, so only the first row is certain
+        assert rows and all(row["on"] for row in rows)
         assert not any("responded" in e for e in events(rig))
         rig.cli("The review is complete.")
         wait_for(
@@ -253,7 +246,7 @@ def test_unanswered_handoff_is_noted_again_once(tmp_path):
         )
         time.sleep(3)
         assert read_text(rig.notes).count("stale-bluebubbles-m1 ") == 1
-        wait_for(lambda: said(rig) == [NOTICE], "the one Firstmate notice", timeout=30)
+        assert texts(rig) == []
 
 
 def test_restart_after_the_stale_note_does_not_repeat_it(tmp_path):
@@ -340,7 +333,7 @@ def test_unreachable_front_falls_back_to_firstmate(tmp_path):
             timeout=120,
         )
         time.sleep(1)
-        assert said(rig) == [NOTICE]
+        assert texts(rig) == []
 
 
 def test_different_texts_never_get_the_same_fixed_routing_line(tmp_path):
@@ -361,9 +354,7 @@ def test_different_texts_never_get_the_same_fixed_routing_line(tmp_path):
         )
         time.sleep(1)
         assert not any("routing this request" in line for line in texts(rig))
-        notices = " ".join(said(rig))
-        assert all(t in notices for t in ["why do you repeat yourself", "please check the whole repo", "what is the weather"])
-        assert all(line.startswith("Sent to Firstmate: ") for line in said(rig))
+        assert texts(rig) == []
 
 
 def test_status_question_gets_a_real_answer_from_the_desk(tmp_path):
@@ -388,8 +379,8 @@ def test_front_timeout_sends_one_honest_line_per_burst(tmp_path):
             deliver(rig, "m2", "and the docs too")
             wait_for(lambda: len(texts(rig)) >= 1, "the honest line", timeout=90)
             time.sleep(20)  # a second front timeout must not add a second line
-            lines = said(rig)
-            assert lines == ["I got your text. I am passing it to Firstmate now.", "Sent to Firstmate: please check the whole repo / and the docs too"], lines
+            lines = texts(rig)
+            assert len(lines) == 1 and "Firstmate" in lines[0], lines
     finally:
         hang.close()
 

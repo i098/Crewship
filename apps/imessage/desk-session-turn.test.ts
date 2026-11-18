@@ -94,7 +94,7 @@ test("delegate_task answers with a queued ack that names no send, then the task 
   const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
   for (let i = 0; i < 300 && events.length < 2; i++) await Bun.sleep(10);
-  expect(events).toEqual([["answer", ["Your text is queued for Firstmate: DELEGATE firstmate"], true], ["send", "firstmate", "DELEGATE firstmate"]]);
+  expect(events).toEqual([["answer", ["Your text is queued for Firstmate"], true], ["send", "firstmate", "DELEGATE firstmate"]]);
 });
 
 test("a delegated thread reply sends the quoted parent bubble, not only the authored text", async () => {

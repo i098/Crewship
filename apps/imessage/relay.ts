@@ -53,12 +53,12 @@ export function mateInboxHas(fmHome: string, mateId: string, requestId: string, 
 export const NOTICE_MAX = 80; // chars of the owner's text a relay notice shows
 
 // The owner's one-line notice of a relay: who got which text. Plain words, so the outbound filter keeps the mate's name (it strips ids like `x-mate-1`).
-// A text that looks sensitive, or any text when no redactor is loaded, is not echoed back.
-export function relayNotice(to: Secondmate | "firstmate", texts: readonly string[], safe: ((text: string) => string) | undefined, verb = "Sent to"): string {
-  const label = to === "firstmate" ? "Firstmate" : to.id.replace(/-/g, " ");
-  const name = to === "firstmate" || /\bmate\b/.test(label) ? label : `${label} mate`;
+// A text that looks sensitive is not echoed back.
+export function relayNotice(to: Secondmate, texts: readonly string[], safe: (text: string) => string, verb = "Sent to"): string {
+  const label = to.id.replace(/-/g, " ");
+  const name = /\bmate\b/.test(label) ? label : `${label} mate`;
   const what = texts.join(" / ").replace(/\s+/g, " ").trim();
-  const held = !safe || supervisorOnly(what) || safe(what) !== what;
+  const held = supervisorOnly(what) || safe(what) !== what;
   const short = what.length > NOTICE_MAX ? `${what.slice(0, NOTICE_MAX - 1).trimEnd()}…` : what;
   return cleanText(`${verb} ${name}: ${held ? "(held back, it may be sensitive)" : short}`);
 }

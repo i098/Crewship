@@ -198,7 +198,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
       helperBusy: helper.busy,
       delegate: (mate, target) => {
         // The ack is the bridge's own text and claims only that the text is queued: whether the send worked is reported later.
-        const ack = relayNotice(typeof mate === "string" ? "firstmate" : mate, pending.map((r) => r.authored ?? r.text), safe, "Your text is queued for");
+        const ack = typeof mate === "string" ? "Your text is queued for Firstmate" : relayNotice(mate, pending.map((r) => r.authored ?? r.text), safe, "Your text is queued for");
         host.answer(pending, [ack], pending[target - 1], true);
         delegate(mate, original.join("\n"), pending.at(-1)!, pending.map((r) => r.requestId));
       },
