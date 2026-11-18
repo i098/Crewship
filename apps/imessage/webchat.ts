@@ -9,6 +9,7 @@ import type { Msg } from "./memory.ts";
 
 export const WEB_MARK = "[web chat] "; // starts the note and the memory entry of a text typed on the page
 const FIRST_PAGE = 200; // messages on a fresh page; shortcut: no older history, add paging when he asks for it
+const MIN_SECRET = 6; // a shorter WEB_ACCESS_PASSWORD would mask ordinary words
 const TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const typeOf = (name: string) => TYPES[name.slice(name.lastIndexOf(".") + 1).toLowerCase()];
 const HEADERS = { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
@@ -40,7 +41,9 @@ export function webchatRoutes(o: WebChat) {
     const all = o.msgs();
     const after = Number(url.searchParams.get("after") ?? -1); // no `after`: a fresh page
     const from = Number.isInteger(after) && after >= 0 ? after + 1 : Math.max(0, all.length - FIRST_PAGE);
-    return Response.json({ messages: all.slice(from).map((m) => ({ i: m.i, kind: m.kind, text: m.text, date: m.date, images: images(o, m) })) }, { headers: HEADERS });
+    const secret = process.env.WEB_ACCESS_PASSWORD;
+    const hide = (t: string) => (secret && secret.length >= MIN_SECRET ? t.replaceAll(secret, "[hidden]") : t);
+    return Response.json({ messages: all.slice(from).map((m) => ({ i: m.i, kind: m.kind, text: hide(m.text), date: m.date, images: images(o, m) })) }, { headers: HEADERS });
   };
   const file = async (dir: string, name: string): Promise<Response> => {
     const type = typeOf(name);

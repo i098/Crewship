@@ -1028,6 +1028,8 @@ The code is `apps/imessage/webchat.ts`.
   The listener answers only a request whose `Host` is `127.0.0.1:<port>` or the name in `FM_IMESSAGE_WEB_HOST`.
   A send must also carry the page's own `Origin`.
   A standby slot does not serve the page.
+- **Hidden password.** When `WEB_ACCESS_PASSWORD` is set and has 6 or more characters, the page shows `[hidden]` in place of each copy of it in the thread.
+  The stored memory is not changed.
 
 ### Publish the web chat
 
