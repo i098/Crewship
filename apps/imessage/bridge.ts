@@ -46,7 +46,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { collectSessions, StuckWatch } from "./stuck-watch.ts";
+import { type Action, collectSessions, StuckWatch } from "./stuck-watch.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -662,20 +662,7 @@ else if (stuckMs > 0) {
       const mates = secondmates(FM_HOME);
       const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"),
         readPane: (pane) => herdr("pane", "read", pane, "--source", "visible", "--lines", "40", "--format", "text").catch(() => undefined) });
-      for (const a of watch.poll(sessions, Date.now())) {
-        let ok = false;
-        try {
-          const mate = mates.find((m) => m.id === a.id);
-          // A bump to a mate is fire-and-forget (a stable id per incident): the desk text is the escalation, not a reply wait.
-          const id = new Bun.CryptoHasher("sha256").update(a.key).digest("hex").slice(0, 16);
-          ok = a.kind === "owner" ? !!proactiveRef && put({ ...proactiveRef, bubbles: [a.text], requests: [] })
-            : a.id === "main" ? await noteMain(`stuck-${a.key}`, a.text, "desk")
-            : !!mate && await spawnSender(mate, `[from desk] ${a.text}`, id).exited === 0;
-        } catch (e) {
-          log("stuck check action")(e);
-        }
-        a.done(ok);
-      }
+      for (const a of watch.poll(sessions, Date.now())) a.done(await runStuckAction(a, mates));
     } catch (e) {
       log("stuck check")(e);
     } finally {
@@ -683,6 +670,21 @@ else if (stuckMs > 0) {
     }
   }, Number(env.FM_IMESSAGE_STUCK_POLL_MS || 60_000));
   console.log(`fm-imessage: stuck supervisor check on, after ${Math.round(stuckMs / 60_000)} min`);
+}
+
+// Runs one bump or owner text of the stuck watch; false when it did not go through (the watch tries again next poll).
+async function runStuckAction(a: Action, mates: Secondmate[]): Promise<boolean> {
+  try {
+    if (a.kind === "owner") return !!proactiveRef && put({ ...proactiveRef, bubbles: [a.text], requests: [] });
+    if (a.id === "main") return await noteMain(`stuck-${a.key}`, a.text, "desk");
+    const mate = mates.find((m) => m.id === a.id);
+    // A bump to a mate is fire-and-forget (a stable id per incident): the desk text is the escalation, not a reply wait.
+    const id = new Bun.CryptoHasher("sha256").update(a.key).digest("hex").slice(0, 16);
+    return !!mate && await spawnSender(mate, `[from desk] ${a.text}`, id).exited === 0;
+  } catch (e) {
+    log("stuck check action")(e);
+    return false;
+  }
 }
 // Tells the owner once when the omp extension had to wake an idle main (herdr-watch.ts).
 const strandedWake = watchStrandedWake(`${FM_HOME}/state/.stranded-wake.log`, (text) => !!proactiveRef && put({ ...proactiveRef, bubbles: [text], requests: [] }));

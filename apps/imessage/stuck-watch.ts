@@ -50,46 +50,51 @@ export class StuckWatch {
 
   // Takes the sessions seen now; returns the bumps and owner texts due. A text that was not sent (`done(false)`) comes again next poll.
   poll(sessions: Session[], now: number): Action[] {
-    const out: Action[] = [];
     const ids = new Set(sessions.map((s) => s.id));
     for (const id of [...this.blockedAt.keys(), ...this.incidents.keys()]) {
       if (ids.has(id)) continue;
       this.blockedAt.delete(id);
       this.incidents.delete(id);
     }
-    for (const s of sessions) {
-      if (!s.blocked) this.blockedAt.delete(s.id);
-      else if (!this.blockedAt.has(s.id)) this.blockedAt.set(s.id, now);
-      const since = Math.min(this.blockedAt.get(s.id) ?? Infinity, s.oldest ?? Infinity);
-      const stuck = now - since >= this.config.stuckMs;
-      let inc = this.incidents.get(s.id);
-      if (!stuck) {
-        if (!inc || ++inc.calm < CALM_POLLS) continue;
-        if (!inc.texted) { this.incidents.delete(s.id); continue; }
-        const text = `${s.label} is moving again after ${span(now - inc.since)}. ${s.notes ? `${notes(s.notes)} still wait.` : "No notes wait."}`;
-        out.push({ kind: "owner", id: s.id, key: `${s.id}-${inc.since}`, text, done: this.persisted((ok) => ok && this.incidents.delete(s.id)) });
-        continue;
-      }
-      if (!inc) this.incidents.set(s.id, inc = { since, calm: 0 });
-      inc.calm = 0;
-      if (inc.texted) continue;
-      const incident = inc;
-      const key = `${s.id}-${inc.since}`;
-      if (!s.blocked && inc.bumpedAt === undefined) {
-        out.push({ kind: "bump", id: s.id, key, text: `${BUMP_MARK} You look stuck: ${notes(s.notes)} wait since ${clock(s.oldest!)}. Read and act on your inbox notes now.`,
-          done: this.persisted((ok) => { incident.bumpedAt = now; incident.nudged = ok; }) });
-        continue;
-      }
-      if (!s.blocked && now - inc.bumpedAt! < this.config.graceMs) continue;
-      const body = [`${s.label} is stuck: ${s.blocked ? "it sits on a prompt" : "it has not read its inbox"} since ${clock(inc.since)} (${span(now - inc.since)}).`,
-        s.notes ? `${notes(s.notes)} wait.` : "No notes wait.",
-        incident.nudged ? "I nudged it, and it is still stuck."
-          : s.blocked ? "I did not nudge it: a prompt may take the nudge as its answer."
-          : "My nudge did not go through."].join(" ");
-      out.push({ kind: "owner", id: s.id, key, text: s.blocked && s.prompt ? `${body}\nPrompt: ${s.prompt}` : body, done: this.persisted((ok) => { if (ok) incident.texted = true; }) });
-    }
+    const out = sessions.flatMap((s) => this.step(s, now) ?? []);
     this.save();
     return out;
+  }
+
+  private step(s: Session, now: number): Action | undefined {
+    if (!s.blocked) this.blockedAt.delete(s.id);
+    else if (!this.blockedAt.has(s.id)) this.blockedAt.set(s.id, now);
+    const since = Math.min(this.blockedAt.get(s.id) ?? Infinity, s.oldest ?? Infinity);
+    const inc = this.incidents.get(s.id);
+    if (now - since < this.config.stuckMs) return inc && this.recover(s, inc, now);
+    const incident = inc ?? { since, calm: 0 };
+    this.incidents.set(s.id, incident);
+    incident.calm = 0;
+    return incident.texted ? undefined : this.escalate(s, incident, now);
+  }
+
+  // The session moves: the incident ends after CALM_POLLS polls, with one text if the owner was told it was stuck.
+  private recover(s: Session, inc: Incident, now: number): Action | undefined {
+    if (++inc.calm < CALM_POLLS) return;
+    if (!inc.texted) return void this.incidents.delete(s.id);
+    const text = `${s.label} is moving again after ${span(now - inc.since)}. ${s.notes ? `${notes(s.notes)} still wait.` : "No notes wait."}`;
+    return { kind: "owner", id: s.id, key: `${s.id}-${inc.since}`, text, done: this.persisted((ok) => ok && this.incidents.delete(s.id)) };
+  }
+
+  // Unread notes get one bump; a prompt and a bump that did not help get the owner text.
+  private escalate(s: Session, inc: Incident, now: number): Action | undefined {
+    const key = `${s.id}-${inc.since}`;
+    if (!s.blocked && inc.bumpedAt === undefined) {
+      return { kind: "bump", id: s.id, key, text: `${BUMP_MARK} You look stuck: ${notes(s.notes)} wait since ${clock(s.oldest!)}. Read and act on your inbox notes now.`,
+        done: this.persisted((ok) => { inc.bumpedAt = now; inc.nudged = ok; }) };
+    }
+    if (!s.blocked && now - inc.bumpedAt! < this.config.graceMs) return;
+    const body = [`${s.label} is stuck: ${s.blocked ? "it sits on a prompt" : "it has not read its inbox"} since ${clock(inc.since)} (${span(now - inc.since)}).`,
+      s.notes ? `${notes(s.notes)} wait.` : "No notes wait.",
+      inc.nudged ? "I nudged it, and it is still stuck."
+        : s.blocked ? "I did not nudge it: a prompt may take the nudge as its answer."
+        : "My nudge did not go through."].join(" ");
+    return { kind: "owner", id: s.id, key, text: s.blocked && s.prompt ? `${body}\nPrompt: ${s.prompt}` : body, done: this.persisted((ok) => { if (ok) inc.texted = true; }) };
   }
 }
 

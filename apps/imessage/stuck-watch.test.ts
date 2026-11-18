@@ -6,12 +6,12 @@ import { BUMP_MARK, collectSessions, pendingNotes, promptOf, type Session, Stuck
 const MIN = 60_000;
 const tmp = () => mkdtempSync(join(process.env.TMPDIR || "/tmp", "stuck-"));
 const watch = (file?: string) => new StuckWatch({ stuckMs: 15 * MIN, graceMs: 5 * MIN, file });
-const main = (over: Partial<Session> = {}): Session => ({ id: "main", label: "Firstmate (main)", notes: 0, blocked: false, ...over });
+const mainSession = (over: Partial<Session> = {}): Session => ({ id: "main", label: "Firstmate (main)", notes: 0, blocked: false, ...over })
 const T0 = Date.UTC(2026, 10, 17, 6, 0);
 
 test("a prompt that stays open is texted once with its text, never bumped, and a recovery is texted once", () => {
   const w = watch();
-  const s = main({ blocked: true, prompt: "Pick a model: 1. Opus 2. Sonnet" });
+  const s = mainSession({ blocked: true, prompt: "Pick a model: 1. Opus 2. Sonnet" });
   expect(w.poll([s], T0)).toEqual([]);
   expect(w.poll([s], T0 + 14 * MIN)).toEqual([]);
   const [text] = w.poll([s], T0 + 15 * MIN);
@@ -21,17 +21,17 @@ test("a prompt that stays open is texted once with its text, never bumped, and a
   expect(text!.text).toContain("Prompt: Pick a model");
   text!.done(true);
   expect(w.poll([s], T0 + 30 * MIN)).toEqual([]);
-  expect(w.poll([main()], T0 + 31 * MIN)).toEqual([]);
-  const [clear] = w.poll([main()], T0 + 32 * MIN);
+  expect(w.poll([mainSession()], T0 + 31 * MIN)).toEqual([]);
+  const [clear] = w.poll([mainSession()], T0 + 32 * MIN);
   expect(clear!.text).toContain("is moving again after 32 min");
   clear!.done(true);
-  expect(w.poll([main()], T0 + 40 * MIN)).toEqual([]);
+  expect(w.poll([mainSession()], T0 + 40 * MIN)).toEqual([]);
 });
 
 test("no prompt is ever bumped, whatever it asks or even when it cannot be read", () => {
   for (const prompt of ["Spend a saved Claude rate-limit reset? 1. Yes 2. No", "Paste your API key:", "Delete 40 files? 1. Yes 2. No", undefined]) {
     const w = watch();
-    const s = main({ blocked: true, prompt, notes: 5, oldest: T0 - MIN });
+    const s = mainSession({ blocked: true, prompt, notes: 5, oldest: T0 - MIN });
     w.poll([s], T0);
     const out = w.poll([s], T0 + 15 * MIN);
     expect(out.map((a) => a.kind)).toEqual(["owner"]);
@@ -39,7 +39,7 @@ test("no prompt is ever bumped, whatever it asks or even when it cannot be read"
 });
 
 test("a session that moves before the grace ends sends no text, and a text that was not sent comes again", () => {
-  const stuckNotes = main({ notes: 2, oldest: T0 });
+  const stuckNotes = mainSession({ notes: 2, oldest: T0 });
   const w = watch();
   w.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(false);
   expect(w.poll([stuckNotes], T0 + 19 * MIN)).toEqual([]);
@@ -50,9 +50,9 @@ test("a session that moves before the grace ends sends no text, and a text that 
 
   const w2 = watch();
   w2.poll([stuckNotes], T0 + 15 * MIN)[0]!.done(true);
-  expect(w2.poll([main()], T0 + 16 * MIN)).toEqual([]);
-  expect(w2.poll([main()], T0 + 17 * MIN)).toEqual([]);
-  expect(w2.poll([main({ notes: 1, oldest: T0 + 17 * MIN })], T0 + 18 * MIN)).toEqual([]);
+  expect(w2.poll([mainSession()], T0 + 16 * MIN)).toEqual([]);
+  expect(w2.poll([mainSession()], T0 + 17 * MIN)).toEqual([]);
+  expect(w2.poll([mainSession({ notes: 1, oldest: T0 + 17 * MIN })], T0 + 18 * MIN)).toEqual([]);
 });
 
 test("unread notes count from the oldest one, and the bump is not counted as a note", () => {
@@ -69,7 +69,7 @@ test("unread notes count from the oldest one, and the bump is not counted as a n
   expect(pendingNotes(dir, ".note")).toEqual({ count: 2, oldest: T0 - 40 * MIN });
 
   const w = watch();
-  const s = main({ notes: 59, oldest: T0 - 40 * MIN });
+  const s = mainSession({ notes: 59, oldest: T0 - 40 * MIN });
   const [bump] = w.poll([s], T0);
   expect(bump!.text).toContain("59 notes wait since 11-17 05:20 UTC");
   bump!.done(true);
@@ -79,14 +79,14 @@ test("unread notes count from the oldest one, and the bump is not counted as a n
 
 test("an incident already texted is not texted again after a restart", () => {
   const file = `${tmp()}/stuck.json`;
-  const s = main({ notes: 3, oldest: T0 - 30 * MIN });
+  const s = mainSession({ notes: 3, oldest: T0 - 30 * MIN });
   const w = watch(file);
   w.poll([s], T0)[0]!.done(true);
   w.poll([s], T0 + 5 * MIN)[0]!.done(true);
   const again = watch(file);
   expect(again.poll([s], T0 + 6 * MIN)).toEqual([]);
-  expect(again.poll([main()], T0 + 7 * MIN)).toEqual([]);
-  expect(again.poll([main()], T0 + 8 * MIN)[0]!.text).toContain("is moving again");
+  expect(again.poll([mainSession()], T0 + 7 * MIN)).toEqual([]);
+  expect(again.poll([mainSession()], T0 + 8 * MIN)[0]!.text).toContain("is moving again");
 });
 
 const agents = (...list: object[]) => JSON.stringify({ result: { agents: list } });
