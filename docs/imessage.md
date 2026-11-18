@@ -441,6 +441,8 @@ Each incident goes through these steps, once:
 2. **Text.** If the session is still stuck `FM_IMESSAGE_STUCK_GRACE_MS` (default 5 minutes) after the bump, the owner gets one text. It names the session, the time it has been stuck since (UTC), the number of unread notes, whether the bump went through, and the last lines of the prompt when the pane shows one. Long token-like strings in the prompt text are hidden.
 3. **Recovery.** When the session has moved for two polls in a row, the owner gets one more text. A text that cannot be queued (no chat yet, or muted) is tried again on the next poll.
 
+**Rate limit.** The bridge reads the newest 429 retry-after row from `~/.omp/stats.db` (read-only). A session whose screen shows `rate_limit_error` or `exceeds retry.maxDelayMs` counts as limited. While the limit is on, a limited session gets no bump and no text of its own. After 2 minutes the owner gets one text that names the model, the stopped sessions and the reset time in Pacific time. When the limit clears, each stopped session gets one ring and the owner gets one text. There is no second ring within 10 minutes or for the same 429. A session that is still stopped 15 minutes after the ring gets the usual stuck text. A missing or unreadable `stats.db` does not stop the watch.
+
 The bridge never bumps a session that sits on a prompt, and it never types an answer to any prompt. The doorbell line goes into the pane, and a prompt can take it as its answer, so a keyword list for credentials, payments or public posts would not be safe enough. For a prompt the owner gets the text at once, after the limit, with the last lines of the prompt, and no bump goes out.
 
 The check turns itself off with one log line when the herdr executable is not found.

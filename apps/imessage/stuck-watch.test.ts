@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUMP_MARK, collectSessions, pendingNotes, promptOf, type Session, StuckWatch } from "./stuck-watch.ts";
+import { BUMP_MARK, collectSessions, pendingNotes, promptOf, rateLimit, type Session, StuckWatch } from "./stuck-watch.ts";
 
 const MIN = 60_000;
 const tmp = () => mkdtempSync(join(process.env.TMPDIR || "/tmp", "stuck-"));
@@ -128,4 +128,44 @@ test("the prompt text keeps the last lines and the question at the end, without 
   const long = `${Array.from({ length: 11 }, () => "chat ".repeat(20)).join("\n")}\nSpend a saved reset? 1. Yes 2. No`;
   expect(promptOf(long)!.endsWith("Spend a saved reset? 1. Yes 2. No")).toBe(true);
   expect(promptOf(long)!.length).toBeLessThanOrEqual(500);
+});
+
+test("a rate limit gives one fleet text with the reset in PT, no text for each session, and one ring when it clears", () => {
+  const w = watch();
+  const limit = { model: "claude-fable-5-2", at: T0, resetAt: Date.UTC(2026, 10, 19, 1, 0), cleared: false };
+  const stopped = ["main", "oss-mate-o1", "codex-mate-x1"].map((id) => mainSession({ id, blocked: true, limited: true, prompt: "Error: 429", notes: 2, oldest: T0 }));
+  expect(w.poll(stopped, T0, limit)).toEqual([]);
+  const [text, ...rest] = w.poll(stopped, T0 + 2 * MIN, { ...limit, at: T0 + MIN, resetAt: limit.resetAt - 9 * MIN }); // a later 429 gives a reset some minutes away
+  expect(rest).toEqual([]);
+  expect(text!.text).toBe("Rate limit on claude-fable-5-2. Stopped: main, oss, codex. It resets at 4:51 PM PT. I ring each one again when it clears.");
+  text!.done(true);
+  expect(w.poll(stopped, T0 + 20 * MIN, limit)).toEqual([]); // past stuckMs: still no text for each session and no bump
+  const rings = w.poll(stopped, T0 + 21 * MIN, { ...limit, cleared: true });
+  expect(rings.map((a) => a.kind)).toEqual(["bump", "bump", "bump", "owner"]);
+  expect(rings[3]!.text).toContain("rate limit cleared");
+  rings.forEach((a) => a.done(true));
+  expect(w.poll(stopped, T0 + 22 * MIN, { ...limit, cleared: true })).toEqual([]); // rung once
+  expect(w.poll(stopped, T0 + 23 * MIN, { ...limit, at: T0 + 22 * MIN, cleared: true })).toEqual([]); // a new 429 right after the ring: no ring loop
+  expect(w.poll(stopped, T0 + 36 * MIN, { ...limit, cleared: true }).map((a) => a.text.slice(0, 26))).toEqual(Array(3).fill("Firstmate (main) is stuck:")); // the ring did not help
+});
+
+test("the limit is read from a stats database", () => {
+  const { Database } = require("bun:sqlite");
+  const file = join(tmp(), "stats.db");
+  const db = new Database(file);
+  db.run("pragma synchronous=off");
+  db.run("create table messages (timestamp integer, model text, stop_reason text, error_message text)");
+  const add = db.prepare("insert into messages values (?, ?, ?, ?)");
+  add.run(T0, "claude-fable-5-2", "error", '429 {"type":"error"} retry-after-ms=10800000');
+  add.run(T0 + MIN, "claude-sonnet-5-5", "stop", null);
+  expect(rateLimit(file, T0 + 2 * MIN)).toEqual({ model: "claude-fable-5-2", at: T0, resetAt: T0 + 180 * MIN, cleared: false });
+  add.run(T0 + 3 * MIN, "claude-fable-5-2", "aborted", null);
+  expect(rateLimit(file, T0 + 4 * MIN)!.cleared).toBe(false);
+  add.run(T0 + 5 * MIN, "claude-fable-5-2", "toolUse", null);
+  expect(rateLimit(file, T0 + 6 * MIN)!.cleared).toBe(true);
+  db.close();
+});
+
+test("rateLimit: a missing stats.db gives no limit", () => {
+  expect(rateLimit("/nonexistent/stats.db", Date.now())).toBeUndefined();
 });

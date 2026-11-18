@@ -4,6 +4,7 @@
 // incident if the session is still stuck `graceMs` later, then once more when it moves again. A prompt is never
 // bumped: the doorbell line is typed into the pane and could answer it, so the owner is told at once. The core is free
 // of the bridge so tests run on recorded JSON and plain files.
+import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { cleanText } from "./clean.ts";
 import type { Secondmate } from "./desk.ts";
@@ -11,32 +12,40 @@ import type { Secondmate } from "./desk.ts";
 export const BUMP_MARK = "[desk stuck-check]"; // the bump note carries it, so it is not counted as an unread note
 const CALM_POLLS = 2; // an incident ends after this many polls in a row that find the session moving
 const PROMPT_LINES = 12;
+const SETTLE_MS = 120_000; // a limit stops each session within a minute or two; one text names them all
+const RERING_MS = 600_000; // a session that hits the limit again after a ring is not rung in a loop
 
-export type Session = { id: string; label: string; notes: number; oldest?: number; blocked: boolean; prompt?: string };
+export type Session = { id: string; label: string; notes: number; oldest?: number; blocked: boolean; prompt?: string; limited?: boolean };
+// The newest long 429 of the fleet: `at` is the failed call, `cleared` says a later call on that model went through or the reset passed.
+export type Limit = { model: string; at: number; resetAt: number; cleared: boolean };
 type Incident = { since: number; bumpedAt?: number; nudged?: boolean; texted?: boolean; calm: number };
 export type Action = { kind: "bump" | "owner"; id: string; key: string; text: string; done(ok: boolean): void };
 
 const span = (ms: number) => ms >= 3_600_000 ? `${Math.floor(ms / 3_600_000)} h ${Math.floor(ms % 3_600_000 / 60_000)} min` : `${Math.max(1, Math.floor(ms / 60_000))} min`;
 const clock = (t: number) => `${new Date(t).toISOString().slice(5, 16).replace("T", " ")} UTC`;
+const pt = (t: number) => `${new Date(t).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" })} PT`;
 const notes = (n: number) => `${n} note${n === 1 ? "" : "s"}`;
 
 export class StuckWatch {
   private blockedAt = new Map<string, number>();
   private incidents = new Map<string, Incident>();
   private saved = "";
+  private limit?: { resetAt: number; since: number; texted?: boolean; cleared?: boolean };
+  private rung = new Map<string, number>();
 
   constructor(private config: { stuckMs: number; graceMs: number; file?: string }) {
     try {
       const state = JSON.parse(readFileSync(config.file ?? "", "utf8"));
       this.blockedAt = new Map(state.blockedAt);
       this.incidents = new Map(state.incidents);
+      this.limit = state.limit;
       this.saved = JSON.stringify(state);
     } catch { /* no state yet */ }
   }
 
   private save() {
     if (!this.config.file) return;
-    const json = JSON.stringify({ blockedAt: [...this.blockedAt], incidents: [...this.incidents] });
+    const json = JSON.stringify({ blockedAt: [...this.blockedAt], incidents: [...this.incidents], limit: this.limit });
     if (json === this.saved) return;
     writeFileSync(`${this.config.file}.tmp`, json, { mode: 0o600 });
     renameSync(`${this.config.file}.tmp`, this.config.file);
@@ -49,21 +58,49 @@ export class StuckWatch {
   }
 
   // Takes the sessions seen now; returns the bumps and owner texts due. A text that was not sent (`done(false)`) comes again next poll.
-  poll(sessions: Session[], now: number): Action[] {
+  poll(sessions: Session[], now: number, limit?: Limit): Action[] {
     const ids = new Set(sessions.map((s) => s.id));
     for (const id of [...this.blockedAt.keys(), ...this.incidents.keys()]) {
       if (ids.has(id)) continue;
       this.blockedAt.delete(id);
       this.incidents.delete(id);
     }
-    const out = sessions.flatMap((s) => this.step(s, now) ?? []);
+    const out = sessions.flatMap((s) => this.step(s, now, limit) ?? []).concat(this.fleet(sessions.filter((s) => s.limited), now, limit) ?? []);
     this.save();
     return out;
   }
 
-  private step(s: Session, now: number): Action | undefined {
+  // One text for the whole fleet when a rate limit stops it, after SETTLE_MS, and one when the limit clears.
+  private fleet(limited: Session[], now: number, limit?: Limit): Action | undefined {
+    if (!limit) return;
+    // The reset time names the episode: each 429 of one episode gives a reset inside the same hour.
+    if (!this.limit || Math.abs(limit.resetAt - this.limit.resetAt) > 3_600_000) {
+      if (limit.cleared || !limited.length) return;
+      this.limit = { resetAt: limit.resetAt, since: now };
+    }
+    const ep = this.limit;
+    const key = ep.resetAt;
+    if (limit.cleared) {
+      if (!ep.texted || ep.cleared) return;
+      return { kind: "owner", id: "fleet", key: `limit-clear-${key}`, text: `The ${limit.model} rate limit cleared. I rang each stopped session again.`, done: this.persisted((ok) => { if (ok) ep.cleared = true; }) };
+    }
+    if (ep.texted || !limited.length || now - ep.since < SETTLE_MS) return;
+    const names = limited.map((s) => s.id.replace(/-mate-\w+$/, "")).join(", ");
+    return { kind: "owner", id: "fleet", key: `limit-${key}`, text: `Rate limit on ${limit.model}. Stopped: ${names}. It resets at ${pt(limit.resetAt)}. I ring each one again when it clears.`, done: this.persisted((ok) => { if (ok) ep.texted = true; }) };
+  }
+
+  private step(s: Session, now: number, limit?: Limit): Action | undefined {
     if (!s.blocked) this.blockedAt.delete(s.id);
     else if (!this.blockedAt.has(s.id)) this.blockedAt.set(s.id, now);
+    // A session stopped by the rate limit shows an error, not a question: the fleet text covers it, and it is rung when the limit clears.
+    if (s.limited && limit) {
+      if (!limit.cleared) return;
+      const last = this.rung.get(s.id) ?? 0;
+      if (now - last < this.config.stuckMs) return; // rung a short time ago: the usual stuck text comes only if the ring did not help
+      if (last < limit.at && now - last >= RERING_MS) {
+        return { kind: "bump", id: s.id, key: `limit-${s.id}-${limit.at}`, text: `${BUMP_MARK} The ${limit.model} rate limit cleared. Continue your work and read your inbox notes now.`, done: (ok) => { if (ok) this.rung.set(s.id, now); } };
+      }
+    }
     const since = Math.min(this.blockedAt.get(s.id) ?? Infinity, s.oldest ?? Infinity);
     const inc = this.incidents.get(s.id);
     if (now - since < this.config.stuckMs) return inc && this.recover(s, inc, now);
@@ -142,7 +179,26 @@ export async function collectSessions(o: { home: string; mates: readonly Secondm
     // Several panes in one home: only all of them waiting on input counts, so a spare pane cannot raise the alarm.
     const blocked = panes.length > 0 && panes.every((a) => a.agent_status === "blocked");
     const screen = blocked ? await o.readPane(panes[0].pane_id) : undefined;
-    sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: screen === undefined ? undefined : promptOf(screen) });
+    sessions.push({ id: t.id, label: t.label, notes: t.inbox.count, oldest: t.inbox.oldest, blocked, prompt: screen === undefined ? undefined : promptOf(screen),
+      limited: !!screen && /rate_limit_error|exceeds retry\.maxDelayMs/.test(screen) });
   }
   return sessions;
+}
+
+// Reads the newest long 429 from omp's stats database (read-only): the reset is the failed call plus its retry-after.
+export function rateLimit(file: string, now: number): Limit | undefined {
+  let db: Database | undefined;
+  try {
+    db = new Database(file, { readonly: true });
+    const e = db.query("select timestamp at, model, error_message m from messages where stop_reason='error' and error_message like '429%retry-after-ms=%' and timestamp>? order by timestamp desc limit 1")
+      .get(now - 7 * 86_400_000) as { at: number; model: string; m: string } | null;
+    const wait = Number(e?.m.match(/retry-after-ms=(\d+)/)?.[1]);
+    if (!e || !(wait > 60_000)) return;
+    const ok = db.query("select 1 from messages where model=? and timestamp>? and stop_reason not in ('error','aborted') limit 1").get(e.model, e.at);
+    return { model: e.model, at: e.at, resetAt: e.at + wait, cleared: !!ok || now >= e.at + wait };
+  } catch {
+    return; // a missing or unreadable stats.db must not stop the watch
+  } finally {
+    db?.close();
+  }
 }
