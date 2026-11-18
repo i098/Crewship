@@ -295,7 +295,8 @@ When the desk relays text to a second mate or to Firstmate, the bridge sends the
 - A desk-only answer or tapback sends no notice. A notice follows only a send that succeeded in this call, so a delivery found already in the mate's inbox, a failed send, and a restart replay add none. A failed mate send still hands the text to Firstmate, which sends the Firstmate notice.
 - The line reads `Sent to <receiver>: <summary>`. The mate name is its id with hyphens as spaces, plus "mate" when the id lacks it (`web-mate` reads "web mate"), because the outbound text filter strips ids of the form `x-mate-1`.
 - The summary is the owner's own text on one line, cut to 80 characters with "…". It passes the outbound text filter, so paths and similar detail are removed.
-- A text that fails the desk's approval and credential checks (decisions, passwords, secrets, redacted values), or any text when the desk has no redactor, is not echoed: the notice then reads "(held back, it may be sensitive)".
+- A text that fails the desk's approval and credential checks (decisions, passwords, secrets, redacted values) is not echoed: the notice then reads "(held back, it may be sensitive)".
+- With `FM_IMESSAGE_DESK_V2` not `true` (the legacy rollback loop) no redactor loads and the bridge sends no notice.
 - Notices go only to a direct chat, only while the desk is vetted and not [muted](#mute). Each uses a task-style guid, so a newer owner text does not cancel it.
 
 ## V2 front desk

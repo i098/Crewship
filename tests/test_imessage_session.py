@@ -65,6 +65,13 @@ def test_social_text_gets_the_session_tapback(tmp_path):
         assert texts(rig) == ["react m1 love"]
 
 
+def test_handoff_to_firstmate_sends_the_owner_a_notice(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "how are you HANDOFF")
+        wait_for(lambda: len(texts(rig)) == 1, "the handoff notice", timeout=120)
+        assert texts(rig)[0].split(" ", 1)[1] == "Sent to Firstmate: how are you HANDOFF"
+
+
 def test_protected_text_never_reaches_the_session(tmp_path):
     with session_rig(tmp_path) as rig:
         deliver(rig, "m1", "approve the deploy")
@@ -72,7 +79,7 @@ def test_protected_text_never_reaches_the_session(tmp_path):
                  "the firstmate handoff", timeout=120)
         time.sleep(1)
         assert desk_lines(rig, "prompt") == []
-        assert texts(rig) == []
+        assert [t.split(" ", 1)[1] for t in texts(rig)] == ["Sent to Firstmate: (held back, it may be sensitive)"]
 
 
 def test_session_relays_to_a_listed_mate(tmp_path):
@@ -87,7 +94,8 @@ def test_session_relays_to_a_listed_mate(tmp_path):
         wait_for(lambda: any(e.get("handoffNote") == "routed to mate1" and e.get("route") == "done" for e in events(rig)),
                  "the mate delivery", timeout=120)
         assert read_text(sent).splitlines() == ["mate1 [from captain via desk] RELAY mate1", "[desk request bluebubbles-m1]"]
-        assert texts(rig) == []
+        wait_for(lambda: len(texts(rig)) == 1, "the relay notice", timeout=120)
+        assert texts(rig)[0].split(" ", 1)[1] == "Sent to mate1 mate: RELAY mate1"
 
 
 def test_fleet_status_names_the_listed_mates_so_the_session_can_pick_one(tmp_path):
@@ -141,7 +149,7 @@ def test_plain_words_the_reply_checks_refuse_go_to_firstmate(tmp_path):
         deliver(rig, "m1", "STUBBORN STATUSLINE")
         wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
         time.sleep(1)
-        assert texts(rig) == []
+        assert [t.split(" ", 1)[1] for t in texts(rig)] == ["Sent to Firstmate: STUBBORN STATUSLINE"]
 
 
 def test_narration_before_a_tool_call_is_not_sent_as_the_reply(tmp_path):
@@ -149,7 +157,7 @@ def test_narration_before_a_tool_call_is_not_sent_as_the_reply(tmp_path):
         deliver(rig, "m1", "NARRATE")
         wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
         time.sleep(1)
-        assert texts(rig) == []
+        assert [t.split(" ", 1)[1] for t in texts(rig)] == ["Sent to Firstmate: NARRATE"]
 
 
 def test_plain_words_of_a_prompt_that_ended_in_error_go_to_firstmate(tmp_path):
@@ -157,7 +165,7 @@ def test_plain_words_of_a_prompt_that_ended_in_error_go_to_firstmate(tmp_path):
         deliver(rig, "m1", "ERRORWORDS")
         wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
         time.sleep(1)
-        assert texts(rig) == []
+        assert [t.split(" ", 1)[1] for t in texts(rig)] == ["Sent to Firstmate: ERRORWORDS"]
         assert len(desk_lines(rig, "prompt")) == 1
 
 
@@ -166,7 +174,7 @@ def test_words_of_the_first_prompt_are_not_sent_when_the_reminder_turn_fails(tmp
         deliver(rig, "m1", "ERRORRETRY")
         wait_for(lambda: any(e.get("route") == "handoff" for e in events(rig)), "the firstmate handoff", timeout=120)
         time.sleep(1)
-        assert texts(rig) == []
+        assert [t.split(" ", 1)[1] for t in texts(rig)] == ["Sent to Firstmate: ERRORRETRY"]
         assert len(desk_lines(rig, "prompt")) == 2
 
 
@@ -210,7 +218,7 @@ def test_delegated_task_replies_first_then_reports_the_answer(tmp_path, target):
         script.chmod(0o755)
         deliver(rig, "m1", f"DELEGATE {target}")
         wait_for(lambda: len(texts(rig)) == 1, "the reply", timeout=120)
-        assert texts(rig)[0].split(" ", 1)[1] == ("Your text is queued for the mate1 mate" if target == "mate1" else "Your text is queued for Firstmate")
+        assert texts(rig)[0].split(" ", 1)[1] == ("Your text is queued for mate1 mate: DELEGATE mate1" if target == "mate1" else "Your text is queued for Firstmate: DELEGATE firstmate")
         wait_for(message.exists, "the task delivery", timeout=120)
         assert not finished.exists()  # the reply was sent while the delivery was still open
         release.touch()
@@ -237,8 +245,10 @@ def test_task_report_survives_a_new_owner_text_during_delivery(tmp_path):
         Path(re.search(r"to (\S+\.answer)$", read_text(message)).group(1)).write_text(f"First bubble.\n\n{second}")
         wait_for(lambda: len(texts(rig)) == 2, "the first bubble of the report", timeout=120)
         deliver(rig, "m2", "how are you HANDOFF")  # a new owner text moves the desk generation before the second bubble
-        wait_for(lambda: len(texts(rig)) == 3, "the second bubble of the report", timeout=120)
-        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["Your text is queued for Firstmate", "First bubble.", second]
+        wait_for(lambda: len(texts(rig)) == 4, "the second bubble and the handoff notice", timeout=120)
+        lines = [line.split(" ", 1)[1] for line in texts(rig)]
+        assert lines[:2] == ["Your text is queued for Firstmate: DELEGATE firstmate", "First bubble."]
+        assert sorted(lines[2:]) == sorted(["Sent to Firstmate: how are you HANDOFF", second])
 
 
 def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(tmp_path):
@@ -255,7 +265,7 @@ def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(
         rig.start()
         wait_for(lambda: len(texts(rig)) == 2, "the answer after the restart", timeout=120)
         time.sleep(1.5)
-        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["Your text is queued for Firstmate", "The repo checks are green."]
+        assert [line.split(" ", 1)[1] for line in texts(rig)] == ["Your text is queued for Firstmate: DELEGATE firstmate", "The repo checks are green."]
         assert not answer.exists()
 
 
@@ -366,5 +376,5 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
             )
         message.unlink()
         reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")  # no id match and two senders: a desk turn
-        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        wait_for(lambda: len(texts(rig)) == 6, "the session reply", timeout=120)  # the reply, two bubbles, two mate notices, the desk reply
         assert not message.exists()
