@@ -981,6 +981,7 @@ With `tailscale serve`, each device and user that the tailnet access rules let r
 The listener allows one outside name: `host` (`FM_IMESSAGE_WEB_HOST`).
 With an access gateway, set `host` to the public hostname of the gateway, or make the gateway forward `Host` and `Origin` as that name; any other name gets 403.
 One `host` name serves one route, so the tailnet name and a gateway name do not work together.
+The page uses relative links, so a gateway can serve it under a path prefix such as `/chat/` (the prefix needs a trailing slash).
 
 1. Add the `web` block to the `imessage` block in `.local/host.yml`, then run `./ship.sh launch`:
 

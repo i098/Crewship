@@ -3841,7 +3841,7 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
         assert [(m["kind"], m["text"]) for m in messages] == [
             ("owner", "[test] hello from the phone"), ("supervisor", "[image: shot.png]\n\n[test] a photo for you"),
             ("owner", "[web chat] [test] typed on the glasses")]
-        status, picture = web(messages[1]["images"][0], host=f"127.0.0.1:{port}")
+        status, picture = web("/" + messages[1]["images"][0], host=f"127.0.0.1:{port}")
         assert status == 200 and picture == shot.read_bytes()
         assert web(f"/messages?after={messages[1]['i']}")[1].count(b'"kind"') == 1
         assert b"<title>Firstmate</title>" in web("/")[1]
