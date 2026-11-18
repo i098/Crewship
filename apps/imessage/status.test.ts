@@ -73,10 +73,10 @@ test("mate status lines take each file's last line and skip missing files", () =
 test("a compaction reply reads text and usage from the json stream, or takes plain text whole", () => {
   const stream = [
     { type: "message_end", message: { role: "user", content: [{ type: "text", text: "q" }] } },
-    { type: "message_end", message: { role: "assistant", model: "gpt-6-luna", content: [{ type: "text", text: "line" }], usage: { input: 9, output: 2 } } },
+    { type: "message_end", message: { role: "assistant", stopReason: "stop", model: "gpt-6-luna", content: [{ type: "text", text: "line" }], usage: { input: 9, output: 2 } } },
   ].map((event) => JSON.stringify(event)).join("\n");
-  expect(compactReply(stream)).toEqual({ text: "line", model: "gpt-6-luna", input: 9, output: 2 });
-  expect(compactReply("plain line")).toEqual({ text: "plain line", model: "gpt-6-luna" });
+  expect(compactReply(stream)).toEqual({ text: "line", ended: true, model: "gpt-6-luna", input: 9, output: 2 });
+  expect(compactReply("plain line")).toEqual({ text: "plain line", ended: false, model: "gpt-6-luna" });
 });
 
 test("a front timeout falls back to Firstmate and says so; other failures do not", async () => {
