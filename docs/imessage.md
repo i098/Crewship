@@ -1028,6 +1028,9 @@ The code is `apps/imessage/webchat.ts`.
   The listener answers only a request whose `Host` is `127.0.0.1:<port>` or the name in `FM_IMESSAGE_WEB_HOST`.
   A send must also carry the page's own `Origin`.
   A standby slot does not serve the page.
+- **Hidden password.** When `WEB_ACCESS_PASSWORD` is set and has 6 or more characters, the page shows `[hidden]` in place of each copy of it, plain or URL-encoded, in the thread.
+  The bridge process must receive `WEB_ACCESS_PASSWORD` in its environment, or the mask does nothing; the bridge logs one warning at start when it is unset or too short.
+  The stored memory files are not changed, and other encodings are not covered.
 
 ### Publish the web chat
 
