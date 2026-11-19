@@ -30,7 +30,7 @@
 #   fleet-browser sync                        converge cookies now
 #   fleet-browser gc                          stop idle chrome (>= $IDLE_MIN min; timer); voxl is never stopped
 #   fleet-browser seed <profile>              one-shot: import cookies from a Chrome profile dir
-#   fleet-browser notice <tier|dia>           text the owner that an agent uses this browser (`env` and `up` do it; once per 30 min per agent and browser)
+#   fleet-browser notice <tier|dia>           text the owner that an agent uses this browser (`env`, `up` and the `chrome-devtools-axi` wrapper do it; once per 30 min per agent and browser)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 STATE=$HOME/.fleet-browser

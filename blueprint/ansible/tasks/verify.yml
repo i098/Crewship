@@ -103,6 +103,7 @@
                    | map('regex_replace', '^', crewship_user_units ~ '/')
                    | list))
              + ([crewship_fleet_browsers_dir ~ '/fleet-browser',
+                 crewship_fleet_browsers_dir ~ '/chrome-devtools-axi',
                  crewship_fleet_browsers_dir ~ '/cookie-sync.ts',
                  crewship_fleet_browsers_dir ~ '/use-notice.ts',
                  crewship_fleet_browsers_dir ~ '/env.sh']

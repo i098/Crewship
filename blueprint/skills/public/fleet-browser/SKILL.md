@@ -27,8 +27,8 @@ Use a fallback tier for one task with `eval "$(fleet-browser env chrome)"`. It s
 
 ## Owner notice
 
-`fleet-browser env` and `fleet-browser up` text the owner once per 30 minutes for each agent and browser: the browser, your purpose and the open tabs in each browser.
-Set `FLEET_BROWSER_AGENT` to your name and `FLEET_BROWSER_PURPOSE` to one short line first. A failed text never stops the browser.
+`chrome-devtools-axi` (a wrapper ahead of the real client on PATH), `fleet-browser env` and `fleet-browser up` text the owner once per 30 minutes for each agent and browser: the browser, your purpose and the open tabs in each browser.
+Set `FLEET_BROWSER_AGENT` to your name and `FLEET_BROWSER_PURPOSE` to one short line first. A refresh of Dia cookies texts the owner only when `FLEET_BROWSER_AGENT` is set. A failed text never stops the browser.
 
 ## Session sync
 

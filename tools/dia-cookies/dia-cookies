@@ -101,10 +101,11 @@ def slug(name):
 
 
 def cmd_refresh(a):
-    try:  # the owner's text that an agent uses Dia; never blocks the refresh
-        subprocess.Popen(["fleet-browser", "notice", "dia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    except OSError:
-        pass
+    if os.environ.get("FLEET_BROWSER_AGENT"):  # the owner's text that an agent uses Dia; the systemd timer has no agent
+        try:
+            subprocess.Popen(["fleet-browser", "notice", "dia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
     r = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", HOST, "python3", "-"],
         input=MAC_SCRIPT.encode(),

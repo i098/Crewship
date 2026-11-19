@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { claim, notice } from "./use-notice.ts"
@@ -34,4 +34,28 @@ test("first use sends one notice, an immediate repeat sends none, a failing send
   expect(run(send, dir).exitCode).toBe(0)
   expect(readFileSync(out, "utf8").match(/Browser: t started using obscura/g)?.length).toBe(1)
   expect(run("false", mkdtempSync(join(tmpdir(), "bun-"))).exitCode).toBe(0)
+})
+
+test("the chrome-devtools-axi wrapper texts once for the session tier, then runs the real client with its arguments", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bun-"))
+  const bin = join(dir, "bin")
+  mkdirSync(bin)
+  const out = join(dir, "out")
+  const ran = join(dir, "ran")
+  const script = (name: string, body: string) => {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
+    chmodSync(join(bin, name), 0o755)
+  }
+  script("chrome-devtools-axi", `echo "$@" > ${ran}`)
+  script("ssh", "exit 1")
+  script("send", `cat >> ${out}`)
+  const env = {
+    ...process.env, HOME: dir, BUN: process.execPath, PATH: `${join(import.meta.dir)}:${bin}:${process.env.PATH}`,
+    FLEET_BROWSER_SEND: join(bin, "send"), FLEET_BROWSER_AGENT: "w", FLEET_BROWSER_PURPOSE: "check pricing", FLEET_BROWSER_TIER: "chrome",
+  }
+  for (let i = 0; i < 2; i++) expect(Bun.spawnSync(["chrome-devtools-axi", "open", "x"], { env }).exitCode).toBe(0)
+  for (let i = 0; i < 100 && !existsSync(out); i++) await Bun.sleep(100)
+  await Bun.sleep(300)
+  expect(readFileSync(ran, "utf8")).toBe("open x\n")
+  expect(readFileSync(out, "utf8").match(/Browser: w started using chrome \(headless Chrome\)\. Purpose: check pricing\./g)?.length).toBe(1)
 })

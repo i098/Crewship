@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -81,12 +82,17 @@ def test_non_interactive_run_prints_hint_and_keeps_offer_pending(tmp_path, monke
     assert not (tmp_path / ".local/share/crewship/dia-cookies-offer-done").exists()
 
 
-def _refresh(tmp_path, ssh_body, umask=0o022):
+def _refresh(tmp_path, ssh_body, umask=0o022, agent=None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "fleet-browser").write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path}/notices\n")
+    (bin_dir / "fleet-browser").chmod(0o755)
     (bin_dir / "ssh").write_text(f"#!/bin/sh\ncat >/dev/null\n{ssh_body}\n")
     (bin_dir / "ssh").chmod(0o755)
     env = {**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}", "DIA_COOKIES_DIR": str(tmp_path / "store" / "dia")}
+    env.pop("FLEET_BROWSER_AGENT", None)
+    if agent:
+        env["FLEET_BROWSER_AGENT"] = agent
     return subprocess.run(
         [sys.executable, str(ROOT / "tools/dia-cookies/dia-cookies"), "refresh"],
         env=env, capture_output=True, preexec_fn=lambda: os.umask(umask),
@@ -105,6 +111,19 @@ def test_refresh_exit_codes_separate_stale_profile_from_failure(tmp_path):
     assert _refresh(tmp_path, "true").returncode == 1
     ok = json.dumps({"profiles": {"P1": PROFILE}, "unread": {}})
     assert _refresh(tmp_path, f"echo '{ok}'").returncode == 0
+
+
+def test_dia_notice_only_for_an_agent_not_the_timer(tmp_path):
+    ok = json.dumps({"profiles": {"P1": PROFILE}, "unread": {}})
+    assert _refresh(tmp_path, f"echo '{ok}'").returncode == 0
+    time.sleep(0.5)
+    assert not (tmp_path / "notices").exists()
+    assert _refresh(tmp_path, f"echo '{ok}'", agent="builder").returncode == 0
+    for _ in range(50):
+        if (tmp_path / "notices").exists():
+            break
+        time.sleep(0.1)
+    assert (tmp_path / "notices").read_text() == "notice dia\n"
 
 
 def test_get_requires_explicit_output(tmp_path):

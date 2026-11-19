@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Thin wrapper ahead of the real chrome-devtools-axi on PATH: one owner notice per browser session, then the real client.
+self=$(readlink -f "$0")
+"$(dirname "$self")/fleet-browser" notice "${FLEET_BROWSER_TIER:-obscura}" >/dev/null 2>&1 || true
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do
+  c=$d/chrome-devtools-axi
+  [ -x "$c" ] && [ "$(readlink -f "$c")" != "$self" ] && exec "$c" "$@"
+done
+echo "chrome-devtools-axi: real client not found on PATH" >&2
+exit 127
