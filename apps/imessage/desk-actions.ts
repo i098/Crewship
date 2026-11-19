@@ -206,14 +206,17 @@ function delegateTarget(host: ActionHost, id: string): Secondmate | `helper:${He
 
 // One runner per turn. `acted()` says whether the turn ended in a reply, tapback, relay or handoff.
 const ACTION_TOOLS = new Set(["message_mate", "pane_choose", "run_script"]);
+// run_script with no name only lists the scripts.
+const provesAction = (name: string, args: Record<string, unknown>) => ACTION_TOOLS.has(name) && !(name === "run_script" && args.name === undefined);
+function refuseUnproven(args: Record<string, unknown>, proved: boolean) {
+  const why = unprovenClaim(String(args.text), proved);
+  if (why) throw new Error(why);
+}
 
 export function createActions(host: ActionHost): { run: ToolRunner; acted(): boolean } {
   let done = false;
   let proved = false; // an action tool succeeded in this turn
-  const claimed = (args: Record<string, unknown>) => {
-    const why = unprovenClaim(String(args.text), proved);
-    if (why) throw new Error(why);
-  };
+  const claimed = (args: Record<string, unknown>) => refuseUnproven(args, proved);
   const live = () => {
     if (!host.current() || host.muted()) throw new Error("this turn is no longer current; stop");
   };
@@ -285,7 +288,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
     const handler = Object.hasOwn(handlers, name) ? handlers[name] : undefined;
     if (!handler) throw new Error(`unknown tool ${name}`);
     const result = await handler(args);
-    if (ACTION_TOOLS.has(name) && !(name === "run_script" && args.name === undefined)) proved = true; // no name only lists scripts
+    proved ||= provesAction(name, args);
     return result;
   };
   return { run, acted: () => done };
