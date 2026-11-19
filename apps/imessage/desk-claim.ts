@@ -43,16 +43,6 @@ export function claimsDir(env: Record<string, string | undefined>): string {
   return env.FM_IMESSAGE_CLAIMS || `${env.STATE_DIRECTORY || `${env.HOME}/.local/state/fm-imessage`}/claims`;
 }
 
-// fm-claim msg|act KEY...   exit 0: yours, act. Exit 3: held by the other actor, stop and do nothing. Actor: FM_CLAIM_ACTOR, default firstmate.
-if (import.meta.main) {
-  const [kind, ...key] = Bun.argv.slice(2);
-  if ((kind !== "msg" && kind !== "act") || !key.length) { console.error("usage: fm-claim msg|act KEY..."); process.exit(2); }
-  const actor = process.env.FM_CLAIM_ACTOR === "desk" ? "desk" : "firstmate";
-  const ok = claim(claimsDir(process.env), kind, key.join(" "), actor);
-  console.log(ok ? "claimed" : "held: another actor has this; stop and do nothing");
-  process.exit(ok ? 0 : 3);
-}
-
 // The desk may not tell the owner that an action is done unless a tool that can do that kind of action succeeded in the same turn.
 // A kind with no tool in its list can never be claimed: no desk tool orders, buys, pays, books or posts.
 // shortcut: a word list, so an unlisted wording slips through and a loose match makes the model reword; upgrade to gating reply text structurally.
