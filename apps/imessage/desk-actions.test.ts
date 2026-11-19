@@ -324,3 +324,21 @@ test("run_script reports a timeout and refuses a protected request", async () =>
   expect(await h.run("run_script", { name: "slow" })).toBe("timed out after 60 s\nno output");
   await expect(host(["deploy now"]).run("run_script", { name: "x" })).rejects.toThrow("protected");
 });
+
+test("reply refuses a completed-action claim when no action tool ran in the turn", async () => {
+  const h = host(["which smart plug is best?"]);
+  await expect(h.run("reply", { text: "The Kasa plug is the pick, ordered via Amazon Prime." })).rejects.toThrow("no action tool succeeded");
+  await expect(h.run("handoff_main", { text: "Ordered it.", reason: "x" })).rejects.toThrow("no action tool succeeded");
+  await h.run("run_script", {}); // listing scripts is no action
+  await expect(h.run("reply", { text: "Sent." })).rejects.toThrow("no action tool succeeded");
+  expect(h.calls).toEqual([]);
+  expect(h.acted()).toBe(false);
+  expect(await h.run("reply", { text: "I recommend the Kasa plug. Say the word and Firstmate orders it." })).toContain("turn is over");
+});
+
+test("reply may claim a send after message_mate succeeded in the same turn", async () => {
+  const h = host(["tell mate1 to rerun checks"]);
+  await h.run("message_mate", { mate: "mate1", text: "rerun checks" });
+  expect(await h.run("reply", { text: "Sent to mate1." })).toContain("turn is over");
+  expect(h.calls.at(-1)).toEqual(["reply", ["Sent to mate1."], 1]);
+});
