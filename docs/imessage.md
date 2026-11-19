@@ -157,7 +157,7 @@ For each message from the owner, the service does these steps:
    Named keep: synchronous inbox filing remains serial; two stalled commands can block the event loop for about ten seconds.
    This can delay the deadline and typing cleanup beyond eight seconds; their timers resume when filing returns.
    The five-second limit applies to each command, not the entire batch.
-   The local regression test checks the eventual handoff and typing cleanup after two command timeouts.
+   The local regression test checks the eventual handoff after two command timeouts, typing staying on through it, and typing ending with the real answer.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.
