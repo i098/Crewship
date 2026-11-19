@@ -1071,7 +1071,7 @@ The filter removes `[Dxxxx]` decision tags, `[key=...]`, `key=` and `corr=` tags
 A line that starts with "decision stuck after N attempts" is dropped whole; inline, only the phrase is removed.
 A bare colon at the start of a line is dropped, also when the text had one before; emoticons such as ":)" stay. "the owner" and "the captain" (also `the owner's`) become "you" ("your"). A bare "owner" or "captain", "the owner of", "the captain Smith", and `owner.json` stay.
 URLs stay as they are. Text with none of these stays byte-exact, except that a bare colon at the start of a line is still dropped. If nothing is left, the original is sent without a leading colon.
-Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
+The CLI looks for bun with `command -v bun`, then beside the `fm-imessage` script, then in `~/.local/bin` and `~/.bun/bin`, so the filter also runs under cron with a minimal `PATH`. Without bun, or if the filter fails, the CLI warns and sends the text unchanged.
 
 ## STE check on desk replies
 
