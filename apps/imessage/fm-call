@@ -10,8 +10,8 @@
 #   Stop switch : `touch ~/.local/state/fm-call/stop` (he texts "no calls"); `rm` it when he says calls are fine again.
 # --incident ID is required except for class asked. Each call decides once and returns: re-run later to follow up.
 # Exit: 0 rang, 3 not rung (text sent, wait, limited or quiet hours: reason on stderr), 4 stop switch on, 5 call failed, 2 usage or setup error.
-# Pager backup: when a ring ends unanswered (Twilio no-answer, busy, canceled or failed), one Bark page goes out with level=critical,
-#   which breaks through silent mode on iPhone. An answered call sends none; no ring, no page. No BARK_DEVICE_KEY: a warning, no page.
+# Pager backup: when a ring ends unanswered (Twilio no-answer, busy, canceled, failed, or answered by voicemail or fax), one Bark page per incident goes out with
+#   level=critical, which breaks through silent mode on iPhone. An answered call sends none; no ring, no page. No BARK_DEVICE_KEY: a warning, no page.
 # Keys (names only, in $SECRETS_FILE, default ~/super.env): TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM PERSONAL_PHONE BARK_DEVICE_KEY (pager, optional).
 # Test hooks: FM_CALL_TWILIO_URL, FM_CALL_BARK_URL, FM_CALL_POLL (seconds between status checks, default 3).
 # Log: ~/.local/state/fm-call/log, tab-separated "epoch class incident event"; event is text, ring, limited or quiet. The gate reads it.
@@ -133,17 +133,22 @@ case $verb in
   *) fail "bad gate result: $decision" ;;
 esac
 
-# Wait for call $1 to end. Only no-answer, busy, canceled and failed count as unanswered; a completed call was answered.
-# An unanswered call sends exactly one critical Bark page. A missing key or a failed page is a warning, never an error.
+# Wait for call $1 to end. no-answer, busy, canceled and failed are unanswered; so is a completed call that a machine (voicemail) or fax picked up.
+# An incident gets one critical Bark page: a second unanswered ring sends none. A missing key or a failed page is a warning, never an error.
 page_if_unanswered() {
-  local status="" i
+  local status="" by="" i
   for ((i = 0; i < 40; i++)); do
-    status=$(printf 'user = "%s:%s"\n' "$TWILIO_ACCOUNT_SID" "$TWILIO_AUTH_TOKEN" | curl -sS --max-time 30 -K - \
-      "$TWILIO_URL/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls/$1.json" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
+    read -r status by < <(printf 'user = "%s:%s"\n' "$TWILIO_ACCOUNT_SID" "$TWILIO_AUTH_TOKEN" | curl -sS --max-time 30 -K - \
+      "$TWILIO_URL/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls/$1.json" 2>/dev/null | jq -r '[.status // "", .answered_by // ""] | join(" ")' 2>/dev/null)
     case $status in completed|no-answer|busy|canceled|failed) break ;; esac
     sleep "${FM_CALL_POLL:-3}"
   done
-  case $status in no-answer|busy|canceled|failed) ;; completed) return 0 ;; *) echo "fm-call: warning: call $1 status unknown ($status), no page sent" >&2; return 0 ;; esac
+  case $status in
+    no-answer|busy|canceled|failed) ;;
+    completed) case $by in machine_*|fax) status="completed, answered by $by" ;; *) return 0 ;; esac ;;
+    *) echo "fm-call: warning: call $1 status unknown ($status), no page sent" >&2; return 0 ;;
+  esac
+  awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="page" {f=1} END {exit !f}' "$LOG" && { echo "fm-call: call unanswered ($status), incident already paged"; return 0; }
   [ -n "${BARK_DEVICE_KEY:-}" ] || BARK_DEVICE_KEY=$(grep -m1 '^BARK_DEVICE_KEY=' "${SECRETS_FILE:-$HOME/super.env}" 2>/dev/null | cut -d= -f2- | tr -d '"')
   [ -n "$BARK_DEVICE_KEY" ] || { echo "fm-call: warning: BARK_DEVICE_KEY is not set, call unanswered and no page sent" >&2; return 0; }
   local body http
@@ -163,7 +168,7 @@ esc=$(printf '%s' "$REASON" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 twiml="<Response><Say voice=\"alice\">Firstmate needs you now. $esc. Read your messages.</Say><Pause length=\"1\"/><Say voice=\"alice\">Again: $esc.</Say></Response>"
 out=$(mktemp)
 code=$(printf 'user = "%s:%s"\n' "$TWILIO_ACCOUNT_SID" "$TWILIO_AUTH_TOKEN" | curl -sS --max-time 30 -K - -o "$out" -w '%{http_code}' \
-  --data-urlencode "To=$PERSONAL_PHONE" --data-urlencode "From=$TWILIO_FROM" --data-urlencode "Twiml=$twiml" --data-urlencode "Timeout=30" \
+  --data-urlencode "To=$PERSONAL_PHONE" --data-urlencode "From=$TWILIO_FROM" --data-urlencode "Twiml=$twiml" --data-urlencode "Timeout=30" --data-urlencode "MachineDetection=Enable" \
   "$TWILIO_URL/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls.json")
 if [ "$code" = 201 ]; then
   logline ring; sid=$(jq -r .sid "$out"); rm -f "$out"; echo "fm-call: ringing (call $sid)"

@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -21,7 +22,7 @@ KEY = "bark-secret-key"
 @pytest.fixture
 def fakes():
     """Serve Twilio (create call, then report the status in `state`) and Bark (record pushes)."""
-    state = {"status": "completed", "pushes": [], "bark_http": 200}
+    state = {"status": "completed", "pushes": [], "calls": [], "bark_http": 200}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -40,10 +41,11 @@ def fakes():
                 state["pushes"].append(json.loads(raw))
                 self.reply(state["bark_http"], {})
             else:
+                state["calls"].append(parse_qs(raw.decode()))
                 self.reply(201, {"sid": "CA1"})
 
         def do_GET(self):
-            self.reply(200, {"status": state["status"]})
+            self.reply(200, {"status": state["status"], "answered_by": state.get("answered_by")})
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -52,9 +54,9 @@ def fakes():
     server.shutdown()
 
 
-def ring(tmp_path, fakes, key=KEY):
+def ring(tmp_path, fakes, key=KEY, now=NOON, incident=None):
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     (tmp_path / "say").write_text("#!/bin/sh\nexit 0\n")
     (tmp_path / "say").chmod(0o755)
     env = {
@@ -63,7 +65,7 @@ def ring(tmp_path, fakes, key=KEY):
         "SECRETS_FILE": str(tmp_path / "none.env"),
         "FM_CALL_STATE": str(tmp_path / "state"),
         "FM_CALL_IMESSAGE": str(tmp_path / "say"),
-        "FM_CALL_NOW": str(NOON),
+        "FM_CALL_NOW": str(now),
         "FM_CALL_TWILIO_URL": fakes["url"],
         "FM_CALL_BARK_URL": fakes["url"],
         "FM_CALL_POLL": "0",
@@ -75,7 +77,7 @@ def ring(tmp_path, fakes, key=KEY):
     if key:
         env["BARK_DEVICE_KEY"] = key
     return subprocess.run(
-        [str(FM_CALL), "--class", "asked", "disk full"],
+        [str(FM_CALL), "--class", "asked", "--incident", incident or f"asked-{now}", "disk full"],
         env=env,
         capture_output=True,
         text=True,
@@ -87,6 +89,25 @@ def test_answered_call_sends_no_page(tmp_path, fakes):
     fakes["status"] = "completed"
     assert ring(tmp_path, fakes).returncode == 0
     assert fakes["pushes"] == []
+
+
+@pytest.mark.parametrize("by", ["machine_start", "machine_end_beep", "fax"])
+def test_voicemail_pickup_sends_critical_page(tmp_path, fakes, by):
+    fakes["status"] = "completed"
+    fakes["answered_by"] = by
+    assert ring(tmp_path, fakes).returncode == 0
+    assert fakes["calls"][0]["MachineDetection"] == ["Enable"]
+    assert len(fakes["pushes"]) == 1
+    assert fakes["pushes"][0]["level"] == "critical"
+
+
+def test_second_unanswered_ring_sends_no_second_page(tmp_path, fakes):
+    fakes["status"] = "no-answer"
+    assert ring(tmp_path, fakes, incident="i1").returncode == 0
+    second = ring(tmp_path, fakes, now=NOON + 400, incident="i1")
+    assert second.returncode == 0
+    assert len(fakes["calls"]) == 2
+    assert len(fakes["pushes"]) == 1
 
 
 @pytest.mark.parametrize("status", ["no-answer", "busy", "canceled", "failed"])
