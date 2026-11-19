@@ -51,7 +51,7 @@ For each message from the owner, the service does these steps:
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
-   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, or discarded; a handoff does not stop it, and the real answer does.
+   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled or discarded; a handoff does not stop it, and the real answer does.
    The service stops refreshes before saving delivery progress, even if that save fails.
    A desk turn that runs past 150 seconds is aborted. If it is still current and no item has routed yet, it is handed off to Firstmate and the owner gets one short delay reply.
    A front model timeout has its own one-line ack; see [V2 front desk](#v2-front-desk).
