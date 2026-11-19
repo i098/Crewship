@@ -59,3 +59,15 @@ test("the chrome-devtools-axi wrapper texts once for the session tier, then runs
   expect(readFileSync(ran, "utf8")).toBe("open x\n")
   expect(readFileSync(out, "utf8").match(/Browser: w started using chrome \(headless Chrome\)\. Purpose: check pricing\./g)?.length).toBe(1)
 })
+
+test("concurrent first uses by one agent on one browser send exactly one text", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bun-"))
+  const out = join(dir, "out")
+  const send = join(dir, "send")
+  writeFileSync(send, `#!/bin/sh\ncat >> ${out}\n`)
+  chmodSync(send, 0o755)
+  const env = { ...process.env, FLEET_BROWSER_STATE: dir, FLEET_BROWSER_SEND: send, FLEET_BROWSER_AGENT: "t", DIA_COOKIES_HOST: "invalid.invalid" }
+  const procs = Array.from({ length: 8 }, () => Bun.spawn(["bun", join(import.meta.dir, "use-notice.ts"), "obscura"], { env }))
+  await Promise.all(procs.map(p => p.exited))
+  expect(readFileSync(out, "utf8").match(/Browser: t started using obscura/g)?.length).toBe(1)
+})

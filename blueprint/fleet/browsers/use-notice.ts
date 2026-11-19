@@ -3,7 +3,7 @@
 // Usage: use-notice.ts <obscura|chrome|voxl|dia>
 // Env: FLEET_BROWSER_AGENT, FLEET_BROWSER_PURPOSE, FLEET_BROWSER_SEND (default `fm-imessage`, text on stdin),
 //      FLEET_BROWSER_NOTICE_WINDOW_MIN (default 30), FLEET_BROWSER_STATE (default ~/.fleet-browser), DIA_COOKIES_HOST (default mac).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -27,11 +27,24 @@ export function notice(tier: Tier, agent: string, purpose: string, counts: Count
 // True once per (tier, agent) inside the window; records the send time before the text goes out.
 export function claim(stateDir: string, tier: Tier, agent: string, now: number, windowMin: number): boolean {
   const file = join(stateDir, `notice-${tier}-${agent.replace(/[^\w.-]/g, "_") || "agent"}`)
-  const last = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0
-  if (now - last < windowMin * 60) return false
+  const lock = `${file}.lock`
   mkdirSync(stateDir, { recursive: true })
-  writeFileSync(file, String(now))
-  return true
+  try {
+    mkdirSync(lock)
+  } catch {
+    try {
+      if (now - statSync(lock).mtimeMs / 1000 >= 60) rmSync(lock, { recursive: true, force: true })
+    } catch {}
+    return false
+  }
+  try {
+    const last = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0
+    if (now - last < windowMin * 60) return false
+    writeFileSync(file, String(now))
+    return true
+  } finally {
+    rmSync(lock, { recursive: true, force: true })
+  }
 }
 
 const pages = (json: string) => (JSON.parse(json) as { type: string }[]).filter(t => t.type === "page").length
