@@ -16,3 +16,9 @@ crewship_stall_nudge_pane: ""
 crewship_usage_remind_every: 3600
 crewship_usage_disks: ["/"]
 crewship_usage_scripts: [fm-usage-brief, fm-usage-remind, fm-text-card, fm-status-card]
+# Token acceleration notice (docs/architecture.md#token-acceleration-notice): fm-token-accel texts a usage card when
+# the fleet's token rate grows faster than this many tokens/s per second (5 min samples, the busiest of the last 5 days
+# reached 208; this fires about once per 2 days), at most once per cooldown seconds.
+crewship_token_accel_threshold: 200
+crewship_token_accel_interval: 300
+crewship_token_accel_cooldown: 3600

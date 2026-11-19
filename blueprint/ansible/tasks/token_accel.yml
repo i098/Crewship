@@ -1,0 +1,93 @@
+---
+# Token acceleration notice (docs/architecture.md#token-acceleration-notice): builds apps/fm-token-accel/
+# with cargo and runs it as a user service. It needs fm-text-card and fm-usage-brief on PATH (stall_nudge.yml installs them).
+
+- name: Ensure the token acceleration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ crewship_share_dir }}/fm-token-accel/source"
+    - "{{ crewship_local_bin }}"
+    - "{{ crewship_user_units }}/default.target.wants"
+
+- name: Copy the token acceleration source
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/fm-token-accel/{{ item }}"
+    dest: "{{ crewship_share_dir }}/fm-token-accel/source/"
+    mode: preserve
+    remote_src: true
+  loop: [Cargo.toml, Cargo.lock, src]
+
+- name: Build the token acceleration watcher
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_cfg.home }}/.cargo/bin/cargo"
+      - build
+      - --release
+      - --locked
+      - --target-dir
+      - "{{ crewship_share_dir }}/fm-token-accel/target"
+    chdir: "{{ crewship_share_dir }}/fm-token-accel/source"
+  environment:
+    PATH: "{{ crewship_cfg.home }}/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Install the token acceleration command
+  ansible.builtin.copy:
+    src: "{{ crewship_share_dir }}/fm-token-accel/target/release/fm-token-accel"
+    dest: "{{ crewship_local_bin }}/fm-token-accel"
+    mode: "0755"
+    remote_src: true
+  when: not ansible_check_mode
+  register: crewship_token_accel_binary
+
+- name: Install the token acceleration unit
+  ansible.builtin.copy:
+    dest: "{{ crewship_user_units }}/fm-token-accel.service"
+    mode: "0644"
+    content: |
+      {{ ansible_managed | comment }}
+      # Texts a usage card when the fleet's token use accelerates fast (docs/architecture.md#token-acceleration-notice).
+
+      [Unit]
+      Description=Token acceleration notice (Crewship managed)
+
+      [Service]
+      Type=simple
+      Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+      Environment=FM_ACCEL_THRESHOLD={{ crewship_token_accel_threshold }}
+      Environment=FM_ACCEL_INTERVAL={{ crewship_token_accel_interval }}
+      Environment=FM_ACCEL_COOLDOWN={{ crewship_token_accel_cooldown }}
+      ExecStart={{ crewship_local_bin }}/fm-token-accel
+      Restart=always
+      RestartSec=10
+      MemoryMax=128M
+      Nice=10
+
+      [Install]
+      WantedBy=default.target
+  register: crewship_token_accel_unit
+
+- name: Statically enable the token acceleration watcher
+  ansible.builtin.file:
+    src: "{{ crewship_user_units }}/fm-token-accel.service"
+    dest: "{{ crewship_user_units }}/default.target.wants/fm-token-accel.service"
+    state: link
+    force: true
+    follow: false
+
+- name: Start the token acceleration watcher
+  ansible.builtin.systemd_service:
+    scope: user
+    name: fm-token-accel.service
+    enabled: true
+    state: "{{ 'restarted' if (crewship_token_accel_binary.changed | default(false) or crewship_token_accel_unit.changed) else 'started' }}"
+    daemon_reload: true
+  environment: "{{ crewship_user_systemd_env }}"
+  failed_when: false
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
