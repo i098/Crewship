@@ -39,6 +39,8 @@ def test_failed_desk_hands_off_one_burst_without_a_receipt_and_keeps_typing(tmp_
         desk_clock(8000)
         wait_for(lambda: text(notes).count("photon-lookup ") == text(notes).count("photon-detail ") == 1, "the durable handoff")
         assert typing_events(fake, text) and False not in typing_events(fake, text)  # the handoff leaves typing on until a real answer
+        desk_clock(300_000)
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "the five-minute typing cap")
         assert text(fake / "sent") == ""
         receive("detail", "Check the release job, not the build job.")
         desk_clock(8000)
