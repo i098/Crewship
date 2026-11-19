@@ -14,7 +14,7 @@ export function isMessageRead(args: string[]): boolean {
   const i = args.indexOf("gmail")
   if (i < 0 || args[i + 1] !== "users") return false
   const [res, a, b] = args.slice(i + 2)
-  return ((res === "messages" || res === "threads") && (a === "get" || a === "list")) || (res === "messages" && a === "attachments" && b === "get")
+  return (res === "messages" || res === "threads") && a === "get" || (res === "messages" && a === "attachments" && b === "get")
 }
 
 export function notice(out: string, agent: string, purpose: string): string {

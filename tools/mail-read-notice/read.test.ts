@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clean, isMessageRead, notice } from "./read.ts"
@@ -18,11 +18,27 @@ test("a read with no purpose says so", () => {
   expect(notice(msg("a@b.co", "hi"), "x", "")).toContain("Purpose: not given.")
 })
 
-test("every Gmail call that returns mail content counts as a read", () => {
+test("only Gmail calls that return one mail count as a read", () => {
   const g = (...a: string[]) => isMessageRead(["gmail", "users", ...a, "--params", "{}"])
-  for (const c of [["messages", "get"], ["messages", "list"], ["threads", "get"], ["threads", "list"], ["messages", "attachments", "get"]]) expect(g(...c)).toBe(true)
-  expect(g("getProfile")).toBe(false)
-  expect(g("messages", "send")).toBe(false)
+  for (const c of [["messages", "get"], ["threads", "get"], ["messages", "attachments", "get"]]) expect(g(...c)).toBe(true)
+  for (const c of [["messages", "list"], ["threads", "list"], ["getProfile"], ["messages", "send"]]) expect(g(...c)).toBe(false)
+})
+
+test("a list call sends no notice and passes output through", () => {
+  const dir = mkdtempSync(join(tmpdir(), "mrn-"))
+  const gws = join(dir, "gws")
+  const send = join(dir, "send")
+  const out = join(dir, "out")
+  writeFileSync(gws, `#!/bin/sh\necho '{"messages":[{"id":"1"}]}'\n`)
+  writeFileSync(send, `#!/bin/sh\ncat > ${out}\n`)
+  chmodSync(gws, 0o755)
+  chmodSync(send, 0o755)
+  const r = Bun.spawnSync(["bun", join(import.meta.dir, "read.ts"), "gmail", "users", "messages", "list"], {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAIL_READ_SEND: send },
+  })
+  expect(r.exitCode).toBe(0)
+  expect(r.stdout.toString()).toContain('"id":"1"')
+  expect(existsSync(out)).toBe(false)
 })
 
 test("a thread read takes the sender from its first message", () => {
