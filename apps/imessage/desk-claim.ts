@@ -61,7 +61,7 @@ const OTHER = String.raw`(?<!\b(?:you|they|he|she)\s+)`;
 const CLAIMS: [kind: string, pattern: RegExp, tools: string[]][] = [
   ["order", /\b(?:ordered|order placed|placed (?:the|an?|your) order|purchased|bought|paid|payment (?:made|sent)|booked|reserved|subscribed|on its way|on the way)\b/i, []],
   ["post", /\b(?:posted|published|tweeted|submitted|cancell?ed|scheduled)\b/i, []],
-  ["send", /\b(?:sent|emailed|texted|messaged)\b/i, ["message_mate"]],
+  ["send", /\b(?:sent|emailed|texted|messaged)\b/i, ["message_mate", "send_file"]],
 ].map(([kind, re, tools]) => [kind, new RegExp(OTHER + (re as RegExp).source, "i"), tools]) as [string, RegExp, string[]][];
 
 // The refusal for `text`, or undefined; `succeeded` holds the tools that succeeded so far in this turn.
