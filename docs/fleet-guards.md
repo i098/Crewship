@@ -185,7 +185,7 @@ Three browser tiers share one cookie jar. The `fleet_browsers` profile, or
 environment in shell profiles and the Herdr unit. Sources of truth:
 `blueprint/fleet/browsers/fleet-browser` (runtime, `alive` probe),
 `blueprint/fleet/browsers/env.sh` (defaults every shell inherits),
-`blueprint/fleet/browsers/cookie-sync.ts` (jar), `blueprint/ansible/tasks/fleet-browsers.yml` and
+`blueprint/fleet/browsers/cookie-sync.ts` (jar), `blueprint/fleet/browsers/use-notice.ts` (owner notice) and the `chrome-devtools-axi` wrapper beside it, `blueprint/ansible/tasks/fleet-browsers.yml` and
 `blueprint/ansible/templates/fleet-browser-*.{service,timer}.j2` (units, cadences).
 The playbook tag `fleet_browsers` (or `fleet`) narrows a run to the ladder;
 `--skip-tags journald` also leaves out its host-wide journald cap.
@@ -205,6 +205,10 @@ session (one exit IP until it restarts), and `--direct` switches back. Then go t
 obscura, obscura `--proxy`, chrome, chrome `--proxy`, voxl, voxl `--proxy`. The option needs the `GEONODE_*` settings.
 
 Dia, the owner's Mac browser, is no tier: use it only for a cookie pull (`fleet-browser seed`).
+
+Owner notice: `use-notice.ts` texts the owner through `FLEET_BROWSER_SEND` (default `fm-imessage`, text on stdin) and counts open tabs in each browser, Dia over `ssh` to `DIA_COOKIES_HOST` (default `mac`).
+`FLEET_BROWSER_NOTICE_WINDOW_MIN` (default 30) sets the window of one text per agent and browser.
+The `chrome-devtools-axi` wrapper in the same directory is one trigger. The agent contract is in the [fleet-browser skill](../blueprint/skills/public/fleet-browser/SKILL.md#owner-notice).
 
 A tier reaches Geonode through `geonode-proxy.py`, a loopback forwarder that adds the credentials
 Chrome cannot carry. It reads `GEONODE_GATEWAY`, `GEONODE_USERNAME`, `GEONODE_PASSWORD`, `GEONODE_STICKY_PORT_BASE` and

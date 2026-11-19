@@ -7,7 +7,7 @@ description: "Use for web interaction, screenshots or browser automation on a fl
 
 Needs the `fleet_browsers` profile (Crewship `docs/fleet-guards.md`, Browser ladder).
 Default tier: Obscura (a Rust engine, CDP `http://127.0.0.1:9222`, always on, about 5x less RAM than Chrome).
-Every agent shell exports `CHROME_DEVTOOLS_AXI_BROWSER_URL`, so `chrome-devtools-axi` and omp's browser tools attach to it and launch no private Chrome.
+Every agent shell exports `CHROME_DEVTOOLS_AXI_BROWSER_URL`, so `chrome-devtools-axi` and omp's browser tools attach to it and launch no private Chrome (only `chrome-devtools-axi` texts the owner).
 
 Ladder, driven with `fleet-browser status|env|up|down|sync`:
 
@@ -24,6 +24,12 @@ Dia (the owner's Mac browser) is no tier: use it only for a cookie pull.
 Never wait for the owner or his Mac to clear a Turnstile; climb the ladder.
 
 Use a fallback tier for one task with `eval "$(fleet-browser env chrome)"`. It sets a separate axi session, so it does not collide with the default.
+
+## Owner notice
+
+`chrome-devtools-axi` (a wrapper ahead of the real client on PATH), `fleet-browser env` and `fleet-browser up` text the owner once per 30 minutes for each agent and browser: the browser, your purpose and the open tabs in each browser.
+Set `FLEET_BROWSER_AGENT` to your name and `FLEET_BROWSER_PURPOSE` to one short line first. A refresh of Dia cookies texts the owner only when `FLEET_BROWSER_AGENT` is set. A failed text never stops the browser.
+omp's browser tools send no notice yet (follow-up: issue #1416).
 
 ## Session sync
 
