@@ -30,6 +30,7 @@
 #   fleet-browser sync                        converge cookies now
 #   fleet-browser gc                          stop idle chrome (>= $IDLE_MIN min; timer); voxl is never stopped
 #   fleet-browser seed <profile>              one-shot: import cookies from a Chrome profile dir
+#   fleet-browser notice <tier|dia>           text the owner that an agent uses this browser (`env` and `up` do it; once per 30 min per agent and browser)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 STATE=$HOME/.fleet-browser
@@ -52,6 +53,8 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 port_of() { case "$1" in obscura) echo 9222 ;; chrome) echo 9522 ;; voxl) echo 9523 ;; *) return 1 ;; esac; }
 url_of() { case "$1" in obscura) echo "$OBSCURA_URL" ;; chrome) echo "$CHROME_URL" ;; voxl) echo "$VOXL_URL" ;; *) return 1 ;; esac; }
 unit_of() { echo "fleet-browser-$1.service"; }
+# One text per browser session: which browser, why (FLEET_BROWSER_PURPOSE), tabs open in each. Never blocks or fails the caller.
+notify_use() { [ -f "$HERE/use-notice.ts" ] && ( "$BUN" "$HERE/use-notice.ts" "$1" >/dev/null 2>&1 & ); return 0; }
 alive() { curl -s -m 3 -o /dev/null "$(url_of "$1")/json/version"; }
 clients() { ss -Htn state established "( sport = :$(port_of "$1") )" 2>/dev/null | wc -l; }
 # Obscura reads its session from the storage file (live: it flushes on every
@@ -86,6 +89,7 @@ cmd_env() {
   if ! alive "$t"; then
     case "$t" in obscura) echo "# obscura is DOWN: systemctl --user start fleet-browser-obscura.service" >&2 ;; *) echo "# $t is not running: fleet-browser up $t" >&2 ;; esac
   fi
+  notify_use "$t"
   cat <<EOF
 # fleet browser tier: $t  (ladder: obscura -> chrome -> voxl; see ~/oss-fleet/browsers/README.md)
 export CHROME_DEVTOOLS_AXI_BROWSER_URL=$(url_of "$t")
@@ -128,6 +132,7 @@ cmd_up() {
     log "up $t"
   fi
   [ "$opt" = --proxy ] && [ ! -e "$STATE/proxy-$t" ] && { echo "proxy unavailable; $t is running direct (see journalctl --user -u $(unit_of "$t"))" >&2; exit 1; }
+  notify_use "$t"
   [ "$t" = obscura ] && { echo "obscura up"; return; }
   date +%s > "$STATE/last-client-$t"
   cmd_sync
@@ -326,6 +331,7 @@ case "${1:-status}" in
   down) cmd_down "${2:-}" ;;
   sync) cmd_sync ;;
   gc) cmd_gc ;;
+  notice) notify_use "${2:?tier}" ;;
   seed) cmd_seed "${2:-}" ;;
   _run-chrome) run_chrome ;;
   _run-obscura) run_obscura ;;

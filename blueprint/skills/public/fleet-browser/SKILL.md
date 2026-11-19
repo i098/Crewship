@@ -25,6 +25,11 @@ Never wait for the owner or his Mac to clear a Turnstile; climb the ladder.
 
 Use a fallback tier for one task with `eval "$(fleet-browser env chrome)"`. It sets a separate axi session, so it does not collide with the default.
 
+## Owner notice
+
+`fleet-browser env` and `fleet-browser up` text the owner once per 30 minutes for each agent and browser: the browser, your purpose and the open tabs in each browser.
+Set `FLEET_BROWSER_AGENT` to your name and `FLEET_BROWSER_PURPOSE` to one short line first. A failed text never stops the browser.
+
 ## Session sync
 
 One canonical cookie jar (`~/.fleet-browser/cookies.json`) converges across the tiers every 2 minutes and on every `up`.
