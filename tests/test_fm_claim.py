@@ -3,7 +3,6 @@ import shutil
 import subprocess
 
 import yaml
-
 from test_imessage import ROOT
 
 
