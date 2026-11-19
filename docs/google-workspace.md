@@ -52,8 +52,10 @@ The export is an `authorized_user` JSON: the client ID and secret plus the refre
 export GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file
 export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<label>"
 export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$GOOGLE_WORKSPACE_CLI_CONFIG_DIR/credentials.json"
-exec gws "$@"
+exec bun "$HOME/code-factory/tools/mail-read-notice/read.ts" "$@"
 ```
+
+The wrapper runs `gws` unchanged; only Gmail calls that return one mail (`messages get`, `threads get` and `messages attachments get`) are buffered, other calls, including `list`, stream straight through with no notice. After such a call succeeds, it texts the owner one line through `fm-imessage` (without waiting for the bridge): the agent (`MAIL_READ_AGENT`), the mail sender ("unknown sender" when the output has no headers, such as `format=raw` or attachments), and the purpose (`MAIL_READ_PURPOSE`, "not given" when unset). The text never holds the subject, body, a link or any sender word with a digit. Do not put a code in the agent or purpose. A failed text does not fail the read. `MAIL_READ_SEND` replaces the send command.
 
 Check each account with read-only calls:
 
