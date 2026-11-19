@@ -12,31 +12,39 @@ export function clean(s: string): string {
 
 export function isMessageRead(args: string[]): boolean {
   const i = args.indexOf("gmail")
-  return i >= 0 && args[i + 1] === "users" && args[i + 2] === "messages" && args[i + 3] === "get"
+  if (i < 0 || args[i + 1] !== "users") return false
+  const [res, a, b] = args.slice(i + 2)
+  return ((res === "messages" || res === "threads") && (a === "get" || a === "list")) || (res === "messages" && a === "attachments" && b === "get")
 }
 
 export function notice(out: string, agent: string, purpose: string): string {
   let h: Record<string, string> = {}
   try {
-    const headers: { name: string; value: string }[] = JSON.parse(out)?.payload?.headers ?? []
+    const j = JSON.parse(out)
+    const headers: { name: string; value: string }[] = (j?.payload ?? j?.messages?.[0]?.payload)?.headers ?? []
     h = Object.fromEntries(headers.map(x => [String(x.name).toLowerCase(), String(x.value)]))
   } catch {}
   const from = h.from ? clean(h.from) : "unknown sender"
-  const subject = h.subject ? clean(h.subject) : "no subject"
-  return `Mail read: ${agent.trim() || "an agent"} read mail from ${from}, subject "${subject}". Purpose: ${purpose.trim() || "not given"}.`
+  return `Mail read: ${agent.trim() || "an agent"} read mail from ${from}. Purpose: ${purpose.trim() || "not given"}.`
 }
 
 if (import.meta.main) {
   const args = process.argv.slice(2)
-  const p = Bun.spawn(["gws", ...args], { stdin: "inherit", stdout: "pipe", stderr: "inherit" })
-  const out = await new Response(p.stdout).text()
+  const read = isMessageRead(args)
+  const p = Bun.spawn(["gws", ...args], { stdin: "inherit", stdout: read ? "pipe" : "inherit", stderr: "inherit" })
+  const bytes = read ? new Uint8Array(await new Response(p.stdout).arrayBuffer()) : new Uint8Array()
   const code = await p.exited
-  process.stdout.write(out)
-  if (code === 0 && isMessageRead(args)) {
+  if (read) process.stdout.write(bytes)
+  if (code === 0 && read) {
     try {
-      const text = notice(out, process.env.MAIL_READ_AGENT ?? "", process.env.MAIL_READ_PURPOSE ?? "")
+      const text = notice(new TextDecoder().decode(bytes), process.env.MAIL_READ_AGENT ?? "", process.env.MAIL_READ_PURPOSE ?? "")
       const cmd = (process.env.MAIL_READ_SEND ?? "fm-imessage").split(" ")
-      const s = Bun.spawn(["timeout", "15", ...cmd], { stdin: new Blob([text]), stdout: "ignore", stderr: "ignore" })
+      const s = Bun.spawn(["timeout", "15", ...cmd], {
+        stdin: new Blob([text]),
+        stdout: "ignore",
+        stderr: "ignore",
+        env: { ...process.env, FM_IMESSAGE_WAIT_S: "0" },
+      })
       await s.exited
     } catch {} // a failed notice never fails the read
   }

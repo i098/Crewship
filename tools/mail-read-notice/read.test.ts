@@ -6,21 +6,28 @@ import { clean, isMessageRead, notice } from "./read.ts"
 
 const msg = (from: string, subject: string) => JSON.stringify({ snippet: "code 482913", payload: { headers: [{ name: "From", value: from }, { name: "Subject", value: subject }] } })
 
-test("notice names agent, sender, subject and purpose, and never the code or a link", () => {
-  const t = notice(msg("Acme <no-reply@acme.com>", "Your code is 482913 https://acme.com/v?t=abc"), "builder-three", "finish the Acme sign-in")
+test("notice names agent, sender and purpose, and never the subject, code or a link", () => {
+  const t = notice(msg("Acme <no-reply@acme.com>", "Your code is KQZPLM https://acme.com/v?t=abc"), "builder-three", "finish the Acme sign-in")
   expect(t).toContain("builder-three")
   expect(t).toContain("Acme <no-reply@acme.com>")
   expect(t).toContain("finish the Acme sign-in")
-  expect(t).not.toMatch(/\d|https?:|acme\.com\/v/)
+  expect(t).not.toMatch(/KQZPLM|\d|https?:|acme\.com\/v/)
 })
 
 test("a read with no purpose says so", () => {
   expect(notice(msg("a@b.co", "hi"), "x", "")).toContain("Purpose: not given.")
 })
 
-test("only a Gmail message get counts as a read", () => {
-  expect(isMessageRead(["gmail", "users", "messages", "get", "--params", "{}"])).toBe(true)
-  expect(isMessageRead(["gmail", "users", "getProfile"])).toBe(false)
+test("every Gmail call that returns mail content counts as a read", () => {
+  const g = (...a: string[]) => isMessageRead(["gmail", "users", ...a, "--params", "{}"])
+  for (const c of [["messages", "get"], ["messages", "list"], ["threads", "get"], ["threads", "list"], ["messages", "attachments", "get"]]) expect(g(...c)).toBe(true)
+  expect(g("getProfile")).toBe(false)
+  expect(g("messages", "send")).toBe(false)
+})
+
+test("a thread read takes the sender from its first message", () => {
+  const t = JSON.stringify({ messages: [{ payload: { headers: [{ name: "From", value: "a@b.co" }] } }] })
+  expect(notice(t, "x", "y")).toContain("from a@b.co")
 })
 
 test("long subjects are cut", () => {

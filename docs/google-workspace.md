@@ -55,7 +55,7 @@ export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$GOOGLE_WORKSPACE_CLI_CONFIG_DIR/c
 exec bun "$HOME/code-factory/tools/mail-read-notice/read.ts" "$@"
 ```
 
-The wrapper runs `gws` unchanged. After each `gmail users messages get` that succeeds, it texts the owner one line through `fm-imessage`: the agent (`MAIL_READ_AGENT`), the mail sender and subject, and the purpose (`MAIL_READ_PURPOSE`, "not given" when unset). Agents set both before they read mail. The text never holds the body, a link or any word with a digit, so a sign-in code cannot reach it. A failed text does not fail the read. `MAIL_READ_SEND` replaces the send command.
+The wrapper runs `gws` unchanged; only Gmail calls that return mail content (`messages` or `threads` `get`/`list`, and `messages attachments get`) are buffered, other calls stream straight through. After such a call succeeds, it texts the owner one line through `fm-imessage` (without waiting for the bridge): the agent (`MAIL_READ_AGENT`), the mail sender ("unknown sender" when the output has no headers, such as `format=raw` or attachments), and the purpose (`MAIL_READ_PURPOSE`, "not given" when unset). The text never holds the subject, body, a link or any sender word with a digit. Do not put a code in the agent or purpose. A failed text does not fail the read. `MAIL_READ_SEND` replaces the send command.
 
 Check each account with read-only calls:
 
