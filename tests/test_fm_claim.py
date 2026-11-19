@@ -1,4 +1,5 @@
 """The supervisor's duplicate guard: fm-claim, installed by the ansible task exactly as the host gets it."""
+
 import shutil
 import subprocess
 
@@ -15,8 +16,14 @@ def installed(tmp_path):
 
 
 def claim(cmd, claims, actor, *args):
-    env = {"PATH": "/usr/bin:/bin:" + shutil.which("bun").rsplit("/", 1)[0], "FM_IMESSAGE_CLAIMS": str(claims), "FM_CLAIM_ACTOR": actor}
-    return subprocess.run([str(cmd), *args], env=env, capture_output=True, text=True, timeout=30).returncode
+    env = {
+        "PATH": "/usr/bin:/bin:" + shutil.which("bun").rsplit("/", 1)[0],
+        "FM_IMESSAGE_CLAIMS": str(claims),
+        "FM_CLAIM_ACTOR": actor,
+    }
+    return subprocess.run(
+        [str(cmd), *args], env=env, capture_output=True, text=True, timeout=30
+    ).returncode
 
 
 def test_installed_fm_claim_lets_only_one_actor_take_an_owner_text(tmp_path):
