@@ -1,0 +1,177 @@
+#!/bin/bash
+# Ring the owner's phone with a spoken message (Twilio Calls API, inline TwiML) when a text is not enough.
+# Usage: fm-call --class prod|money|deadline|asked [--incident ID] [--deadline-at EPOCH] [--named-quiet] [--dry-run] [--] 'one-line reason'
+#        fm-call --self-test
+# Rule (proposed in data/call-captain-plan/report.md; the owner has not yet approved the classes or limits):
+#   prod, money : 1 text, then 10 min with no answer, then ring.      deadline: 2 texts, then 15 min, then ring.   asked: ring at once.
+#   Rate limit  : 2 rings per incident (5 min apart); 3 incidents per 24 h; 30 min between incidents. Over the limit: text only.
+#   Quiet hours : 00:00-08:00 Pacific. prod and money ring. deadline rings only with --deadline-at before 08:00.
+#                 asked rings only with --named-quiet (he named a time in quiet hours). Anything else waits as a text.
+#   Stop switch : `touch ~/.local/state/fm-call/stop` (he texts "no calls"); `rm` it when he says calls are fine again.
+# --incident ID is required except for class asked. Each call decides once and returns: re-run later to follow up.
+# Exit: 0 rang, 3 not rung (text sent, wait, limited or quiet hours: reason on stderr), 4 stop switch on, 5 call failed, 2 usage or setup error.
+# Pager backup: when a ring ends unanswered (Twilio no-answer, busy, canceled, failed, or answered by voicemail or fax), one Bark page per incident goes out with
+#   level=critical, which breaks through silent mode on iPhone. An answered call sends none; no ring, no page. No BARK_DEVICE_KEY: a warning, no page.
+# Keys (names only, in $SECRETS_FILE, default ~/super.env): TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM PERSONAL_PHONE BARK_DEVICE_KEY (pager, optional).
+# Test hooks: FM_CALL_TWILIO_URL, FM_CALL_BARK_URL, FM_CALL_POLL (seconds between status checks, default 3).
+# Log: ~/.local/state/fm-call/log, tab-separated "epoch class incident event"; event is text, ring, page, limited or quiet. The gate reads it.
+STATE=${FM_CALL_STATE:-$HOME/.local/state/fm-call}
+LOG=$STATE/log STOP=$STATE/stop
+TZ_Q=America/Los_Angeles
+SAY=${FM_CALL_IMESSAGE:-fm-imessage}
+fail() { echo "fm-call: $1" >&2; exit 2; }
+
+# gate: decide from the log. Prints "ring", "text WHY" (send a text, then stop), "wait WHY", "limited WHY" or "quiet WHY".
+# Reads: CLASS INCIDENT DEADLINE NAMED_QUIET NOW LOG STOP.
+gate() {
+  [ -e "$STOP" ] && { echo "stop stop switch is on"; return; }
+  local h need wait_s texts last rings lastring recent lastinc
+  h=$(TZ=$TZ_Q date -d "@$NOW" +%H); h=$((10#$h))
+  if [ "$h" -lt 8 ]; then
+    case $CLASS in
+      prod|money) ;;
+      deadline) [ -n "$DEADLINE" ] && [ "$DEADLINE" -lt "$(TZ=$TZ_Q date -d "$(TZ=$TZ_Q date -d "@$NOW" +%F) 08:00" +%s)" ] || { echo "quiet deadline does not end before 08:00"; return; } ;;
+      asked) [ "$NAMED_QUIET" = 1 ] || { echo "quiet no quiet-hours time was named"; return; } ;;
+    esac
+  fi
+  case $CLASS in prod|money) need=1 wait_s=600 ;; deadline) need=2 wait_s=900 ;; asked) need=0 wait_s=0 ;; esac
+  read -r texts last < <(awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="text" {n++; l=$1} END {print n+0, l+0}' "$LOG" 2>/dev/null || echo "0 0")
+  [ "${texts:-0}" -ge "$need" ] || { echo "text $((texts + 1)) of $need before a ring"; return; }
+  [ "$need" -eq 0 ] || [ $((NOW - last)) -ge "$wait_s" ] || { echo "wait $((wait_s - NOW + last)) s since the last text"; return; }
+  read -r rings lastring < <(awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="ring" {n++; l=$1} END {print n+0, l+0}' "$LOG" 2>/dev/null || echo "0 0")
+  [ "$rings" -lt 2 ] || { echo "limited 2 rings already made for this incident"; return; }
+  if [ "$rings" -eq 1 ]; then
+    [ $((NOW - lastring)) -ge 300 ] && echo ring || echo "wait $((300 - NOW + lastring)) s since the first ring"
+    return
+  fi
+  # a new incident: count other incidents with a first ring in the last 24 h, and the newest one
+  read -r recent lastinc < <(awk -F'\t' -v i="$INCIDENT" -v t="$((NOW - 86400))" '$4=="ring" && $3!=i && $1>=t && !($3 in s) {s[$3]=1; n++; if ($1>l) l=$1} END {print n+0, l+0}' "$LOG" 2>/dev/null || echo "0 0")
+  [ "$recent" -lt 3 ] || { echo "limited 3 incidents in 24 h already rang"; return; }
+  [ "$recent" -eq 0 ] || [ $((NOW - lastinc)) -ge 1800 ] || { echo "limited another incident rang less than 30 min ago"; return; }
+  echo ring
+}
+
+self_test() {
+  local d fails=0 t0 got
+  d=$(mktemp -d) || exit 2
+  STATE=$d LOG=$d/log STOP=$d/stop
+  t0=$(TZ=$TZ_Q date -d '2026-11-18 14:00' +%s) # 14:00 Pacific, outside quiet hours
+  check() { # name want [setup: log lines on stdin]
+    : > "$LOG"; cat >> "$LOG"; got=$(gate); got=${got%% *}
+    [ "$got" = "$2" ] && echo "ok   $1" || { echo "FAIL $1: want $2, got $got"; fails=$((fails + 1)); }
+  }
+  NOW=$t0 CLASS=prod INCIDENT=a DEADLINE= NAMED_QUIET=0
+  check "prod, no text yet"            text </dev/null
+  check "prod, text 5 min ago"         wait < <(printf '%s\tprod\ta\ttext\n' $((NOW - 300)))
+  check "prod, text 11 min ago"        ring < <(printf '%s\tprod\ta\ttext\n' $((NOW - 660)))
+  check "prod, second ring too soon"   wait < <(printf '%s\tprod\ta\ttext\n%s\tprod\ta\tring\n' $((NOW - 900)) $((NOW - 120)))
+  check "prod, second ring after 5 min" ring < <(printf '%s\tprod\ta\ttext\n%s\tprod\ta\tring\n' $((NOW - 900)) $((NOW - 360)))
+  check "prod, third ring refused"     limited < <(printf '%s\tprod\ta\ttext\n%s\tprod\ta\tring\n%s\tprod\ta\tring\n' $((NOW - 2000)) $((NOW - 1500)) $((NOW - 1000)))
+  check "3 incidents in 24 h"          limited < <(printf '%s\tprod\ta\ttext\n' $((NOW - 660)); for i in x y z; do printf '%s\tprod\t%s\tring\n' $((NOW - 7200)) $i; done)
+  check "another incident 10 min ago"  limited < <(printf '%s\tprod\ta\ttext\n%s\tmoney\tb\tring\n' $((NOW - 660)) $((NOW - 600)))
+  check "another incident 2 h ago"     ring < <(printf '%s\tprod\ta\ttext\n%s\tmoney\tb\tring\n' $((NOW - 660)) $((NOW - 7200)))
+  CLASS=deadline
+  check "deadline, no text"            text </dev/null
+  check "deadline, one text"           text < <(printf '%s\tdeadline\ta\ttext\n' $((NOW - 3600)))
+  check "deadline, two texts 10 min"   wait < <(printf '%s\tdeadline\ta\ttext\n%s\tdeadline\ta\ttext\n' $((NOW - 3600)) $((NOW - 600)))
+  check "deadline, two texts 16 min"   ring < <(printf '%s\tdeadline\ta\ttext\n%s\tdeadline\ta\ttext\n' $((NOW - 3600)) $((NOW - 960)))
+  CLASS=asked
+  check "asked rings at once"          ring </dev/null
+  NOW=$(TZ=$TZ_Q date -d '2026-11-18 03:00' +%s) # quiet hours
+  check "asked, quiet, no time named"  quiet </dev/null
+  NAMED_QUIET=1; check "asked, quiet, time named" ring </dev/null; NAMED_QUIET=0
+  CLASS=deadline; texts2=$(printf '%s\tdeadline\ta\ttext\n%s\tdeadline\ta\ttext\n' $((NOW - 3600)) $((NOW - 1800)))
+  check "deadline, quiet, no deadline" quiet <<<"$texts2"
+  DEADLINE=$((NOW + 3600)); check "deadline, quiet, ends 04:00" ring <<<"$texts2"
+  DEADLINE=$((NOW + 6 * 3600)); check "deadline, quiet, ends 09:00" quiet <<<"$texts2"
+  DEADLINE=; CLASS=prod; check "prod rings in quiet hours" ring < <(printf '%s\tprod\ta\ttext\n' $((NOW - 660)))
+  touch "$STOP"; check "stop switch" stop </dev/null
+  rm -rf "$d"; [ $fails -eq 0 ] && echo "self-test passed" || { echo "self-test: $fails failed" >&2; exit 1; }
+}
+
+TWILIO_URL=${FM_CALL_TWILIO_URL:-https://api.twilio.com} BARK_URL=${FM_CALL_BARK_URL:-https://api.day.app}
+CLASS= INCIDENT= DEADLINE= NAMED_QUIET=0 DRY=0 NOW=${FM_CALL_NOW:-$(date +%s)}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) sed -n '2,18p' "$0" | cut -c3-; exit 0 ;;
+    --self-test) self_test; exit ;;
+    --class) CLASS=${2:-}; shift 2 ;;
+    --incident) INCIDENT=${2:-}; shift 2 ;;
+    --deadline-at) DEADLINE=${2:-}; shift 2 ;;
+    --named-quiet) NAMED_QUIET=1; shift ;;
+    --dry-run) DRY=1; shift ;;
+    --) shift; break ;;
+    -*) fail "unknown option $1" ;;
+    *) break ;;
+  esac
+done
+case $CLASS in prod|money|deadline|asked) ;; *) fail "--class must be prod, money, deadline or asked" ;; esac
+[ "$CLASS" = asked ] && : "${INCIDENT:=asked-$NOW}"
+[[ $INCIDENT =~ ^[A-Za-z0-9._-]+$ ]] || fail "--incident ID is required (letters, digits, . _ -)"
+[ -z "$DEADLINE" ] || [[ $DEADLINE =~ ^[0-9]+$ ]] || fail "--deadline-at needs an epoch in seconds"
+[[ $NOW =~ ^[0-9]+$ ]] || fail "FM_CALL_NOW must be an epoch in seconds"
+REASON=$(printf '%s' "$*" | tr -d '\000-\037' | cut -c1-200)
+[ -n "$REASON" ] || fail "a one-line reason is required"
+mkdir -p "$STATE"; touch "$LOG"
+
+decision=$(gate); verb=${decision%% *}; why=${decision#* }
+if [ "$DRY" = 1 ]; then
+  echo "fm-call dry-run: class=$CLASS incident=$INCIDENT decision=$verb ($why)"
+  [ "$verb" = ring ] && echo "would POST api.twilio.com Calls: To=<PERSONAL_PHONE> From=<TWILIO_FROM> Twiml=<Say> Firstmate needs you now. $REASON"
+  exit 0
+fi
+logline() { flock "$LOG" -c "printf '%s\t%s\t%s\t%s\n' '$NOW' '$CLASS' '$INCIDENT' '$1' >> '$LOG'"; }
+text() { "$SAY" --key "call-$INCIDENT-$1" -- "$2" >/dev/null 2>&1; logline text; }
+
+case $verb in
+  stop) echo "fm-call: $why" >&2; exit 4 ;;
+  wait) echo "fm-call: not yet: $why" >&2; exit 3 ;;
+  text) text "$(( $(awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="text"' "$LOG" | wc -l) + 1 ))" "Call pending ($CLASS): $REASON"
+        echo "fm-call: text sent, no ring yet: $why" >&2; exit 3 ;;
+  limited|quiet) logline "$verb"; text "$verb-$NOW" "Not ringing ($why) ($CLASS): $REASON"; echo "fm-call: text only: $why" >&2; exit 3 ;;
+  ring) ;;
+  *) fail "bad gate result: $decision" ;;
+esac
+
+# Wait for call $1 to end. no-answer, busy, canceled and failed are unanswered; so is a completed call that a machine (voicemail) or fax picked up.
+# An incident gets one critical Bark page: a second unanswered ring sends none. A missing key or a failed page is a warning, never an error.
+page_if_unanswered() {
+  local status="" by="" i
+  for ((i = 0; i < 40; i++)); do
+    read -r status by < <(printf 'user = "%s:%s"\n' "$TWILIO_ACCOUNT_SID" "$TWILIO_AUTH_TOKEN" | curl -sS --max-time 30 -K - \
+      "$TWILIO_URL/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls/$1.json" 2>/dev/null | jq -r '[.status // "", .answered_by // ""] | join(" ")' 2>/dev/null)
+    case $status in completed|no-answer|busy|canceled|failed) break ;; esac
+    sleep "${FM_CALL_POLL:-3}"
+  done
+  case $status in
+    no-answer|busy|canceled|failed) ;;
+    completed) case $by in machine_*|fax) status="completed, answered by $by" ;; *) return 0 ;; esac ;;
+    *) echo "fm-call: warning: call $1 status unknown ($status), no page sent" >&2; return 0 ;;
+  esac
+  awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="page" {f=1} END {exit !f}' "$LOG" && { echo "fm-call: call unanswered ($status), incident already paged"; return 0; }
+  [ -n "${BARK_DEVICE_KEY:-}" ] || BARK_DEVICE_KEY=$(grep -m1 '^BARK_DEVICE_KEY=' "${SECRETS_FILE:-$HOME/super.env}" 2>/dev/null | cut -d= -f2- | tr -d '"')
+  [ -n "$BARK_DEVICE_KEY" ] || { echo "fm-call: warning: BARK_DEVICE_KEY is not set, call unanswered and no page sent" >&2; return 0; }
+  local body http
+  body=$(jq -n --arg k "$BARK_DEVICE_KEY" --arg t "Firstmate called you ($CLASS)" --arg b "$REASON" '{device_key: $k, title: $t, body: $b, level: "critical", volume: 10}')
+  http=$(printf '%s' "$body" | curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d @- "$BARK_URL/push" 2>/dev/null)
+  if [ "$http" = 200 ]; then logline page; echo "fm-call: call unanswered ($status), critical page sent"
+  else echo "fm-call: warning: Bark answered HTTP ${http:-none}, no page sent" >&2; fi
+}
+
+for k in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM PERSONAL_PHONE; do
+  [ -n "${!k:-}" ] || export "$k=$(grep -m1 "^$k=" "${SECRETS_FILE:-$HOME/super.env}" 2>/dev/null | cut -d= -f2- | tr -d '"')"
+  [ -n "${!k}" ] || fail "$k is not set"
+done
+[[ $TWILIO_FROM =~ ^\+[0-9]{10,15}$ && $PERSONAL_PHONE =~ ^\+[0-9]{10,15}$ ]] || fail "TWILIO_FROM and PERSONAL_PHONE must be E.164 (+15551234567)"
+[ "$(awk -F'\t' -v i="$INCIDENT" '$3==i && $4=="text"' "$LOG" | wc -l)" -gt 0 ] || text first "Calling you now ($CLASS): $REASON"
+esc=$(printf '%s' "$REASON" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+twiml="<Response><Say voice=\"alice\">Firstmate needs you now. $esc. Read your messages.</Say><Pause length=\"1\"/><Say voice=\"alice\">Again: $esc.</Say></Response>"
+out=$(mktemp)
+code=$(printf 'user = "%s:%s"\n' "$TWILIO_ACCOUNT_SID" "$TWILIO_AUTH_TOKEN" | curl -sS --max-time 30 -K - -o "$out" -w '%{http_code}' \
+  --data-urlencode "To=$PERSONAL_PHONE" --data-urlencode "From=$TWILIO_FROM" --data-urlencode "Twiml=$twiml" --data-urlencode "Timeout=30" --data-urlencode "MachineDetection=Enable" \
+  "$TWILIO_URL/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls.json")
+if [ "$code" = 201 ]; then
+  logline ring; sid=$(jq -r .sid "$out"); rm -f "$out"; echo "fm-call: ringing (call $sid)"
+  page_if_unanswered "$sid"; exit 0
+fi
+echo "fm-call: Twilio answered HTTP $code: $(jq -r '.message // empty' "$out" 2>/dev/null)" >&2; rm -f "$out"; exit 5

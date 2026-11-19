@@ -853,7 +853,7 @@ Apply installs these items:
 
 - the build in `~/.local/share/crewship/imessage/stage/`, with the latest spectrum-ts in `~/.local/share/crewship/imessage/node_modules`, rolled out into a slot by `imessage-deploy.ts`, which gives each slot its own copy of `node_modules`, so a rollback keeps the SDK that the old slot ran with. The one exception is the first rolling install: it snapshots the pre-slot files into `legacy` after the SDK upgrade has already rewritten `node_modules`, so a rollback to `legacy` on that install runs on the new SDK
 - the slot unit `~/.config/systemd/user/fm-imessage@.service` and the front unit `fm-imessage.service`, mode `0600` because they hold the owner's number
-- the commands `fm-imessage` and `fm-location` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
+- the commands `fm-imessage`, `fm-location` and `fm-call` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
 
 The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a drop-in of the slot unit (`systemctl --user edit fm-imessage@.service`) and in the environment of the commands, including `imessage-deploy.ts`, which reads the port only from its own environment. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
 
@@ -895,6 +895,7 @@ To turn it off, remove the block, then run `systemctl --user disable --now fm-im
 | `fm-desk --follow` | Waits for the next desk turn, then prints its session entries live as they are appended (time, role, text; tool calls and results as one-liners) and exits when the turn's final assistant message arrives (stopReason other than toolUse) and nothing follows within `FM_DESK_GRACE` seconds (default 10, so a retry reminder keeps the follow going), or, if none appears, once the file has been quiet for `FM_DESK_SETTLE` seconds (default 60). `fm-desk --loop` then waits for the next turn again. omp is not started and the session file is only read. |
 | `fm-location` | Prints the location that the owner shares with the line in Find My, as JSON. |
 | `fm-location --check` | Prints one line, `ok, age <N> s, accuracy <M> m`, and no coordinates. Use it to prove a read works. On failure both forms print one line to stderr (`fm-location: HTTP <code>: ...`) and exit 1. |
+| `fm-call --class prod\|money\|deadline\|asked [--incident ID] 'reason'` | Rings the owner through Twilio when a text is not enough; `fm-call --help` shows the rules. When the ring ends unanswered (no-answer, busy, canceled, failed, or answered by voicemail or fax), it sends one [Bark](https://bark.day.app) page per incident with `level=critical`, which breaks through silent mode on iPhone. An answered call sends no page. Set `BARK_DEVICE_KEY` (the device key in the Bark app) in the environment or in `~/super.env`. Without it the command warns on stderr and sends no page. |
 
 Use `--` before text that starts with a dash: `fm-imessage -- '- first item'`.
 Place send options before `--`: `fm-imessage --reply 1 --no-thread -- '- first item'`.
