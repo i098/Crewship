@@ -1655,7 +1655,7 @@ function watchStale(id: string) {
     const open = routing.get(id);
     if (stopping || muted() || !open || open.responded) return;
     const minutes = Math.round((Date.now() - open.at!) / 60_000);
-    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}\n${claimLine([id]).trimEnd()}`)) recordRoute({ ids: [id], stale: true });
+    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`, claimLine([id]).trimEnd())) recordRoute({ ids: [id], stale: true });
     else log("stale note")(new Error(id));
   }, STALE_MS);
 }
@@ -1704,9 +1704,8 @@ function flushRoutes() {
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
-        // A firstmate-only text never gets a desk turn, so the desk cannot hold its claim: no claim line.
-        const body = item.firstmate ? item.text : `${item.text}\n${claimLine([item.requestId]).trimEnd()}`;
-        if (!fileNote(item.requestId, `${warning ? `${warning}\n` : ""}${body}`)) throw new Error("the inbox note failed; routing retains the request");
+        // A firstmate-only text never gets a desk turn, so the desk cannot hold its claim: no claim note.
+        if (!fileNote(item.requestId, `${warning ? `${warning}\n` : ""}${item.text}`, item.firstmate ? "" : claimLine([item.requestId]).trimEnd())) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
@@ -1755,14 +1754,15 @@ async function noteMain(requestId: string, text: string, from = "captain via des
   return await proc.exited === 0;
 }
 
-// Files a Firstmate inbox note; true when the inbox took it.
-function fileNote(requestId: string, text: string): boolean {
+// Files a Firstmate inbox note; true when the inbox took it. The claim instruction rides in the header bracket,
+// so it reaches Firstmate with the text in one note and the owner's text stays the whole body.
+function fileNote(requestId: string, text: string, claim = ""): boolean {
   if (stopping) return false;
-  const note = Bun.spawnSync(
-    [INBOX, "note", "--request-id", requestId, "--", `[iMessage from the owner; answer with fm-imessage] ${text}`],
+  const head = `[iMessage from the owner; answer with fm-imessage${claim ? `; ${claim.replace(/\s*\n\s*/g, " ")}` : ""}]`;
+  return Bun.spawnSync(
+    [INBOX, "note", "--request-id", requestId, "--", `${head} ${text}`],
     { cwd: FM_HOME, env: { ...env, FM_HOME }, timeout: 5000 },
-  );
-  return note.exitCode === 0;
+  ).exitCode === 0;
 }
 
 // Tries the attachments of his message again; once all are saved, files its note again with their paths.
