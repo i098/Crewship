@@ -70,13 +70,13 @@ impl Watch {
         pacific_hour >= QUIET_END_HOUR || accel > self.threshold * EXTREME
     }
 
-    /// One tick: sample, decide, send. A failed send leaves the cooldown unset so the next tick retries.
+    /// One tick: sample, decide, send. A failed send restores the earlier rate and leaves the cooldown unset, so the next tick sees the same jump and retries.
     fn tick(
         &mut self,
         tokens: u64,
         secs: f64,
         tops: &[(String, u64)],
-        quota: &[String],
+        quota: impl FnOnce() -> Vec<String>,
         clock: &dyn Clock,
         sender: &mut dyn Sender,
     ) -> bool {
@@ -86,10 +86,11 @@ impl Watch {
         if !self.due(r.accel, clock.epoch(), clock.pacific_hour()) {
             return false;
         }
-        if sender.send(&card(&r, tops, quota)) {
+        if sender.send(&card(&r, tops, &quota())) {
             self.last_sent = Some(clock.epoch());
             return true;
         }
+        self.prev_rate = Some(r.prev_rate);
         false
     }
 }
@@ -318,12 +319,7 @@ fn main() {
         last = now;
         let mut tops: Vec<_> = per.into_iter().collect();
         tops.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        // Quota is fetched only when a card is due, so check the decision first.
-        let due = watch.prev_rate.is_some_and(|p| {
-            watch.due((tokens as f64 / secs - p) / secs, now, clock.pacific_hour())
-        });
-        let quota = if due { quota_now() } else { vec![] };
-        watch.tick(tokens, secs, &tops, &quota, &clock, &mut sender);
+        watch.tick(tokens, secs, &tops, quota_now, &clock, &mut sender);
     }
 }
 
@@ -381,14 +377,14 @@ mod tests {
             },
         );
         let clock = FakeClock(Cell::new(100_000), 12);
-        assert!(!w.tick(0, 300.0, &[], &[], &clock, &mut s)); // first sample
-        assert!(!w.tick(300 * 100, 300.0, &[], &[], &clock, &mut s)); // accel 0.33 < 200
-        assert!(w.tick(300 * 100_000, 300.0, &[], &[], &clock, &mut s)); // accel ~333
-        assert!(!w.tick(0, 300.0, &[], &[], &clock, &mut s)); // rate falls
-        assert!(!w.tick(300 * 100_000, 300.0, &[], &[], &clock, &mut s)); // still in cooldown
+        assert!(!w.tick(0, 300.0, &[], Vec::new, &clock, &mut s)); // first sample
+        assert!(!w.tick(300 * 100, 300.0, &[], Vec::new, &clock, &mut s)); // accel 0.33 < 200
+        assert!(w.tick(300 * 100_000, 300.0, &[], Vec::new, &clock, &mut s)); // accel ~333
+        assert!(!w.tick(0, 300.0, &[], Vec::new, &clock, &mut s)); // rate falls
+        assert!(!w.tick(300 * 100_000, 300.0, &[], Vec::new, &clock, &mut s)); // still in cooldown
         clock.0.set(100_000 + 3600);
-        assert!(!w.tick(0, 300.0, &[], &[], &clock, &mut s));
-        assert!(w.tick(300 * 100_000, 300.0, &[], &[], &clock, &mut s)); // cooldown over
+        assert!(!w.tick(0, 300.0, &[], Vec::new, &clock, &mut s));
+        assert!(w.tick(300 * 100_000, 300.0, &[], Vec::new, &clock, &mut s)); // cooldown over
         assert_eq!(s.cards.len(), 2);
     }
 
@@ -406,9 +402,12 @@ mod tests {
     fn failed_send_retries_next_tick() {
         let (mut w, mut s) = (watch(), FakeSender::default());
         let clock = FakeClock(Cell::new(1), 12);
-        w.tick(0, 300.0, &[], &[], &clock, &mut s);
-        assert!(!w.tick(300 * 100_000, 300.0, &[], &[], &clock, &mut s));
+        w.tick(0, 300.0, &[], Vec::new, &clock, &mut s);
+        assert!(!w.tick(300 * 100_000, 300.0, &[], Vec::new, &clock, &mut s));
         assert!(w.last_sent.is_none());
+        s.ok = true;
+        assert!(w.tick(300 * 100_000, 300.0, &[], Vec::new, &clock, &mut s));
+        assert_eq!(s.cards.len(), 2);
     }
 
     #[test]
