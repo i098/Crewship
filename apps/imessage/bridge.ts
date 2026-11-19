@@ -49,7 +49,7 @@ import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { type Action, collectSessions, rateLimit, StuckWatch } from "./stuck-watch.ts";
 import { paneIO } from "./desk-pane.ts";
 import { listScripts, runScript } from "./desk-scripts.ts";
-import { claim, claimsDir } from "./desk-claim.ts";
+import { claim, claimHolder, claimsDir, deskActions } from "./desk-claim.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -1655,7 +1655,7 @@ function watchStale(id: string) {
     const open = routing.get(id);
     if (stopping || muted() || !open || open.responded) return;
     const minutes = Math.round((Date.now() - open.at!) / 60_000);
-    if (fileNote(`stale-${id}`, `${claimLine([id])}\n(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
+    if (fileNote(`stale-${id}`, `${claimLine([id])}(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
     else log("stale note")(new Error(id));
   }, STALE_MS);
 }
@@ -1704,7 +1704,7 @@ function flushRoutes() {
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
-        if (!fileNote(item.requestId, `${claimLine([item.requestId])}\n${warning ? `${warning}\n` : ""}${item.text}`)) throw new Error("the inbox note failed; routing retains the request");
+        if (!fileNote(item.requestId, `${claimLine([item.requestId])}${warning ? `${warning}\n` : ""}${item.text}`)) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
@@ -1737,7 +1737,12 @@ async function noteText(message: LineMessage) {
 }
 
 function claimLine(ids: readonly string[]): string {
-  return ids.map((id) => `Before you act, run: fm-claim msg ${id}. On exit code 3, stop: the desk already acted.`).join("\n");
+  const dir = claimsDir({ ...env, STATE_DIRECTORY: STATE });
+  return ids.map((id) => {
+    if (claimHolder(dir, "msg", id) !== "desk") return `Before you act, run: fm-claim msg ${id}. On exit code 3, stop: the desk already acted.\n`;
+    const done = deskActions(dir, id);
+    return `The desk already acted on owner text ${id}${done.length ? `: ${done.join("; ")}` : ""}. Do not repeat it. Only answer the owner.\n`;
+  }).join("");
 }
 
 // An inbox note for Firstmate. The default sender is a background desk task, which waits for the answer file, not for fm-imessage.

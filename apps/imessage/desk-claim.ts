@@ -1,7 +1,7 @@
 // The duplicate guard. One claim is one file made with an exclusive create (`wx`), so two actors that race get exactly one winner,
 // and the claim stays on disk through a bridge restart. A claim is never released: a crash after the claim loses the action, never repeats it.
 // The desk takes claims in desk-actions.ts; the supervisor runs `fm-claim` (fm-claim, next to this file) before it acts on an owner text.
-import { closeSync, fsyncSync, openSync, readFileSync, writeSync, mkdirSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readdirSync, readFileSync, writeSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 export type Actor = "desk" | "firstmate";
@@ -20,6 +20,23 @@ export function claim(dir: string, kind: Kind, key: string, actor: Actor): boole
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     return kind === "msg" && readFileSync(path, "utf8").split("\n")[0] === actor;
   }
+}
+
+// What the desk already did for owner text `id`: one "tool path" per act claim it holds ([] when the desk holds none).
+export function deskActions(dir: string, id: string): string[] {
+  const done: string[] = [];
+  if (claimHolder(dir, "msg", id) !== "desk") return done;
+  let names: string[] = [];
+  try { names = readdirSync(dir).filter((n) => n.startsWith("act-")); } catch { return done; }
+  for (const name of names) {
+    const [actor, ids, tool, path] = readFileSync(`${dir}/${name}`, "utf8").split("\n");
+    if (actor === "desk" && ids?.split(",").includes(id)) done.push(`${tool} ${path}`);
+  }
+  return done;
+}
+
+export function claimHolder(dir: string, kind: Kind, key: string): Actor | undefined {
+  try { return readFileSync(`${dir}/${kind}-${createHash("sha256").update(key).digest("hex")}`, "utf8").split("\n")[0] as Actor; } catch { return undefined; }
 }
 
 export function claimsDir(env: Record<string, string | undefined>): string {

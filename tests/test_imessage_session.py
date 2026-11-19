@@ -303,6 +303,20 @@ def test_task_delegated_after_the_desk_claimed_the_text_does_not_tell_firstmate_
     assert held.returncode == 3  # why the note must not tell Firstmate to run it
 
 
+def test_handoff_after_the_desk_wrote_a_file_names_the_action_and_has_no_stop_line(tmp_path):
+    message, claims, skills = tmp_path / "task-message", tmp_path / "claims", tmp_path / "skills"
+    skills.mkdir()
+    with session_rig(tmp_path, FM_IMESSAGE_CLAIMS=str(claims), FM_IMESSAGE_DESK_SKILLS=str(skills)) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\n[ -e {shlex.quote(str(message))} ] || printf "%s" "$5" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", f"WRITESTUB {skills}/notes/SKILL.md STATUSLINE")
+        wait_for(lambda: message.exists(), "the handoff note", timeout=120)
+    note = read_text(message)
+    assert f"write_file {skills}/notes/SKILL.md" in note and "Only answer the owner" in note
+    assert "fm-claim" not in note
+
+
 def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_path):
     ids = tmp_path / "note-ids"
     with session_rig(tmp_path) as rig:

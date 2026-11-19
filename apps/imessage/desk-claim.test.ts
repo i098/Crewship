@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { claim } from "./desk-claim.ts";
+import { claim, claimHolder, deskActions } from "./desk-claim.ts";
 import { createActions, type ActionHost } from "./desk-actions.ts";
 import type { RelayRequest } from "./relay.ts";
 
@@ -69,6 +69,17 @@ test("a down transport burns no claim: the retry sends the file once", async () 
   expect(a.sent).toEqual(["p.png"]);
   await expect(a.run("send_file", { path: `${files}/p.png` })).rejects.toThrow("already took");
   expect(a.sent).toEqual(["p.png"]);
+}, 60_000);
+
+test("what the desk already did for a text is readable from its claims", async () => {
+  const dir = `${tmp}/c7`;
+  const a = desk(dir, ["save it"]);
+  expect(deskActions(dir, "m1")).toEqual([]);
+  await a.run("write_file", { path: `${skills}/seven/SKILL.md`, content: "# seven" });
+  expect(deskActions(dir, "m1")).toEqual([`write_file ${skills}/seven/SKILL.md`]);
+  expect(deskActions(dir, "other")).toEqual([]);
+  expect(claimHolder(dir, "msg", "m1")).toBe("desk");
+  expect(claimHolder(dir, "msg", "other")).toBeUndefined();
 }, 60_000);
 
 test("claim races have one winner", async () => {

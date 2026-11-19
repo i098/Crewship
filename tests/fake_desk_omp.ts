@@ -59,6 +59,11 @@ const scripts: [hit: (texts: string, message: string) => boolean, run: (texts: s
   }],
   [(t) => t.includes("HANDOFF"), () => call("handoff_main", { reason: "fake handoff" })],
   [(t) => t.includes("Never give time estimates"), () => call("handoff_main", { text: "Got it, passing that to Firstmate." })],
+  [(t, m) => /WRITESTUB (\S+)/.test(t) && !reminded(m), async (t) => {
+    await call("write_file", { path: /WRITESTUB (\S+)/.exec(t)![1], content: "x" });
+    stubborn = "working: cf-x on tests";
+    say(stubborn);
+  }],
   [(t) => /WRITEFILE (\S+)/.test(t), async (t) => {
     await call("write_file", { path: /WRITEFILE (\S+)/.exec(t)![1], content: "x" });
     return call("delegate_task", { target: "firstmate" });
