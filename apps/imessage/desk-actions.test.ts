@@ -327,10 +327,9 @@ test("run_script reports a timeout and refuses a protected request", async () =>
 
 test("reply refuses a completed-action claim when no action tool ran in the turn", async () => {
   const h = host(["which smart plug is best?"]);
-  await expect(h.run("reply", { text: "The Kasa plug is the pick, ordered via Amazon Prime." })).rejects.toThrow("no action tool succeeded");
-  await expect(h.run("handoff_main", { text: "Ordered it.", reason: "x" })).rejects.toThrow("no action tool succeeded");
-  await h.run("run_script", {}); // listing scripts is no action
-  await expect(h.run("reply", { text: "Sent." })).rejects.toThrow("no action tool succeeded");
+  await expect(h.run("reply", { text: "The Kasa plug is the pick, ordered via Amazon Prime." })).rejects.toThrow("no desk tool can do that");
+  await expect(h.run("handoff_main", { text: "Ordered it.", reason: "x" })).rejects.toThrow("no desk tool can do that");
+  await expect(h.run("reply", { text: "Sent." })).rejects.toThrow("did not succeed");
   expect(h.calls).toEqual([]);
   expect(h.acted()).toBe(false);
   expect(await h.run("reply", { text: "I recommend the Kasa plug. Say the word and Firstmate orders it." })).toContain("turn is over");
@@ -341,4 +340,26 @@ test("reply may claim a send after message_mate succeeded in the same turn", asy
   await h.run("message_mate", { mate: "mate1", text: "rerun checks" });
   expect(await h.run("reply", { text: "Sent to mate1." })).toContain("turn is over");
   expect(h.calls.at(-1)).toEqual(["reply", ["Sent to mate1."], 1]);
+});
+
+test("reply refuses a send claim after a script that timed out or exited non-zero", async () => {
+  const failed = host(["send the report"], { script: async () => ({ code: 1, timedOut: false, output: "boom" }) });
+  expect(await failed.run("run_script", { name: "send-report" })).toBe("exit 1\nboom");
+  await expect(failed.run("reply", { text: "Sent." })).rejects.toThrow("did not succeed");
+  const slow = host(["send the report"], { script: async () => ({ code: null, timedOut: true, output: "" }) });
+  await slow.run("run_script", { name: "send-report" });
+  await expect(slow.run("reply", { text: "Sent." })).rejects.toThrow("did not succeed");
+});
+
+test("a successful message_mate does not unlock an order claim", async () => {
+  const h = host(["which smart plug is best?"]);
+  await h.run("message_mate", { mate: "mate1", text: "look it up" });
+  await expect(h.run("reply", { text: "The Kasa plug is the pick, ordered via Amazon Prime." })).rejects.toThrow("no desk tool can do that");
+});
+
+test("reply refuses noun-first claims but not the owner's own past acts", async () => {
+  for (const text of ["Order placed.", "I placed the order for the plug.", "Done, it is on its way."]) {
+    await expect(host(["x"]).run("reply", { text })).rejects.toThrow("no desk tool can do that");
+  }
+  expect(await host(["x"]).run("reply", { text: "Check the email you sent yesterday." })).toContain("turn is over");
 });
