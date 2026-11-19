@@ -55,7 +55,7 @@ Thresholds use `crewship_storage_guard_*` in `blueprint/ansible/group_vars/all/f
 
 | Tier | Trigger (default) | Action |
 | --- | --- | --- |
-| FILL | Growth projects a full filesystem within six hours, at or above 70% used | Alert before reclaim, including below WARN; repeat at most every 30 minutes. Silent while a CRIT episode is already alerted: only the CRIT reminder repeats. |
+| FILL | Growth projects a full filesystem within six hours, at or above 70% used | Alert before reclaim, including below WARN; repeat at most every 30 minutes. Silent at or above CRIT while that CRIT episode is already alerted: only the CRIT reminder repeats. |
 | WARN | 85% used | Alert once per filesystem and episode; re-arm below 82%. |
 | CRIT | 92% used | Alert first, then reclaim only eligible worktree output and Docker data; one alert per episode, repeated after 24 hours (`crewship_storage_guard_crit_remind_min`) while it stays open. The episode ends when usage falls below CRIT minus the hysteresis. |
 
