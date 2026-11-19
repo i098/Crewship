@@ -131,3 +131,13 @@ test("send_file sends a png once and refuses other types", async () => {
   await expect(a.run("send_file", { path: `${files}/shot.png` })).rejects.toThrow("another actor or an earlier call");
   expect(a.sent).toEqual(["shot.png"]);
 }, 60_000);
+
+test("reply may claim a send after send_file succeeded, not after a refused one", async () => {
+  const a = desk(`${tmp}/l6`, ["show me"], { sent: () => false, log: () => {}, reply: () => {}, replies: () => 0 } as Partial<ActionHost>);
+  writeFileSync(`${files}/pic.png`, "x");
+  writeFileSync(`${files}/pic.pdf`, "x");
+  await expect(a.run("send_file", { path: `${files}/pic.pdf` })).rejects.toThrow("images only");
+  await expect(a.run("reply", { text: "Sent." })).rejects.toThrow("did not succeed");
+  await a.run("send_file", { path: `${files}/pic.png` });
+  expect(await a.run("reply", { text: "Sent the picture." })).toContain("turn is over");
+}, 60_000);
