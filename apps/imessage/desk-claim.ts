@@ -1,3 +1,41 @@
+// The duplicate guard. One claim is one file made with an exclusive create (`wx`), so two actors that race get exactly one winner,
+// and the claim stays on disk through a bridge restart. A claim is never released: a crash after the claim loses the action, never repeats it.
+// The desk takes claims in desk-actions.ts; the supervisor calls `fm-claim` (the same file, below) before it acts on an owner text.
+import { closeSync, fsyncSync, openSync, readFileSync, writeSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+export type Actor = "desk" | "firstmate";
+// "msg": the owner text with that id. The actor that holds it may take it again (a later tool call in its own turn); the other actor may not.
+// "act": one action key. Strict: nobody takes it twice, not even the same actor.
+export type Kind = "msg" | "act";
+
+export function claim(dir: string, kind: Kind, key: string, actor: Actor): boolean {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = `${dir}/${kind}-${createHash("sha256").update(key).digest("hex")}`;
+  try {
+    const fd = openSync(path, "wx", 0o600);
+    try { writeSync(fd, `${actor}\n${key}\n`); fsyncSync(fd); } finally { closeSync(fd); }
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    return kind === "msg" && readFileSync(path, "utf8").split("\n")[0] === actor;
+  }
+}
+
+export function claimsDir(env: Record<string, string | undefined>): string {
+  return env.FM_IMESSAGE_CLAIMS || `${env.STATE_DIRECTORY || `${env.HOME}/.local/state/fm-imessage`}/claims`;
+}
+
+// fm-claim msg|act KEY...   exit 0: yours, act. Exit 3: held by the other actor, stop and do nothing. Actor: FM_CLAIM_ACTOR, default firstmate.
+if (import.meta.main) {
+  const [kind, ...key] = Bun.argv.slice(2);
+  if ((kind !== "msg" && kind !== "act") || !key.length) { console.error("usage: fm-claim msg|act KEY..."); process.exit(2); }
+  const actor = process.env.FM_CLAIM_ACTOR === "desk" ? "desk" : "firstmate";
+  const ok = claim(claimsDir(process.env), kind, key.join(" "), actor);
+  console.log(ok ? "claimed" : "held: another actor has this; stop and do nothing");
+  process.exit(ok ? 0 : 3);
+}
+
 // The desk may not tell the owner that an action is done unless a tool that can do that kind of action succeeded in the same turn.
 // A kind with no tool in its list can never be claimed: no desk tool orders, buys, pays, books or posts.
 // shortcut: a word list, so an unlisted wording slips through and a loose match makes the model reword; upgrade to gating reply text structurally.

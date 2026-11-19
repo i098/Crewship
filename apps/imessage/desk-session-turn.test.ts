@@ -20,7 +20,7 @@ async function sessionArgv(provider: string, model: string): Promise<string[]> {
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => {}, answer: () => {}, react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }),
-    stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {},
+    stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   await turn([request], new AbortController(), () => true);
   const start = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((row) => row.argv);
@@ -60,7 +60,7 @@ test("a background task's answer reaches the next turn as a missed line, the ses
     env: { PATH: `${dir}:${process.env.PATH}` }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
     stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs, render: () => "" } as never,
     memoryIndex: (r) => r.memoryId, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
-    log: () => () => {}, handoff: () => {}, answer: () => {}, react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {},
+    log: () => () => {}, handoff: () => {}, answer: () => {}, react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   const ask = (text: string, id: string) => {
     add("owner", text, id);
@@ -89,7 +89,7 @@ test("delegate_task answers with a queued ack that names no send, then the task 
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts, _target, delegated) => events.push(["answer", parts, delegated]),
     react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, held: () => false,
-    send: async (target, _id, text) => { events.push(["send", target, text.split("\n")[0]]); return true; }, report: () => {}, notice: () => {},
+    send: async (target, _id, text) => { events.push(["send", target, text.split("\n")[0]]); return true; }, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
@@ -110,7 +110,7 @@ test("a delegated thread reply sends the quoted parent bubble, not only the auth
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts, _target, delegated) => events.push(["answer", parts, delegated]),
     react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, held: () => false,
-    send: async (target, _id, text) => { events.push(["send", target, text]); return true; }, report: () => {}, notice: () => {},
+    send: async (target, _id, text) => { events.push(["send", target, text]); return true; }, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   const request: TurnRequest = { requestId: "r1", text: "DELEGATE firstmate\n(this message is a thread reply to the earlier message: \"five graded cards\")", authored: "DELEGATE firstmate", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
@@ -135,7 +135,7 @@ test("a mate delegation acks synchronously with its own text, before the send fi
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => events.push(["handoff"]), answer: (_pending, parts) => events.push(["answer", parts]),
     react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true, held: () => false,
-    send: async (target) => { await gate.promise; events.push(["send", typeof target === "string" ? target : target.id]); return true; }, report: () => {}, notice: () => {},
+    send: async (target) => { await gate.promise; events.push(["send", typeof target === "string" ? target : target.id]); return true; }, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   await turn([{ requestId: "r1", text: "DELEGATE mate1", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" }], new AbortController(), () => true);
   expect(events).toEqual([["answer", ["Your text is queued for mate1 mate: DELEGATE mate1"]]]);
@@ -178,7 +178,7 @@ async function ownerInstruction(report: (events: unknown[][], parts: string[], g
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => events.push(["handoff"]), answer: () => events.push(["answer"]),
     react: () => {}, relay: async () => {}, inbox: async () => ({ status: "", statusOk: true }), stopping: () => false, listed: () => true,
-    send: async () => { events.push(["send"]); return true; }, report: (parts, guid) => report(events, parts, guid), notice: () => {},
+    send: async () => { events.push(["send"]); return true; }, report: (parts, guid) => report(events, parts, guid), notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   const request: TurnRequest = { requestId: "r1", text: "Never give time estimates, just do everything as soon as possible", mateEligible: true, firstmate: false, memoryId: 0, route: "pending" };
   await turn([request], new AbortController(), () => true);
@@ -209,7 +209,7 @@ test("a thread reply to a mate's bubble is relayed to that mate with no model tu
     memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
     log: () => () => {}, handoff: () => relayed.push("handoff"), answer: () => {}, react: () => {},
     relay: async (items, mate) => { relayed.push(`${mate.id}:${items.map((r) => r.requestId)}`); }, inbox: async () => ({ status: "", statusOk: true }),
-    stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {},
+    stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
   });
   const reply = (id: string): TurnRequest => ({ requestId: id, text: "thanks", mateEligible: true, firstmate: false, memoryId: 0, route: "pending", threadMate: "engram" });
   await turn([reply("r1")], new AbortController(), () => true);

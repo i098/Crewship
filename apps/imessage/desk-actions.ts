@@ -11,6 +11,8 @@ import { helperKind, helperMayAct, type HelperKind } from "./desk-helper.ts";
 import { deskMayAct, relayTarget, type RelayRequest } from "./relay.ts";
 import { keysTo, parsePrompt, promptList, promptRefusal, type PanePrompt } from "./desk-pane.ts";
 import { SCRIPT_MS, type ScriptRun } from "./desk-scripts.ts";
+import type { Actor, Kind } from "./desk-claim.ts";
+import { planSend, planWrite, readFile, writeText, type FileRoots } from "./desk-files.ts";
 
 export const TAPBACKS = ["❤️", "😂", "‼️", "👍"];
 export const TASK_GUID_PREFIX = "task-"; // the outbox guid of a background task's report; memory keeps it as outbox-text-<guid>
@@ -40,9 +42,16 @@ export const HOST_TOOLS: HostTool[] = [
     parameters: { type: "object", properties: { pane: { type: "string" }, prompt: { type: "string" }, option: { type: "integer", minimum: 1 } }, required: ["pane", "prompt", "option"], additionalProperties: false } },
   { name: "run_script", description: `Run one operator script from the allowlisted script directory: no arguments, ${SCRIPT_MS / 1000} s limit, output captured. Call it with no \`name\` to list the scripts. A script about credentials or logins, payments or purchases, or public posts is refused. Does not end your turn; reply after it.`,
     parameters: { type: "object", properties: { name: { type: "string" } }, additionalProperties: false } },
+  { name: "write_file", description: "Write one text file on the host, under the user skills folder or the desk files folder only (an absolute `path`; parent folders are made). Never project files, git checkouts or credential files. Does not end your turn; reply after it. Refused when another actor already did this action.",
+    parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } },
+  { name: "send_file", description: "Send the owner one png, jpg or webp image from the user skills folder or the desk files folder (an absolute `path`; other file types cannot be sent). `to` is as in reply. Does not end your turn; reply after it. Refused when another actor already did this action.",
+    parameters: { type: "object", properties: { path: { type: "string" }, to: { type: "integer", minimum: 1 } }, required: ["path"], additionalProperties: false } },
 ];
 
 export type ActionHost = {
+  roots: FileRoots;
+  claim(kind: Kind, key: string, actor: Actor): boolean; // the durable duplicate guard (desk-claim.ts); false: the other actor, or an earlier call, holds it
+  sendImage(bytes: Uint8Array, name: string, target: number): Promise<void>; // queues the image to the owner; throws when the transport cannot
   requests: readonly RelayRequest[];
   current(): boolean;
   muted(): boolean;
@@ -204,6 +213,37 @@ function delegateTarget(host: ActionHost, id: string): Secondmate | `helper:${He
   return id === "firstmate" ? id : relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
 }
 
+const HELD = "refused: another actor or an earlier call already took this action; stop, do nothing more, and reply";
+
+// The tools that act on the host. Each one takes its claims (the owner texts, then the action) only after its own checks pass and just before its effect.
+function fileTools(host: ActionHost, gate: { live(): void; may(): void }): Record<string, (args: Record<string, unknown>) => string | Promise<string>> {
+  const take = (...action: string[]) => {
+    const ids = host.requests.map((r) => r.requestId);
+    if (!ids.every((id) => host.claim("msg", id, "desk")) || !host.claim("act", [ids.join(","), ...action].join("\n"), "desk")) throw new Error(HELD);
+  };
+  return {
+    write_file: (args) => {
+      gate.live(); gate.may();
+      const { real, text } = planWrite(host.roots, String(args.path), args.content, host.safe);
+      take("write_file", real, text);
+      writeText(real, text);
+      host.remember(`desk wrote ${real} (${text.length} characters)`);
+      return `wrote ${real}`;
+    },
+    send_file: async (args) => {
+      gate.live(); gate.may();
+      const real = planSend(host.roots, String(args.path));
+      const target = args.to === undefined ? host.requests.length : Number(args.to);
+      if (!Number.isInteger(target) || target < 1 || target > host.requests.length) throw new Error(`to must be 1 to ${host.requests.length}`);
+      take("send_file", real);
+      const { bytes, name } = readFile(real);
+      await host.sendImage(bytes, name, target);
+      host.remember(`desk sent ${real}`);
+      return `sent ${name}`;
+    },
+  };
+}
+
 // One runner per turn. `acted()` says whether the turn ended in a reply, tapback, relay or handoff.
 function refuseUnproven(args: Record<string, unknown>, succeeded: ReadonlySet<string>) {
   const why = unprovenClaim(String(args.text), succeeded);
@@ -252,6 +292,8 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
     },
     handoff_main: (args) => {
       open();
+      // The supervisor now owns these texts: a desk action on them is refused from here on, and a text the desk already acted on cannot be handed on.
+      if (!host.requests.every((r) => host.claim("msg", r.requestId, "firstmate"))) throw new Error("refused: the desk already acted on this text; call reply, not handoff_main");
       let ack: ReturnType<typeof replyParts> | undefined;
       if (args.text !== undefined) {
         if (!deskMayAct(host.requests)) throw new Error("refused: this request is protected; call handoff_main with no text");
@@ -275,6 +317,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
       return "queued; whether it was delivered is reported later; your turn is over";
     },
     ...mateTools(host, live, may),
+    ...fileTools(host, { live, may }),
     ...opsTools(host, { live, open, may, end: () => { done = true; } }),
     fleet_status: async () => {
       live(); may();

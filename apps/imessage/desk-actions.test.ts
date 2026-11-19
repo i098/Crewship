@@ -25,6 +25,7 @@ function host(texts: string[], over: Partial<ActionHost> = {}) {
     safe: (text) => text.replaceAll("hunter2", "[REDACTED]"),
     pane: async () => "idle", press: async () => {}, scripts: () => [], script: async () => ({ code: 0, timedOut: false, output: "" }),
     remember: (text) => void calls.push(["remember", text]),
+    roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {},
     ...over,
   };
   return { calls, logged, ...createActions(stub) };

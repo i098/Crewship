@@ -64,7 +64,8 @@ export type SessionHost<R extends TurnRequest> = {
   record(key: string | undefined, text: string): void;
   report(parts: string[], guid: string, origin: R): void; // a text queued on the chat of the request: a background task's answer, or the ack of a handoff
   notice(origin: R | undefined, mate: Secondmate, texts: readonly string[]): void; // the fixed "Sent to" line: direct chat only, never rewritten
-} & Pick<ActionHost, "pane" | "press" | "scripts" | "script" | "remember">;
+  sendImage(bytes: Uint8Array, name: string, origin: R): Promise<void>; // queues an image on the chat of the request, owned by no request
+} & Pick<ActionHost, "pane" | "press" | "scripts" | "script" | "remember" | "roots" | "claim">;
 
 // The newest status lines of a mate: where a marked reply returns to the desk's home.
 function readStatusTail(home: string, id: string) {
@@ -177,6 +178,7 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     const actions = createActions({
       requests: pending, current, muted: host.muted, mates: () => mates, safe, sent: host.sent, log: host.record,
       pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,
+      roots: host.roots, claim: host.claim, sendImage: (bytes, name, target) => host.sendImage(bytes, name, pending[target - 1]!),
       message: async (mate, text) => {
         const sent = await host.message(mate, text);
         if (sent) host.notice(pending.at(-1), mate, [text]);

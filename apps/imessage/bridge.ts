@@ -49,6 +49,7 @@ import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { type Action, collectSessions, rateLimit, StuckWatch } from "./stuck-watch.ts";
 import { paneIO } from "./desk-pane.ts";
 import { listScripts, runScript } from "./desk-scripts.ts";
+import { claim, claimsDir } from "./desk-claim.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -1273,6 +1274,10 @@ async function runHerdr(cmd: string[]): Promise<string> {
 }
 const deskPanes = paneIO(runHerdr, env.FM_IMESSAGE_HERDR_BIN || "herdr");
 const SCRIPTS_DIR = env.FM_IMESSAGE_DESK_SCRIPTS || `${FM_HOME}/desk-scripts`;
+// The desk's file tools (desk-files.ts) reach only these folders. The claims live in the state directory, so a restart keeps them.
+const DESK_FILES = `${STATE}/desk-files`;
+const FILE_ROOTS = { write: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES], read: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES] };
+const CLAIMS = claimsDir({ ...env, STATE_DIRECTORY: STATE });
 
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
@@ -1286,6 +1291,13 @@ const runSessionTurn = createSessionTurn<Routing>({
   pane: deskPanes.read, press: deskPanes.press,
   scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
   remember: (text) => void remember("desk", text),
+  roots: FILE_ROOTS, claim: (kind, key, actor) => claim(CLAIMS, kind, key, actor),
+  sendImage: async (bytes, name, origin) => {
+    if (!lines.some((line) => line.sendImage)) throw new Error("photos need the photon transport, which is not running");
+    const photo = stage(await prepareImage(bytes, name));
+    const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+    outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), image: photo, bubbles: [], deskGeneration, deskSession });
+  },
   ...deskLog(STATE),
   notice: noticeRelay,
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
