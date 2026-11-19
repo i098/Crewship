@@ -36,7 +36,7 @@ export function timeOutTurn(pending: Turn[], controller: AbortController, curren
   return true;
 }
 
-// Typing stays on after a turn only while a desk answer waits for delivery; a handoff or an empty turn ends it.
+// Typing stays on after a turn while a desk answer waits for delivery or Firstmate holds a handoff (a filed handoff is route done); an empty turn ends it.
 export function typingOutlivesTurn(pending: Turn[]) {
-  return pending.some((r) => r.route === "desk" && !!r.out?.bubbles?.length);
+  return pending.some((r) => (r.route === "handoff" || r.route === "done") || (r.route === "desk" && !!r.out?.bubbles?.length));
 }

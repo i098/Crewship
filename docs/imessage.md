@@ -51,7 +51,7 @@ For each message from the owner, the service does these steps:
    Its input combines [desk memory](#desk-memory), durable `fm-inbox.sh status` output, and pending messages.
    Reading status does not request a supervisor answer.
    The desk refreshes typing every four seconds during the model call, delivery lookups, queue waits, and retries.
-   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled, handed off, or discarded.
+   It stops when the transport accepts the first response bubble or the reaction, or when the response is cancelled or discarded; a handoff does not stop it, and the real answer does.
    The service stops refreshes before saving delivery progress, even if that save fails.
    A desk turn that runs past 150 seconds is aborted. If it is still current and no item has routed yet, it is handed off to Firstmate and the owner gets one short delay reply.
    A front model timeout has its own one-line ack; see [V2 front desk](#v2-front-desk).
@@ -137,12 +137,12 @@ For each message from the owner, the service does these steps:
    They never use another chat or transport as a fallback.
    A desk answer confirms requests only in its destination chat; other chats keep their separate handoffs and deadlines.
    A handoff uses `fm-inbox.sh note --request-id`; acceptance means the inbox saved it, not that the supervisor answered.
-   Eight seconds after the latest unanswered request arrives in a direct chat, the bridge stops that chat's typing indicator and hands off its still-unassigned requests.
+   Eight seconds after the latest unanswered request arrives in a direct chat, the bridge hands off its still-unassigned requests.
    The deadline sends the owner nothing: no receipt or fixed text says that the request is saved or unanswered.
    Each direct chat keeps its own deadline, and it fires once per request; messages in another chat do not cancel it.
    Five minutes after a v2 request's route finishes with no answer, the bridge files one more inbox note with key `stale-<request id>`, and records that in the routing log so a restart does not repeat it. It skips a text older than two hours at startup. It sends nothing to the owner.
    A deadline does not count as global Firstmate activity.
-   Active mate delivery does not block a due deadline or keep that chat's typing indicator active.
+   Active mate delivery does not block a due deadline; typing stays on until the real answer goes out.
    A prompt answer leaves nothing to hand off; typing alone does not.
    A queued supervisor response ends the wait only after the transport accepts that response.
    An explicit `--reply N` confirms only its selected message and that message's current edit requests, even with `--no-thread`.
@@ -157,7 +157,7 @@ For each message from the owner, the service does these steps:
    Named keep: synchronous inbox filing remains serial; two stalled commands can block the event loop for about ten seconds.
    This can delay the deadline and typing cleanup beyond eight seconds; their timers resume when filing returns.
    The five-second limit applies to each command, not the entire batch.
-   The local regression test checks the eventual handoff and typing cleanup after two command timeouts.
+   The local regression test checks the eventual handoff after two command timeouts, typing staying on through it, and typing ending with the real answer.
    Firstmate activity cancels a draft and hands pending requests to Firstmate.
    A new owner text or Firstmate activity also stops the remaining bubbles of a queued desk answer.
    The service records already sent bubbles in memory and completes the cancelled answer without sending the remaining bubbles.

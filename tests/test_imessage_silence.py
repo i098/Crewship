@@ -18,7 +18,7 @@ def typing_events(fake, text):
 
 
 @pytest.mark.parametrize("failure", ["model-fail", "refusal", "model-hold", "status-fail"])
-def test_failed_desk_hands_off_one_burst_without_a_receipt_and_clears_typing(tmp_path, desk_clock, failure):
+def test_failed_desk_hands_off_one_burst_without_a_receipt_and_keeps_typing(tmp_path, desk_clock, failure):
     fake, state, notes, err, start, receive, cli, text, records = basic_rig(tmp_path)
     (fake / "typing-down").unlink()
     if failure == "refusal":
@@ -37,8 +37,10 @@ def test_failed_desk_hands_off_one_burst_without_a_receipt_and_clears_typing(tmp
                 if event.get("route") == "done" for request in event["ids"]
             } >= {"photon-lookup", "photon-detail"}, "the completed failure handoff")
         desk_clock(8000)
-        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "typing cleanup")
         wait_for(lambda: text(notes).count("photon-lookup ") == text(notes).count("photon-detail ") == 1, "the durable handoff")
+        assert typing_events(fake, text) and False not in typing_events(fake, text)  # the handoff leaves typing on until a real answer
+        desk_clock(300_000)
+        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "the five-minute typing cap")
         assert text(fake / "sent") == ""
         receive("detail", "Check the release job, not the build job.")
         desk_clock(8000)
@@ -296,15 +298,17 @@ def test_synchronous_inbox_timeouts_delay_but_do_not_lose_the_deadline_handoff(t
         wait_for(lambda: (fake / "model-started").exists(), "the held model")
         started = time.monotonic()
         desk_clock(8000)
-        wait_for(lambda: typing_events(fake, text)[-1:] == [False], "typing cleanup after two inbox timeouts")
+        wait_for(lambda: text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1, "both retained handoffs")
+        assert typing_events(fake, text) and False not in typing_events(fake, text)  # the handoff leaves typing on until a real answer
         elapsed = time.monotonic() - started
         attempts = [float(row) for row in text(fake / "note-attempts").splitlines()]
         assert len(attempts) == 2
         assert attempts[1] - attempts[0] >= 4.5
         assert elapsed >= 9
         assert text(err).count("the inbox note failed; routing retains the request") >= 2
-        wait_for(lambda: text(notes).count("photon-release ") == text(notes).count("photon-backup ") == 1, "both retained handoffs")
         assert text(fake / "sent") == ""
+        cli("The release job passed.")
+        wait_for(lambda: text(fake / "sent") and typing_events(fake, text)[-1:] == [False], "typing cleanup after the real answer")
         print(f"Two synchronous inbox timeouts delayed the deadline handoff by {elapsed:.3f} seconds.")
     finally:
         bridge.terminate()

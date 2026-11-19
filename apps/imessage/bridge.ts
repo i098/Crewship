@@ -497,8 +497,8 @@ if (pendingRoutes().length) {
 }
 
 // Stop a pending or running desk turn: he sent more, or Firstmate is active on the line.
-function cancelDesk() {
-  stopDeskTyping?.();
+function cancelDesk(keepTyping = false) {
+  if (!keepTyping) stopDeskTyping?.();
   if (!deskRun) return;
   deskRun.kill();
   deskRun = undefined;
@@ -1129,17 +1129,16 @@ function scheduleChatDeadline(pending: Routing[]) {
   deadlineTimers.set(target.requestId, setTimeout(() => handOffAtDeadline(pending), Math.max(0, ACK_MS - (Date.now() - target.at!))));
 }
 
-// Eight seconds after the latest unanswered request: stop the typing indicator and give still-unassigned requests to Firstmate. It sends nothing to the owner.
+// Eight seconds after the latest unanswered request: give still-unassigned requests to Firstmate. It sends nothing to the owner.
 function handOffAtDeadline(pending: Routing[]) {
   pending = pending.filter((r) => r.loop !== "v2" && !r.responded);
   const target = pending.at(-1);
   if (stopping || muted() || !target
     || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
   if (target.out) return finishDeskDelivery(target.out);
-  if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
   const unassigned = pending.filter((r) => r.route === "pending");
   if (!unassigned.length) return;
-  cancelDesk();
+  cancelDesk(true);
   recordRoute({ ids: unassigned.map((r) => r.requestId), route: "handoff" });
   desk.inboundText();
   flushRoutes();
@@ -1211,9 +1210,8 @@ async function runDeskV2() {
     // Typing starts with the turn and ends with it, unless a desk answer still waits for delivery.
     const finishTyping = muted() ? () => {} : startDeskTyping(pending, () => !stopping);
     const turnDone = deskTurns.begin();
-    let done = false;
     try {
-      done = await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => timeOutV2(pending, controller, current));
+      await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => timeOutV2(pending, controller, current));
     } catch (error) {
       if (current()) {
         log("v2 desk")(error);
@@ -1221,7 +1219,7 @@ async function runDeskV2() {
       }
     } finally {
       turnDone();
-      if (!done || !typingOutlivesTurn(pending)) finishTyping();
+      if (!typingOutlivesTurn(pending)) finishTyping();
       if (v2Jobs.get(key) === controller) v2Jobs.delete(key);
     }
   }));
@@ -1425,6 +1423,10 @@ function startDeskTyping(pending: Routing[], current: () => boolean) {
   return finishTyping;
 }
 
+function deskTypingCurrent(pending: Routing[], current: () => boolean) {
+  return () => pending.every((r) => !r.responded) && (current() || typingOutlivesTurn(pending));
+}
+
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
@@ -1434,31 +1436,37 @@ async function runDesk(current: () => boolean) {
   const registered = secondmates(FM_HOME);
   const mates = pending.every((r) => r.mateEligible) ? registered : [];
   if (!DESK_VETTED || (pending.some((r) => r.firstmate) && !mates.length)) return handoffPending();
-  const finishTyping = startDeskTyping(pending, current);
-  let queued = false;
-  try {
-    const result = pending.some((r) => r.firstmate) ? undefined : await draftBasic(pending, current);
-    if (stopping || !current()) return;
-    if (result === undefined) {
-      const mate = await draftHandoff(pending, mates, current);
-      if (stopping || !current()) return;
-      if (mate) await handoffToMate(pending, mate, current);
-      else handoffPending();
-    } else {
-      commitDeskAnswer(pending, result);
-      queued = !("handled" in result.answer);
-    }
-    const at = result?.target.ref ?? pending.at(-1)!.ref;
-    appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "bubbles" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
-  } finally {
-    if (!queued) finishTyping();
-  }
+  const finishTyping = startDeskTyping(pending, deskTypingCurrent(pending, current));
+  const queued = await draftAndCommit(pending, mates, current).catch((error) => {
+    log("desk failed")(error);
+    handoffPending();
+  });
+  if (!queued && !typingOutlivesTurn(pending)) finishTyping();
+}
+
+async function draftAndCommit(pending: Routing[], mates: Secondmate[], current: () => boolean) {
+  const result = pending.some((r) => r.firstmate) ? undefined : await draftBasic(pending, current);
+  if (stopping || !current()) return false;
+  if (result === undefined) {
+    const mate = await draftHandoff(pending, mates, current);
+    if (stopping || !current()) return false;
+    if (mate) await handoffToMate(pending, mate, current);
+    else handoffPending();
+  } else commitDeskAnswer(pending, result);
+  logDeskOutcome(pending, result);
+  return !!result && !("handled" in result.answer);
+}
+
+function logDeskOutcome(pending: Routing[], result: DeskResult | undefined) {
+  const at = result?.target.ref ?? pending.at(-1)!.ref;
+  appendFileSync(DESK_LOG, `${new Date().toISOString()} ${at.id} ${result === undefined ? "handoff" : "bubbles" in result.answer ? "basic" : "handled" in result.answer ? "handled" : `react ${result.answer.react}`}\n`, { mode: 0o600 });
 }
 
 function commitDeskAnswer(pending: Routing[], result: DeskResult) {
   const { answer, target } = result;
   if ("handled" in answer) {
     recordRoute({ ids: pending.map((r) => r.requestId), route: "done" });
+    stopDeskTyping?.();
     return;
   }
   const ids = pending.filter((r) => sameChat(r.ref, target.ref)).map((r) => r.requestId);
