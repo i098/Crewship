@@ -218,10 +218,59 @@ def test_crit_that_reclaim_cannot_fix_alerts_loudly_rate_limited(guard):
     assert guard.prunes() == STEPS * 2
     (alert,) = guard.alerts()
     assert alert.startswith("CRIT / 97% used")
-    guard.run(STORAGE_REPEAT_MIN="0")
+    guard.run(STORAGE_CRIT_REMIND_MIN="0")
     assert len(guard.alerts()) == 2
     verbs = {" ".join(c.split()[:2]) for c in guard._lines("docker.log")}
     assert verbs <= {"info -f", "system df", "builder prune", "image prune"}
+
+
+def _age_crit_alert(guard, hours):
+    path = guard.doctor / ".storage-guard/_"
+    t, used, warn, _crit, fill, seq = path.read_text().split()
+    path.write_text(f"{t} {used} {warn} {int(time.time()) - hours * 3600} {fill} {seq}\n")
+
+
+def test_open_crit_episode_alerts_once_then_reminds_after_the_interval(guard):
+    guard.fs({"/": 97})
+    guard.run()
+    for hours in (1, 6, 23):  # each used to re-file: the old gap was REPEAT_MIN (30m)
+        _age_crit_alert(guard, hours)
+        guard.run()
+        assert len(guard.alerts()) == 1
+    _age_crit_alert(guard, 25)
+    guard.run()
+    assert len(guard.alerts()) == 2
+
+
+def test_growing_mount_held_at_crit_files_no_fill_alert_inside_the_reminder_interval(guard):
+    guard.fs({"/": 96})
+    guard.run()
+    assert len(guard.alerts()) == 1
+    state = guard.doctor / ".storage-guard/_"
+    for used in (97, 98):
+        _t, _used, warn, crit, _fill, seq = state.read_text().split()
+        state.write_text(f"{int(time.time()) - 600} {(used - 2) * G} {warn} {crit} 0 {seq}\n")
+        guard.fs({"/": used})
+        guard.run()
+    assert len(guard.alerts()) == 1
+
+
+def test_crit_after_warn_escalates_and_recovery_rearms_crit(guard):
+    guard.fs({"/": 86})
+    guard.run()
+    guard.fs({"/": 97})
+    guard.run()
+    assert [a.split()[0] for a in guard.alerts()] == ["WARN", "CRIT"]
+    guard.fs({"/": 90})  # under CRIT but inside hysteresis: same episode
+    guard.run()
+    guard.fs({"/": 97})
+    guard.run()
+    assert len(guard.alerts()) == 2
+    guard.fs({"/": 80})
+    guard.run()
+    guard.fs({"/": 97})
+    guard.run()
+    assert [a.split()[0] for a in guard.alerts()] == ["WARN", "CRIT", "CRIT"]
 
 
 def test_filesystem_without_docker_is_measured_separately_and_never_pruned(guard):

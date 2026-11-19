@@ -28,6 +28,7 @@ AGE_H=${STORAGE_IMAGE_AGE_HOURS:-168}
 HORIZON_H=${STORAGE_FILL_HORIZON_HOURS:-6}
 FILL_MIN=${STORAGE_FILL_MIN_PCT:-70}
 REPEAT_MIN=${STORAGE_REPEAT_MIN:-30}
+CRIT_REMIND_MIN=${STORAGE_CRIT_REMIND_MIN:-1440}  # reminder while one CRIT episode stays open
 SCAN_TIMEOUT=${STORAGE_SCAN_TIMEOUT:-300}
 PRUNE_TIMEOUT=${STORAGE_PRUNE_TIMEOUT:-300}
 if [ -n "${WORKTREE_PRUNE_POOLS:-}" ]; then
@@ -42,7 +43,7 @@ case "${1:-}" in
   '') ;;
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
-for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN SCAN_TIMEOUT PRUNE_TIMEOUT NOTIFY_TIMEOUT; do
+for v in WARN CRIT HYST AGE_H HORIZON_H FILL_MIN REPEAT_MIN CRIT_REMIND_MIN SCAN_TIMEOUT PRUNE_TIMEOUT NOTIFY_TIMEOUT; do
   [[ ${!v} =~ ^[0-9]+$ ]] || { echo "storage-guard: $v=${!v} is not a whole number" >&2; exit 2; }
 done
 [ "$HYST" -lt "$WARN" ] && [ "$WARN" -lt "$CRIT" ] && [ "$CRIT" -le 100 ] \
@@ -261,7 +262,7 @@ for m in "${real[@]}"; do
   mounts+=("$m"); holds[$m]="the mount ${dev_of[$m]}"
 done
 
-show "storage-guard --dry-run: WARN ${WARN}% (re-armed below $((WARN - HYST))%), CRIT ${CRIT}%, fill horizon ${HORIZON_H}h, image age ${AGE_H}h, repeat ${REPEAT_MIN}m"
+show "storage-guard --dry-run: WARN ${WARN}% (re-armed below $((WARN - HYST))%), CRIT ${CRIT}%, fill horizon ${HORIZON_H}h, image age ${AGE_H}h, repeat ${REPEAT_MIN}m, CRIT reminder ${CRIT_REMIND_MIN}m"
 declare -A needs_scan=() reclaim_eligible=()
 
 for m in "${mounts[@]}"; do
@@ -295,7 +296,9 @@ for m in "${mounts[@]}"; do
       show "  growing $fill - below FILL floor ${FILL_MIN}%"
     elif [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
       say "  FILL $m $fill - inside the ${HORIZON_H}h horizon"
-      if [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
+      if [ "$pct" -ge "$CRIT" ] && [ "$crit_at" -gt 0 ]; then
+        show "  CRIT episode already alerted; the reminder interval is the only repeat"
+      elif [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
         notes+=("filling: $fill"); fill_at=$now
       fi
     else
@@ -311,17 +314,21 @@ for m in "${mounts[@]}"; do
     lvl=CRIT
     reclaim_eligible[$m]=1
     show "  tier CRIT: ${pct}% >= ${CRIT}%"
-    if [ $((now - crit_at)) -ge $((REPEAT_MIN * 60)) ]; then
+    # One alert per CRIT episode: crit_at stays set until usage falls under
+    # CRIT - HYST, and only the reminder interval re-files it meanwhile.
+    if [ $((now - crit_at)) -ge $((CRIT_REMIND_MIN * 60)) ]; then
       n="at ${pct}% (CRIT ${CRIT}%) - needs a human; eligible safe reclaim follows this alert"
       notes+=("$n"); crit_at=$now; warn_on=1
     fi
   elif [ "$pct" -ge "$WARN" ]; then
     lvl=WARN
     show "  tier WARN: ${pct}% >= ${WARN}%$([ "$warn_on" = 1 ] && echo ', episode already alerted')"
+    [ "$pct" -lt $((CRIT - HYST)) ] && crit_at=0
     [ "$warn_on" = 1 ] || { notes+=("at ${pct}% (WARN ${WARN}%)"); warn_on=1; }
   else
     lvl=FILL
     show "  tier OK: ${pct}% < ${WARN}%"
+    crit_at=0
     if [ "$warn_on" = 1 ] && [ "$pct" -lt $((WARN - HYST)) ]; then
       say "  WARN episode over for $m at ${pct}% (< $((WARN - HYST))%); re-armed"; warn_on=0
     fi
