@@ -203,8 +203,7 @@ def test_work_request_hands_off_without_a_canned_reply(tmp_path, resume):
         )
 
 
-def test_work_request_stops_typing_at_the_handoff(tmp_path):
-    # docs/imessage.md: a handoff ends the desk typing indicator; the final answer starts none.
+def test_work_request_keeps_typing_until_the_final_answer(tmp_path):
     with v2_rig(
         tmp_path, [{"kind": "relay", "target": 0, "domains": [], "category": "other"}]
     ) as rig:
@@ -221,19 +220,18 @@ def test_work_request_stops_typing_at_the_handoff(tmp_path):
             "the handoff",
             timeout=120,
         )
-        wait_for(
-            lambda: read_text(typing).splitlines()
-            and not json.loads(read_text(typing).splitlines()[-1])["on"],
-            "typing stopped by the handoff",
-        )
-        assert json.loads(read_text(typing).splitlines()[0])["on"]
+        wait_for(lambda: read_text(typing), "typing", timeout=30)
+        rows = [json.loads(line) for line in read_text(typing).splitlines()]
+        assert rows and all(row["on"] for row in rows)
         assert not any("responded" in e for e in events(rig))
         rig.cli("The review is complete.")
         wait_for(
             lambda: any("responded" in e for e in events(rig)), "the completed request", timeout=30
         )
-        rows = [json.loads(line) for line in read_text(typing).splitlines()]
-        assert not rows[-1]["on"]
+        wait_for(
+            lambda: not json.loads(read_text(typing).splitlines()[-1])["on"],
+            "typing stopped by the final answer",
+        )
 
 
 def test_unanswered_handoff_is_noted_again_once(tmp_path):

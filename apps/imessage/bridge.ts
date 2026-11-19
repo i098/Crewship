@@ -1129,14 +1129,13 @@ function scheduleChatDeadline(pending: Routing[]) {
   deadlineTimers.set(target.requestId, setTimeout(() => handOffAtDeadline(pending), Math.max(0, ACK_MS - (Date.now() - target.at!))));
 }
 
-// Eight seconds after the latest unanswered request: stop the typing indicator and give still-unassigned requests to Firstmate. It sends nothing to the owner.
+// Eight seconds after the latest unanswered request: give still-unassigned requests to Firstmate. It sends nothing to the owner.
 function handOffAtDeadline(pending: Routing[]) {
   pending = pending.filter((r) => r.loop !== "v2" && !r.responded);
   const target = pending.at(-1);
   if (stopping || muted() || !target
     || target !== [...routing.values()].findLast((r) => !r.responded && sameChat(r.ref, target.ref))) return;
   if (target.out) return finishDeskDelivery(target.out);
-  if (pending.some((r) => r.requestId === deskTypingRequestId)) stopDeskTyping?.();
   const unassigned = pending.filter((r) => r.route === "pending");
   if (!unassigned.length) return;
   cancelDesk();
@@ -1211,9 +1210,8 @@ async function runDeskV2() {
     // Typing starts with the turn and ends with it, unless a desk answer still waits for delivery.
     const finishTyping = muted() ? () => {} : startDeskTyping(pending, () => !stopping);
     const turnDone = deskTurns.begin();
-    let done = false;
     try {
-      done = await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => timeOutV2(pending, controller, current));
+      await withDeadline(runV2Turn(pending, controller, current), TURN_MAX_MS, () => timeOutV2(pending, controller, current));
     } catch (error) {
       if (current()) {
         log("v2 desk")(error);
@@ -1221,7 +1219,7 @@ async function runDeskV2() {
       }
     } finally {
       turnDone();
-      if (!done || !typingOutlivesTurn(pending)) finishTyping();
+      if (!typingOutlivesTurn(pending)) finishTyping();
       if (v2Jobs.get(key) === controller) v2Jobs.delete(key);
     }
   }));

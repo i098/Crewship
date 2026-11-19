@@ -39,9 +39,11 @@ test("a turn that already routed or went stale queues no reply", () => {
   }
 });
 
-test("typing outlives a turn only for a desk answer awaiting delivery", () => {
+test("typing outlives a turn for a desk answer awaiting delivery or a handoff", () => {
   expect(typingOutlivesTurn([{ route: "desk", out: { bubbles: ["hi"] } }])).toBe(true);
-  expect(typingOutlivesTurn([{ route: "handoff" }])).toBe(false);
+  expect(typingOutlivesTurn([{ route: "handoff" }])).toBe(true);
+  expect(typingOutlivesTurn([{ route: "done" }])).toBe(true);
+  expect(typingOutlivesTurn([{ route: "pending" }])).toBe(false);
   expect(typingOutlivesTurn([{ route: "desk", out: { bubbles: [] } }])).toBe(false);
 });
 
