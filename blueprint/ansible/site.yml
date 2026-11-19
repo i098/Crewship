@@ -163,6 +163,17 @@
         - crewship_cfg.profiles.development | bool
       tags: [firstmate, gh_webhook]
 
+    - name: Token acceleration notice for the owner
+      ansible.builtin.import_tasks: tasks/token_accel.yml
+      become: "{{ crewship_become_target | bool }}"
+      become_user: "{{ crewship_cfg.user }}"
+      environment: "{{ crewship_user_env }}"
+      when:
+        - crewship_account_ready | bool
+        - crewship_cfg.profiles.firstmate | bool
+        - crewship_cfg.profiles.development | bool
+      tags: [firstmate, token_accel]
+
     - name: GitHub reply alerts for main Firstmate
       ansible.builtin.include_tasks:
         file: tasks/gh_replies.yml

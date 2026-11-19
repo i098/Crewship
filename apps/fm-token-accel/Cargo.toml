@@ -1,0 +1,17 @@
+[package]
+name = "fm-token-accel"
+version = "0.1.0"
+edition = "2024"
+description = "Sends a usage status card when the fleet's token use accelerates fast"
+license = "FSL-1.1-ALv2"
+publish = false
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
+strip = true
