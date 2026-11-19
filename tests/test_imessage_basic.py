@@ -565,6 +565,12 @@ def test_desk_refreshes_typing_only_until_its_turn_ends(tmp_path, desk_clock, ex
         wait_for(lambda: len(events()) == 2, "the typing refresh")
         assert events() == [{"chat": "iMessage;-;+10000000000", "on": True}] * 2
         end_typing_turn(fake, exit_path, receive, cli, bridge)
+        if exit_path in ("skip", "handoff", "error", "spawn-error"):
+            wait_for(lambda: "photon-question " in text(notes), "the desk handoff")
+            desk_clock(8000)
+            time.sleep(1)
+            assert all(row["on"] for row in events())
+            cli("The build is paused.")
         wait_for(lambda: any(not row["on"] for row in events()), "typing stopped")
         if exit_path == "typing":
             wait_for(lambda: events()[-1]["on"], "supervisor typing after desk cleanup")

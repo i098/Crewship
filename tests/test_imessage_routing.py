@@ -455,7 +455,7 @@ def test_registry_change_during_delivery_hands_remaining_texts_to_firstmate(tmp_
         bridge.wait(10)
 
 
-def test_due_deadline_clears_typing_during_active_mate_delivery(tmp_path, desk_clock):
+def test_due_deadline_keeps_typing_during_active_mate_delivery(tmp_path, desk_clock):
     fake, state, notes, err, start, receive, cli, text, records = routing_rig(tmp_path)
     (fake / "typing-down").unlink()
     first = fake / "mate-hold-1"
@@ -472,7 +472,9 @@ def test_due_deadline_clears_typing_during_active_mate_delivery(tmp_path, desk_c
         first.unlink()
         wait_for(lambda: len(text(fake / "mate-sends").splitlines()) == 2, "the second held delivery")
         desk_clock(2000)
-        wait_for(lambda: text(fake / "typing-events") and not json.loads(text(fake / "typing-events").splitlines()[-1])["on"], "typing cleanup during mate delivery", timeout=2)
+        wait_for(lambda: text(fake / "typing-events"), "typing during mate delivery", timeout=2)
+        time.sleep(1)
+        assert all(json.loads(row)["on"] for row in text(fake / "typing-events").splitlines())
         assert text(fake / "sent") == ""
         assert not (fake / "send-cancelled").exists()
         assert text(notes) == ""
