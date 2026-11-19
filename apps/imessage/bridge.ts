@@ -1257,9 +1257,9 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
 }
 
 // A desk task goes to Firstmate as an inbox note, or to a mate (the delegator adds the marker `id` its handling is traced by).
-async function sendDeskTask(target: string | Secondmate, id: string, text: string) {
+async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
   if (target === "firstmate") {
-    return await noteMain(`desk-task-${id}`, text);
+    return await noteMain(`desk-task-${id}`, `${claimLine(requests)}\n${text}`);
   }
   if (typeof target === "string") return false; // a helper has no inbox
   return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
@@ -1277,6 +1277,7 @@ const SCRIPTS_DIR = env.FM_IMESSAGE_DESK_SCRIPTS || `${FM_HOME}/desk-scripts`;
 // The desk's file tools (desk-files.ts) reach only these folders. The claims live in the state directory, so a restart keeps them.
 const DESK_FILES = `${STATE}/desk-files`;
 const FILE_ROOTS = { write: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES], read: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES] };
+mkdirSync(DESK_FILES, { recursive: true });
 const CLAIMS = claimsDir({ ...env, STATE_DIRECTORY: STATE });
 
 const runSessionTurn = createSessionTurn<Routing>({
@@ -1292,6 +1293,7 @@ const runSessionTurn = createSessionTurn<Routing>({
   scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
   remember: (text) => void remember("desk", text),
   roots: FILE_ROOTS, claim: (kind, key, actor) => claim(CLAIMS, kind, key, actor),
+  canSend: () => lines.some((line) => line.sendImage),
   sendImage: async (bytes, name, origin) => {
     if (!lines.some((line) => line.sendImage)) throw new Error("photos need the photon transport, which is not running");
     const photo = stage(await prepareImage(bytes, name));
@@ -1653,7 +1655,7 @@ function watchStale(id: string) {
     const open = routing.get(id);
     if (stopping || muted() || !open || open.responded) return;
     const minutes = Math.round((Date.now() - open.at!) / 60_000);
-    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
+    if (fileNote(`stale-${id}`, `${claimLine([id])}\n(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
     else log("stale note")(new Error(id));
   }, STALE_MS);
 }
@@ -1702,7 +1704,7 @@ function flushRoutes() {
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
-        if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
+        if (!fileNote(item.requestId, `${claimLine([item.requestId])}\n${warning ? `${warning}\n` : ""}${item.text}`)) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
@@ -1732,6 +1734,10 @@ async function noteText(message: LineMessage) {
     throw e;
   }), whoSent);
   return { text, failed };
+}
+
+function claimLine(ids: readonly string[]): string {
+  return ids.map((id) => `Before you act, run: fm-claim msg ${id}. On exit code 3, stop: the desk already acted.`).join("\n");
 }
 
 // An inbox note for Firstmate. The default sender is a background desk task, which waits for the answer file, not for fm-imessage.

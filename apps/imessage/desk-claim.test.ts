@@ -21,7 +21,7 @@ function desk(dir: string, texts: string[], over: Partial<ActionHost> = {}) {
     safe: (text: string) => text.replaceAll("hunter2", "[REDACTED]"), remember: () => {},
     roots: { write: [skills, files], read: [skills, files] },
     claim: (kind, key, actor) => claim(dir, kind, key, actor),
-    sendImage: async (_b, name) => void sent.push(name),
+    sendImage: async (_b, name) => void sent.push(name), canSend: () => true,
     handoff: () => {},
     ...over,
   } as ActionHost;
@@ -31,7 +31,7 @@ function desk(dir: string, texts: string[], over: Partial<ActionHost> = {}) {
 test("the desk and the supervisor get one text and only one acts", async () => {
   const dir = `${tmp}/c1`;
   const a = desk(dir, ["save the notes as a skill"]);
-  const proc = Bun.spawnSync(["bun", `${import.meta.dir}/desk-claim.ts`, "msg", "m1"], { env: { ...process.env, FM_IMESSAGE_CLAIMS: dir } });
+  const proc = Bun.spawnSync([`${import.meta.dir}/fm-claim`, "msg", "m1"], { env: { ...process.env, FM_IMESSAGE_CLAIMS: dir } });
   expect(proc.exitCode).toBe(0); // the supervisor got there first
   await expect(a.run("write_file", { path: `${skills}/notes/SKILL.md`, content: "# notes" })).rejects.toThrow("another actor");
   expect(await Bun.file(`${skills}/notes/SKILL.md`).exists()).toBe(false);
@@ -41,7 +41,7 @@ test("the desk acts first, then the supervisor and a handoff are refused", async
   const dir = `${tmp}/c2`;
   const a = desk(dir, ["save the notes as a skill"]);
   await a.run("write_file", { path: `${skills}/two/SKILL.md`, content: "# two" });
-  expect(Bun.spawnSync(["bun", `${import.meta.dir}/desk-claim.ts`, "msg", "m1"], { env: { ...process.env, FM_IMESSAGE_CLAIMS: dir } }).exitCode).toBe(3);
+  expect(Bun.spawnSync([`${import.meta.dir}/fm-claim`, "msg", "m1"], { env: { ...process.env, FM_IMESSAGE_CLAIMS: dir } }).exitCode).toBe(3);
   await expect(a.run("handoff_main", {})).rejects.toThrow("already acted");
 }, 60_000);
 
@@ -56,6 +56,19 @@ test("a handoff to the supervisor shuts the desk out", async () => {
   const dir = `${tmp}/c4`;
   await desk(dir, ["save the notes"]).run("handoff_main", {});
   await expect(desk(dir, ["save the notes"]).run("write_file", { path: `${files}/b.txt`, content: "x" })).rejects.toThrow("another actor");
+}, 60_000);
+
+test("a down transport burns no claim: the retry sends the file once", async () => {
+  const dir = `${tmp}/c6`;
+  writeFileSync(`${files}/p.png`, "png");
+  let up = false;
+  const a = desk(dir, ["send the picture"], { canSend: () => up });
+  await expect(a.run("send_file", { path: `${files}/p.png` })).rejects.toThrow("cannot send");
+  up = true;
+  await a.run("send_file", { path: `${files}/p.png` });
+  expect(a.sent).toEqual(["p.png"]);
+  await expect(a.run("send_file", { path: `${files}/p.png` })).rejects.toThrow("already took");
+  expect(a.sent).toEqual(["p.png"]);
 }, 60_000);
 
 test("claim races have one winner", async () => {

@@ -1,6 +1,6 @@
 // The duplicate guard. One claim is one file made with an exclusive create (`wx`), so two actors that race get exactly one winner,
 // and the claim stays on disk through a bridge restart. A claim is never released: a crash after the claim loses the action, never repeats it.
-// The desk takes claims in desk-actions.ts; the supervisor calls `fm-claim` (the same file, below) before it acts on an owner text.
+// The desk takes claims in desk-actions.ts; the supervisor runs `fm-claim` (fm-claim, next to this file) before it acts on an owner text.
 import { closeSync, fsyncSync, openSync, readFileSync, writeSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 

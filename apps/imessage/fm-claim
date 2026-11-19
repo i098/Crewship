@@ -1,2 +1,12 @@
 #!/usr/bin/env bun
-import "./desk-claim.ts";
+import { claim, claimsDir } from "./desk-claim.ts";
+
+// fm-claim msg|act KEY...   exit 0: yours, act. Exit 3: held by the other actor, stop and do nothing. Actor: FM_CLAIM_ACTOR, default firstmate.
+{
+  const [kind, ...key] = Bun.argv.slice(2);
+  if ((kind !== "msg" && kind !== "act") || !key.length) { console.error("usage: fm-claim msg|act KEY..."); process.exit(2); }
+  const actor = process.env.FM_CLAIM_ACTOR === "desk" ? "desk" : "firstmate";
+  const ok = claim(claimsDir(process.env), kind, key.join(" "), actor);
+  console.log(ok ? "claimed" : "held: another actor has this; stop and do nothing");
+  process.exit(ok ? 0 : 3);
+}
