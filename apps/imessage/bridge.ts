@@ -1704,7 +1704,9 @@ function flushRoutes() {
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
-        if (!fileNote(item.requestId, `${warning ? `${warning}\n` : ""}${item.text}\n${claimLine([item.requestId]).trimEnd()}`)) throw new Error("the inbox note failed; routing retains the request");
+        // A firstmate-only text never gets a desk turn, so the desk cannot hold its claim: no claim line.
+        const body = item.firstmate ? item.text : `${item.text}\n${claimLine([item.requestId]).trimEnd()}`;
+        if (!fileNote(item.requestId, `${warning ? `${warning}\n` : ""}${body}`)) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
