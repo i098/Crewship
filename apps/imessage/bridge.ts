@@ -1257,9 +1257,9 @@ async function draftV2Front(pending: Routing[], signal: AbortSignal, mates: Seco
 }
 
 // A desk task goes to Firstmate as an inbox note, or to a mate (the delegator adds the marker `id` its handling is traced by).
-async function sendDeskTask(target: string | Secondmate, id: string, text: string, requests: string[]) {
+async function sendDeskTask(target: string | Secondmate, id: string, text: string) {
   if (target === "firstmate") {
-    return await noteMain(`desk-task-${id}`, `${claimLine(requests)}\n${text}`);
+    return await noteMain(`desk-task-${id}`, text);
   }
   if (typeof target === "string") return false; // a helper has no inbox
   return await spawnSender(target, `[from captain via desk] ${text}`).exited === 0;
