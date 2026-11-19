@@ -46,7 +46,7 @@ import { ImageError, type Picture, type PreparedImage, prepareImage } from "./im
 import { instagramWebhook } from "./instagram-webhook.ts";
 import { type Kind, Memory } from "./memory.ts";
 import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
-import { type Action, collectSessions, StuckWatch } from "./stuck-watch.ts";
+import { type Action, collectSessions, rateLimit, StuckWatch } from "./stuck-watch.ts";
 import { paneIO } from "./desk-pane.ts";
 import { listScripts, runScript } from "./desk-scripts.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
@@ -663,9 +663,10 @@ else if (stuckMs > 0) {
     polling = true;
     try {
       const mates = secondmates(FM_HOME);
-      const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"),
+      const limit = rateLimit(`${env.HOME}/.omp/stats.db`, Date.now());
+      const sessions = await collectSessions({ home: FM_HOME, mates, agentsJson: await herdr("agent", "list"), limit,
         readPane: (pane) => herdr("pane", "read", pane, "--source", "visible", "--lines", "40", "--format", "text").catch(() => undefined) });
-      for (const a of watch.poll(sessions, Date.now())) a.done(await runStuckAction(a, mates));
+      for (const a of watch.poll(sessions, Date.now(), limit)) a.done(await runStuckAction(a, mates));
     } catch (e) {
       log("stuck check")(e);
     } finally {
