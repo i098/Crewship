@@ -213,6 +213,10 @@ function delegateTarget(host: ActionHost, id: string): Secondmate | `helper:${He
   return id === "firstmate" ? id : relayTarget(host.requests, { category: "work", target: id, domains: [id] }, host.mates());
 }
 
+function handoffClaim(host: ActionHost): void {
+  if (!host.requests.every((r) => host.claim("msg", r.requestId, "firstmate"))) throw new Error("refused: the desk already acted on this text; call reply, not handoff_main");
+}
+
 const HELD = "refused: another actor or an earlier call already took this action; stop, do nothing more, and reply";
 
 // The tools that act on the host. Each one takes its claims (the owner texts, then the action) only after its own checks pass and just before its effect.
@@ -293,7 +297,7 @@ export function createActions(host: ActionHost): { run: ToolRunner; acted(): boo
     handoff_main: (args) => {
       open();
       // The supervisor now owns these texts: a desk action on them is refused from here on, and a text the desk already acted on cannot be handed on.
-      if (!host.requests.every((r) => host.claim("msg", r.requestId, "firstmate"))) throw new Error("refused: the desk already acted on this text; call reply, not handoff_main");
+      handoffClaim(host);
       let ack: ReturnType<typeof replyParts> | undefined;
       if (args.text !== undefined) {
         if (!deskMayAct(host.requests)) throw new Error("refused: this request is protected; call handoff_main with no text");

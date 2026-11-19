@@ -11,32 +11,37 @@ export const SEND_TYPES = /\.(?:png|jpe?g|webp)$/i; // the only types the transp
 
 const CREDENTIAL = /(?:^|\/)(?:\.env[^/]*|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.docker|\.kube|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(?:pem|key|p12|pfx|kdbx)|[^/]*(?:secret|credential|passw|token|keychain|auth\.json|super\.env)[^/]*)(?:\/|$)/i;
 
+// `target` with the deepest existing part resolved, so a symlink out of the root is caught; the rest is new.
+function realOf(target: string): string {
+  let near = target;
+  while (!existsSync(near)) near = dirname(near);
+  return resolve(realpathSync(near), relative(near, target));
+}
+
+// Refuses a real path (`inside` is its part under the real root) that holds project files, a credential or a denied topic.
+function vet(real: string, realRoot: string, inside: string): void {
+  for (let dir = real; ; dir = dirname(dir)) { // a git checkout (the root included) holds project files
+    if (existsSync(`${dir}/.git`)) throw new Error("refused: the path is inside a git checkout (project files)");
+    if (dir === realRoot || dir === dirname(dir)) break;
+  }
+  if (/(?:^|\/)(?:\.treehouse|worktrees)(?:\/|$)/.test(real)) throw new Error("refused: the path is inside a project worktree");
+  if (CREDENTIAL.test(inside)) throw new Error("refused: the path names a credential file");
+  const topic = deniedTopic(inside);
+  if (topic) throw new Error(`refused: the path concerns ${topic}`);
+}
+
 // The real path `path` would have, or the reason it may not be used. `roots` are the allowed roots.
 function check(path: string, roots: string[]): string {
   if (typeof path !== "string" || !path || path.includes("\0") || !path.startsWith("/")) throw new Error("refused: path must be absolute");
   const target = resolve(path);
-  for (const root of roots) {
-    const lexical = relative(resolve(root), target);
-    if (lexical.startsWith("..") || lexical === "") continue;
-    if (!existsSync(root)) continue;
-    // The deepest part that exists is resolved, so a symlink out of the root is caught; the rest is new.
-    let near = target;
-    while (!existsSync(near)) near = dirname(near);
-    const realRoot = realpathSync(root);
-    const real = resolve(realpathSync(near), relative(near, target));
-    const inside = relative(realRoot, real);
-    if (inside.startsWith("..") || inside === "") throw new Error("refused: the path leaves the allowed folder");
-    for (let dir = real; ; dir = dirname(dir)) { // a git checkout (the root included) holds project files
-      if (existsSync(`${dir}/.git`)) throw new Error("refused: the path is inside a git checkout (project files)");
-      if (dir === realRoot || dir === dirname(dir)) break;
-    }
-    if (/(?:^|\/)(?:\.treehouse|worktrees)(?:\/|$)/.test(real)) throw new Error("refused: the path is inside a project worktree");
-    if (CREDENTIAL.test(inside)) throw new Error("refused: the path names a credential file");
-    const topic = deniedTopic(inside);
-    if (topic) throw new Error(`refused: the path concerns ${topic}`);
-    return real;
-  }
-  throw new Error(`refused: the path is outside the allowed folders (${roots.join(", ") || "none set"})`);
+  const root = roots.find((r) => existsSync(r) && !relative(resolve(r), target).startsWith("..") && target !== resolve(r));
+  if (!root) throw new Error(`refused: the path is outside the allowed folders (${roots.join(", ") || "none set"})`);
+  const realRoot = realpathSync(root);
+  const real = realOf(target);
+  const inside = relative(realRoot, real);
+  if (inside.startsWith("..") || inside === "") throw new Error("refused: the path leaves the allowed folder");
+  vet(real, realRoot, inside);
+  return real;
 }
 
 export function planWrite(roots: FileRoots, path: string, content: unknown, safe: (text: string) => string): { real: string; text: string } {
