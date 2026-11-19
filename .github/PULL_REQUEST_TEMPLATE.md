@@ -25,3 +25,4 @@ Closes #
 - [ ] Ansible syntax clean (`--syntax-check`).
 - [ ] Idempotent: `launch` → `launch` = `changed=0` on the second run.
 - [ ] A changelog fragment, `changelog.d/<issue>.<type>.md` (not a `CHANGELOG.md` edit), or the `no changelog` label.
+- [ ] `/no-mistakes` run on the branch, or left for a maintainer to run.

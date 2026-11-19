@@ -37,6 +37,7 @@ All body-check tests passed.
 - [ ] Ansible syntax clean (`--syntax-check`). Not applicable: no playbook changed.
 - [ ] Idempotent: `launch` → `launch` = `changed=0` on the second run. Not applicable: no provisioning path changed.
 - [x] A changelog fragment, `changelog.d/<issue>.<type>.md` (not a `CHANGELOG.md` edit), or the `no changelog` label.
+- [x] `/no-mistakes` run on the branch, or left for a maintainer to run.
 
 <details>
 <summary>Validation evidence</summary>

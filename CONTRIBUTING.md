@@ -230,6 +230,7 @@ The script applies the form's label and rejects missing required fields or commi
 - Ansible syntax clean (`--syntax-check`).
 - Idempotent: an unchanged second `launch` reports `changed=0` when no upstream tool has published a new release or source update since the last apply.
   A newer release or source update shows as an expected change in the toolchain step.
+- Running `/no-mistakes` on the branch when the PR work is done is welcome but optional. You may open a direct PR without it; a maintainer then runs `/no-mistakes` on that PR.
 - Describe what changed and why in the PR body.
 - Add a changelog fragment, `changelog.d/<issue>.<type>.md`, and never edit [CHANGELOG.md](CHANGELOG.md) (see [Changelog and releases](#changelog-and-releases)). Fragments are separate files, so PRs that run at the same time do not conflict. CI fails a PR without a fragment, unless the PR has the `no changelog` label.
 - PRs merge with a merge commit; squash and rebase merging are off.
