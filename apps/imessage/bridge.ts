@@ -49,6 +49,7 @@ import { HerdrWatch, watchStrandedWake } from "./herdr-watch.ts";
 import { type Action, collectSessions, rateLimit, StuckWatch } from "./stuck-watch.ts";
 import { paneIO } from "./desk-pane.ts";
 import { listScripts, runScript } from "./desk-scripts.ts";
+import { claim, claimHolder, claimsDir, deskActions } from "./desk-claim.ts";
 import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
@@ -1273,6 +1274,11 @@ async function runHerdr(cmd: string[]): Promise<string> {
 }
 const deskPanes = paneIO(runHerdr, env.FM_IMESSAGE_HERDR_BIN || "herdr");
 const SCRIPTS_DIR = env.FM_IMESSAGE_DESK_SCRIPTS || `${FM_HOME}/desk-scripts`;
+// The desk's file tools (desk-files.ts) reach only these folders. The claims live in the state directory, so a restart keeps them.
+const DESK_FILES = `${STATE}/desk-files`;
+const FILE_ROOTS = { write: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES], read: [env.FM_IMESSAGE_DESK_SKILLS || `${env.HOME}/.omp/agent/skills`, DESK_FILES] };
+mkdirSync(DESK_FILES, { recursive: true });
+const CLAIMS = claimsDir({ ...env, STATE_DIRECTORY: STATE });
 
 const runSessionTurn = createSessionTurn<Routing>({
   env, provider: DESK_PROVIDER, model: DESK_MODEL, reasoning: DESK_REASONING, supervisorModel: SUPERVISOR_MODEL, vetted: DESK_VETTED,
@@ -1286,6 +1292,14 @@ const runSessionTurn = createSessionTurn<Routing>({
   pane: deskPanes.read, press: deskPanes.press,
   scripts: () => listScripts(SCRIPTS_DIR), script: (name) => runScript(SCRIPTS_DIR, name, { ...env, FM_HOME }),
   remember: (text) => void remember("desk", text),
+  roots: FILE_ROOTS, claim: (kind, key, actor) => claim(CLAIMS, kind, key, actor),
+  canSend: () => lines.some((line) => line.sendImage),
+  sendImage: async (bytes, name, origin) => {
+    if (!lines.some((line) => line.sendImage)) throw new Error("photos need the photon transport, which is not running");
+    const photo = stage(await prepareImage(bytes, name));
+    const guid = `${ACK_GUID_PREFIX}${crypto.randomUUID()}`;
+    outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk", guid, at: Date.now(), image: photo, bubbles: [], deskGeneration, deskSession });
+  },
   ...deskLog(STATE),
   notice: noticeRelay,
   report: (parts, guid, origin) => (deskLog(STATE).report(parts.join("\n\n")), outbox.add({ ...origin.ref, requestId: guid, requests: [], kind: "desk",
@@ -1641,7 +1655,7 @@ function watchStale(id: string) {
     const open = routing.get(id);
     if (stopping || muted() || !open || open.responded) return;
     const minutes = Math.round((Date.now() - open.at!) / 60_000);
-    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`)) recordRoute({ ids: [id], stale: true });
+    if (fileNote(`stale-${id}`, `(still unanswered ${minutes} min after it arrived; answer it now)\n${open.text}`, claimLine([id]).trimEnd())) recordRoute({ ids: [id], stale: true });
     else log("stale note")(new Error(id));
   }, STALE_MS);
 }
@@ -1690,7 +1704,8 @@ function flushRoutes() {
       }
       if (item.route === "handoff") {
         const warning = item.handoffNote ?? (item.mutationPath ? `The desk may have changed ${item.mutationPath}; inspect it before retrying this action.` : undefined);
-        if (!fileNote(item.requestId, warning ? `${warning}\n${item.text}` : item.text)) throw new Error("the inbox note failed; routing retains the request");
+        // A firstmate-only text never gets a desk turn, so the desk cannot hold its claim: no claim note.
+        if (!fileNote(item.requestId, `${warning ? `${warning}\n` : ""}${item.text}`, item.firstmate ? "" : claimLine([item.requestId]).trimEnd())) throw new Error("the inbox note failed; routing retains the request");
         trace(item.ref.id, "inbox-accepted");
       } else if (item.route !== "desk") continue;
       if (item.out) outbox.add(item.out);
@@ -1722,6 +1737,15 @@ async function noteText(message: LineMessage) {
   return { text, failed };
 }
 
+function claimLine(ids: readonly string[]): string {
+  const dir = claimsDir({ ...env, STATE_DIRECTORY: STATE });
+  return ids.map((id) => {
+    if (claimHolder(dir, "msg", id) !== "desk") return `Before you act, run: fm-claim msg ${id}. On exit code 3, stop: the desk already acted.\n`;
+    const done = deskActions(dir, id);
+    return `The desk already acted on owner text ${id}${done.length ? `: ${done.join("; ")}` : ""}. Do not repeat it. Only answer the owner.\n`;
+  }).join("");
+}
+
 // An inbox note for Firstmate. The default sender is a background desk task, which waits for the answer file, not for fm-imessage.
 async function noteMain(requestId: string, text: string, from = "captain via desk"): Promise<boolean> {
   if (stopping) return false;
@@ -1730,14 +1754,15 @@ async function noteMain(requestId: string, text: string, from = "captain via des
   return await proc.exited === 0;
 }
 
-// Files a Firstmate inbox note; true when the inbox took it.
-function fileNote(requestId: string, text: string): boolean {
+// Files a Firstmate inbox note; true when the inbox took it. The claim instruction rides in the header bracket,
+// so it reaches Firstmate with the text in one note and the owner's text stays the whole body.
+function fileNote(requestId: string, text: string, claim = ""): boolean {
   if (stopping) return false;
-  const note = Bun.spawnSync(
-    [INBOX, "note", "--request-id", requestId, "--", `[iMessage from the owner; answer with fm-imessage] ${text}`],
+  const head = `[iMessage from the owner; answer with fm-imessage${claim ? `; ${claim.replace(/\s*\n\s*/g, " ")}` : ""}]`;
+  return Bun.spawnSync(
+    [INBOX, "note", "--request-id", requestId, "--", `${head} ${text}`],
     { cwd: FM_HOME, env: { ...env, FM_HOME }, timeout: 5000 },
-  );
-  return note.exitCode === 0;
+  ).exitCode === 0;
 }
 
 // Tries the attachments of his message again; once all are saved, files its note again with their paths.

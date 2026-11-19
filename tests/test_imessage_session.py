@@ -286,6 +286,37 @@ def test_answer_written_while_the_bridge_is_down_is_sent_once_after_the_restart(
         assert not answer.exists()
 
 
+def test_task_delegated_after_the_desk_claimed_the_text_does_not_tell_firstmate_to_stop(tmp_path):
+    message, claims, skills = tmp_path / "task-message", tmp_path / "claims", tmp_path / "skills"
+    skills.mkdir()
+    with session_rig(tmp_path, FM_IMESSAGE_CLAIMS=str(claims), FM_IMESSAGE_DESK_SKILLS=str(skills)) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\n[ -e {shlex.quote(str(message))} ] || printf "%s" "$5" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", f"WRITEFILE {skills}/notes/SKILL.md")
+        wait_for(lambda: message.exists(), "the task delivery", timeout=120)
+    assert (skills / "notes/SKILL.md").read_text() == "x"
+    assert list(claims.glob("msg-*")), "the desk holds the owner text"
+    note = read_text(message)
+    assert "fm-claim" not in note and "stop" not in note.lower()
+    held = subprocess.run([str(SEND.parent / "fm-claim"), "msg", "bluebubbles-m1"], env={**os.environ, "FM_IMESSAGE_CLAIMS": str(claims)}, capture_output=True, timeout=30)
+    assert held.returncode == 3  # why the note must not tell Firstmate to run it
+
+
+def test_handoff_after_the_desk_wrote_a_file_names_the_action_and_has_no_stop_line(tmp_path):
+    message, claims, skills = tmp_path / "task-message", tmp_path / "claims", tmp_path / "skills"
+    skills.mkdir()
+    with session_rig(tmp_path, FM_IMESSAGE_CLAIMS=str(claims), FM_IMESSAGE_DESK_SKILLS=str(skills)) as rig:
+        script = tmp_path / "bin" / "fm-inbox"
+        script.write_text(f'#!/bin/bash\n[ "$1" = note ] || exit 0\n[ -e {shlex.quote(str(message))} ] || printf "%s" "$5" > {shlex.quote(str(message))}\n')
+        script.chmod(0o755)
+        deliver(rig, "m1", f"WRITESTUB {skills}/notes/SKILL.md STATUSLINE")
+        wait_for(lambda: message.exists(), "the handoff note", timeout=120)
+    note = read_text(message)
+    assert f"write_file {skills}/notes/SKILL.md" in note and "Only answer the owner" in note
+    assert "fm-claim" not in note
+
+
 def test_cancelled_delegated_ack_does_not_send_the_text_to_firstmate_twice(tmp_path):
     ids = tmp_path / "note-ids"
     with session_rig(tmp_path) as rig:

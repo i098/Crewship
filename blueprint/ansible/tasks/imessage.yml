@@ -28,7 +28,7 @@
     dest: "{{ crewship_imessage_dir }}/stage/{{ item }}"
     mode: "0644"
     remote_src: true
-  loop: [bridge.ts, bluebubbles.ts, cards.ts, clean.ts, desk.ts, desk-actions.ts, desk-claim.ts, desk-deadline.ts, desk-delegate.ts, desk-deny.ts, desk-helper.ts, desk-pane.ts, desk-scripts.ts, desk-session.ts, desk-session-turn.ts, desk-tools.yml, dispatch-policy.ts, front.ts, herdr-watch.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, ownership.ts, relay.ts, standby.ts, reply-target.ts, selfheal.ts, sender-log.ts, ste.ts, stuck-watch.ts, subagent.ts, tokenlog.ts, transcribe.ts, webchat.ts, zoom.ts]
+  loop: [bridge.ts, bluebubbles.ts, cards.ts, clean.ts, desk.ts, desk-actions.ts, desk-claim.ts, desk-files.ts, desk-deadline.ts, desk-delegate.ts, desk-deny.ts, desk-helper.ts, desk-pane.ts, desk-scripts.ts, desk-session.ts, desk-session-turn.ts, desk-tools.yml, dispatch-policy.ts, front.ts, herdr-watch.ts, image.ts, inception-desk.ts, instagram-webhook.ts, memory.ts, outbox.ts, ownership.ts, relay.ts, standby.ts, reply-target.ts, selfheal.ts, sender-log.ts, ste.ts, stuck-watch.ts, subagent.ts, tokenlog.ts, transcribe.ts, webchat.ts, zoom.ts]
   notify: deploy fm-imessage
 
 - name: Install the STE style files for the bridge
@@ -57,7 +57,7 @@
     dest: "{{ crewship_local_bin }}/{{ item }}"
     mode: "0755"
     remote_src: true
-  loop: [fm-imessage, fm-location, fm-call, fm-desk, clean.ts]
+  loop: [fm-imessage, fm-location, fm-call, fm-desk, fm-claim, desk-claim.ts, clean.ts]
 
 - name: Read the installed spectrum-ts version
   ansible.builtin.slurp:
