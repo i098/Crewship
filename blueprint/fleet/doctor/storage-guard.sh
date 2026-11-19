@@ -296,7 +296,9 @@ for m in "${mounts[@]}"; do
       show "  growing $fill - below FILL floor ${FILL_MIN}%"
     elif [ "$eta" -lt $((HORIZON_H * 3600)) ]; then
       say "  FILL $m $fill - inside the ${HORIZON_H}h horizon"
-      if [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
+      if [ "$pct" -ge "$CRIT" ] && [ "$crit_at" -gt 0 ]; then
+        show "  CRIT episode already alerted; the reminder interval is the only repeat"
+      elif [ $((now - fill_at)) -ge $((REPEAT_MIN * 60)) ]; then
         notes+=("filling: $fill"); fill_at=$now
       fi
     else

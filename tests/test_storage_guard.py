@@ -242,6 +242,19 @@ def test_open_crit_episode_alerts_once_then_reminds_after_the_interval(guard):
     assert len(guard.alerts()) == 2
 
 
+def test_growing_mount_held_at_crit_files_no_fill_alert_inside_the_reminder_interval(guard):
+    guard.fs({"/": 96})
+    guard.run()
+    assert len(guard.alerts()) == 1
+    state = guard.doctor / ".storage-guard/_"
+    for used in (97, 98):
+        _t, _used, warn, crit, _fill, seq = state.read_text().split()
+        state.write_text(f"{int(time.time()) - 600} {(used - 2) * G} {warn} {crit} 0 {seq}\n")
+        guard.fs({"/": used})
+        guard.run()
+    assert len(guard.alerts()) == 1
+
+
 def test_crit_after_warn_escalates_and_recovery_rearms_crit(guard):
     guard.fs({"/": 86})
     guard.run()
