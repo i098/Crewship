@@ -14,7 +14,7 @@
 #   level=critical, which breaks through silent mode on iPhone. An answered call sends none; no ring, no page. No BARK_DEVICE_KEY: a warning, no page.
 # Keys (names only, in $SECRETS_FILE, default ~/super.env): TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM PERSONAL_PHONE BARK_DEVICE_KEY (pager, optional).
 # Test hooks: FM_CALL_TWILIO_URL, FM_CALL_BARK_URL, FM_CALL_POLL (seconds between status checks, default 3).
-# Log: ~/.local/state/fm-call/log, tab-separated "epoch class incident event"; event is text, ring, limited or quiet. The gate reads it.
+# Log: ~/.local/state/fm-call/log, tab-separated "epoch class incident event"; event is text, ring, page, limited or quiet. The gate reads it.
 STATE=${FM_CALL_STATE:-$HOME/.local/state/fm-call}
 LOG=$STATE/log STOP=$STATE/stop
 TZ_Q=America/Los_Angeles
