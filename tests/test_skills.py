@@ -445,6 +445,7 @@ PRIVATE = re.compile(
 VENDORED_OWNER = {
     "blueprint/skills/public/README.md": ("github.com/DannyMac180", "github.com/caldoai"),
     "blueprint/skills/public/untangle-codebase/": ("github.com/caldoai",),
+    "blueprint/skills/public/prune-tests/": ("github.com/caldoai",),
     "blueprint/skills/public/apple-hig/": (
         "github.com/twostraws",
         "github.com/AvdLee",
