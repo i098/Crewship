@@ -13,7 +13,7 @@ Put the owner's words in the project instructions, so the authorization is on re
 ## What the authorization covers
 
 - Register the accounts that assigned work needs, under the owner's account email (`$ACCOUNT_EMAIL`, set in `$SECRETS_FILE`). No per-signup approval round trip.
-- Read the owner's mailbox to finish email verification and device codes. Do not hand a code back to the owner to type.
+- Read the owner's mailbox to finish email verification and device codes. Do not hand a code back to the owner to type. Set `MAIL_READ_AGENT` (your task name) and `MAIL_READ_PURPOSE` (why you read) before you read mail; the owner gets a text with both.
 - Approve OAuth consent and install third-party apps into the owner's workspaces.
 - Report the end result, not the consent screens you crossed to reach it.
 
