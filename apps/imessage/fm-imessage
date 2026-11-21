@@ -3,7 +3,7 @@
 # Usage: fm-imessage [--reply N | --reply-id ID] [--no-thread] [--key TOPIC] [--] 'text' | fm-imessage [--reply N | --reply-id ID] [--no-thread] --image PATH ['caption']
 #        fm-imessage --typing | fm-imessage --react '👍' | fm-imessage --card '<json>'|-|FILE
 # Blank-line-separated paragraphs become separate bubbles; a list stays one bubble. Sends are plain by default.
-# --reply N threads the first bubble only across later bubbles; --no-thread forces plain even with --reply N.
+# --reply N threads the first bubble only; --no-thread forces plain even with --reply N.
 # --reply-id ID threads to that exact message id, so a newer text cannot move the target; an unknown id sends nothing.
 # --image sends a photo (png, jpg or webp, up to 25 MB), then the caption as text bubbles. The bridge downscales a
 # photo with a side over 2048 px and checks it by content. Photos go over the Photon line only.
