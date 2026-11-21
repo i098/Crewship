@@ -8,7 +8,7 @@ const cleanup: (() => void)[] = [];
 afterEach(() => { for (const done of cleanup.splice(0)) done(); });
 
 async function sessionArgv(provider: string, model: string): Promise<string[]> {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const log = join(dir, "fake.jsonl");
   const wrapper = join(dir, "omp");
@@ -48,7 +48,7 @@ test("the system prompt sends a link read or web lookup to the helper, also afte
 });
 
 test("a background task's answer reaches the next turn as a missed line, the session's own replies do not", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const log = join(dir, "fake.jsonl");
   const wrapper = join(dir, "omp");
@@ -77,7 +77,7 @@ test("a background task's answer reaches the next turn as a missed line, the ses
 });
 
 test("delegate_task answers with a queued ack that names no send, then the task is sent once", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const wrapper = join(dir, "omp");
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
@@ -98,7 +98,7 @@ test("delegate_task answers with a queued ack that names no send, then the task 
 });
 
 test("a delegated thread reply sends the quoted parent bubble, not only the authored text", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const wrapper = join(dir, "omp");
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
@@ -120,7 +120,7 @@ test("a delegated thread reply sends the quoted parent bubble, not only the auth
 });
 
 test("a mate delegation acks synchronously with its own text, before the send finishes, and the rows are answered once", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "data"), { recursive: true });
   writeFileSync(join(dir, "data", "secondmates.md"), "- mate1 - Mate one (home: /srv/mate1; scope: s; projects: none)\n");
@@ -145,7 +145,7 @@ test("a mate delegation acks synchronously with its own text, before the send fi
 });
 
 test("message_mate hands the owner notice to the host with the mate and the sent text", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "data"), { recursive: true });
   writeFileSync(join(dir, "data", "secondmates.md"), "- web-mate - Website (home: /srv/web; scope: s; projects: none)\n");
@@ -166,7 +166,7 @@ test("message_mate hands the owner notice to the host with the mate and the sent
 });
 
 async function ownerInstruction(report: (events: unknown[][], parts: string[], guid: string) => void) {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const wrapper = join(dir, "omp");
   writeFileSync(wrapper, `#!/bin/bash\nFAKE_DESK_LOG=${JSON.stringify(join(dir, "fake.jsonl"))} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`);
@@ -198,7 +198,7 @@ test("an owner instruction is still handed to Firstmate when the ack cannot be q
 });
 
 test("a thread reply to a mate's bubble is relayed to that mate with no model turn;", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-turn-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "data"));
   writeFileSync(join(dir, "data/secondmates.md"), "- engram - Engram mate (home: /srv/engram; scope: engram work; projects: none)\n");

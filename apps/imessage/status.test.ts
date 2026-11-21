@@ -6,7 +6,7 @@ import { answerStatus, runFront } from "./front.ts";
 import { deskMayAct } from "./relay.ts";
 
 const realFetch = globalThis.fetch;
-const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "status-"));
+const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "status-"));
 process.env.STATE_DIRECTORY = dir;
 afterEach(() => { globalThis.fetch = realFetch; });
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));

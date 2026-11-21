@@ -8,7 +8,7 @@ const cleanup: (() => void)[] = [];
 afterEach(() => { for (const done of cleanup.splice(0)) done(); });
 
 function session(over: Partial<SessionOptions> = {}) {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-session-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-session-"));
   const logPath = join(dir, "fake.jsonl");
   const options: SessionOptions = {
     argv: [process.execPath, FAKE], cwd: dir, sessionDir: join(dir, "sessions"), tools: [], model: "fake/desk-model",

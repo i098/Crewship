@@ -2496,14 +2496,14 @@ def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_bridge_reply_threads_only_across_later_bubbles(tmp_path):
+def test_bridge_reply_threads_even_when_the_target_is_the_last_bubble(tmp_path):
     fake, state, notes, err, start, inbound, cli, text = fake_bridge(tmp_path)
     bridge = start(1)
     try:
         inbound("m1", text="first text")
         cli("--reply", "1", "immediate answer")
         wait_for(lambda: text(fake / "sent"), "the immediate answer")
-        assert text(fake / "sent").splitlines() == ["send immediate answer"]
+        assert text(fake / "sent").splitlines() == ["reply m1 immediate answer"]
         cli("--reply", "1", "after our bubble\n\nsecond")
         wait_for(lambda: len(text(fake / "sent").splitlines()) == 3, "the separated answer")
         assert text(fake / "sent").splitlines()[1:] == ["reply m1 after our bubble", "send second"]
@@ -2525,7 +2525,7 @@ def test_bridge_reply_threads_only_across_later_bubbles(tmp_path):
         bridge = start(2)
         inbound("m5", text="after restart")
         cli("--reply", "1", "adjacent after restart")
-        wait_for(lambda: "send adjacent after restart" in text(fake / "sent"), "the adjacent restored answer")
+        wait_for(lambda: "reply m5 adjacent after restart" in text(fake / "sent"), "the adjacent restored answer")
         cli("--reply", "1", "separated after restart")
         wait_for(lambda: "reply m5 separated after restart" in text(fake / "sent"), "the separated restored answer")
     finally:
@@ -2542,7 +2542,7 @@ def test_reply_does_not_count_a_bubble_in_another_chat(tmp_path):
         inbound("m2", text="another chat", space="chat-2")
         cli("--reply", "2", "adjacent in the target chat")
         wait_for(lambda: text(fake / "sent"), "the same-chat check")
-        assert text(fake / "sent").splitlines() == ["send adjacent in the target chat"]
+        assert text(fake / "sent").splitlines() == ["reply m1 adjacent in the target chat"]
     finally:
         bridge.terminate()
         bridge.wait(10)
@@ -3150,47 +3150,6 @@ export const Spectrum = async () => {
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_reply_keeps_an_uncertain_fallback_queued_after_a_permanent_read_error(tmp_path):
-    rig = FallbackRig(tmp_path)
-    try:
-        rig.start()
-        rig.photon_text("p1", "on Photon", at=1)
-        rig.relay_text("g1", "on BlueBubbles", int(time.time() * 1000))
-        rig.relay_mode("last-404")
-        (rig.fake / "send-unsure").touch()
-        rig.cli("--reply", "1", "first\n\nsecond")
-        wait_for(lambda: "outbox item 1 failed" in read_text(rig.err)
-                 or list((rig.state / "outbox-dead").glob("*.json")), "the uncertain send result")
-        assert not list((rig.state / "outbox-dead").glob("*.json"))
-        assert rig.outbox()[0]["maybe"] == {"photon": "iMessage;-;+10000000000"}
-        (rig.fake / "send-unsure").unlink()
-        rig.relay_mode("")
-        wait_for(lambda: "send second" in read_text(rig.fake / "sent"), "the queued remaining bubbles")
-        assert read_text(rig.fake / "sent").splitlines() == ["send first", "send second"]
-        assert not read_text(rig.fake / "relay-sent")
-    finally:
-        rig.close()
-
-
-@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_reply_read_timeout_uses_the_fallback_without_blocking_plain_sends(tmp_path):
-    rig = FallbackRig(tmp_path)
-    try:
-        rig.start()
-        rig.photon_text("p1", "the target")
-        (rig.fake / "read-timeout").touch()
-        rig.cli("--reply", "1", "fallback answer")
-        rig.cli("plain behind it")
-        wait_for(lambda: "fallback answer" in read_text(rig.fake / "relay-sent")
-                 or "outbox item 1 failed" in read_text(rig.err), "the read-only failure result")
-        assert "fallback answer" in read_text(rig.fake / "relay-sent")
-        wait_for(lambda: "send plain behind it" in read_text(rig.fake / "sent"), "the unblocked plain send")
-        wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "the completed fallback queue")
-    finally:
-        rig.close()
-
-
-@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_reply_does_not_count_a_bluebubbles_tapback_as_a_later_bubble(tmp_path):
     rig = FallbackRig(tmp_path)
     try:
@@ -3202,7 +3161,7 @@ def test_reply_does_not_count_a_bluebubbles_tapback_as_a_later_bubble(tmp_path):
         wait_for(lambda: read_text(rig.fake / "relay-payloads"), "the tapback-only answer")
         payload = json.loads(read_text(rig.fake / "relay-payloads").splitlines()[0])
         assert payload["message"] == "adjacent despite the tapback"
-        assert "selectedMessageGuid" not in payload and "partIndex" not in payload
+        assert payload["selectedMessageGuid"] == "g1" and payload["partIndex"] == 0
     finally:
         rig.close()
 
@@ -3250,10 +3209,7 @@ def test_smart_reply_orders_history_across_lagging_relays(tmp_path, later):
         payload = json.loads(read_text(rig.fake / "relay-payloads").splitlines()[0])
         assert payload["chatGuid"] == "iMessage;-;+10000000000"
         assert payload["message"] == "- the answer"
-        if later is None:
-            assert "selectedMessageGuid" not in payload
-        else:
-            assert payload["selectedMessageGuid"] == "target"
+        assert payload["selectedMessageGuid"] == "target"
         rig.cli("--no-thread", "--reply", n, "--", "- forced plain")
         rig.cli("--reply", n, "--no-thread", "--", "- forced plain again")
         rig.cli("--", "- plain")
@@ -3292,9 +3248,8 @@ def test_bridge_smart_reply_uses_inbound_bluebubbles_transport(tmp_path, private
         payloads = [json.loads(line) for line in read_text(rig.fake / "relay-payloads").splitlines()]
         assert [p["message"] for p in payloads] == ["adjacent", "after our bubble", "after his bubble"]
         assert all(p["chatGuid"] == "iMessage;-;+10000000000" for p in payloads)
-        assert "selectedMessageGuid" not in payloads[0]
         if private_api:
-            assert [p["selectedMessageGuid"] for p in payloads[1:]] == ["g1", "g2"]
+            assert [p["selectedMessageGuid"] for p in payloads] == ["g1", "g1", "g2"]
         else:
             assert all("selectedMessageGuid" not in p and "partIndex" not in p for p in payloads)
         assert not read_text(rig.fake / "sent")
@@ -3388,7 +3343,7 @@ def test_a_text_the_check_proves_not_sent_goes_out_once_on_photon(tmp_path):
     finally:
         rig.close()
     assert read_text(rig.fake / "relay-sent") == ""
-    assert read_text(rig.fake / "sent").splitlines() == ["send once only"]
+    assert read_text(rig.fake / "sent").splitlines() == ["reply m1 once only"]
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
 def test_a_stuck_tapback_is_dropped_and_the_sends_behind_it_go_out(tmp_path):
@@ -3565,13 +3520,15 @@ def test_owner_group_text_preserves_the_direct_proactive_destination(tmp_path, t
         latest = rig.state / ("latest" if transport == "photon" else "latest-bluebubbles")
         wait_for(lambda: group in read_text(latest), "the explicit group target")
         rig.cli("--reply", "1", "explicit group answer")
-        sent = rig.fake / ("send-targets" if transport == "photon" else "relay-sent")
-        wait_for(lambda: group in read_text(sent), "the explicit group reply")
+        # A Photon thread reply goes through the group message itself, so the fake logs it in "sent", not "send-targets".
+        sent = rig.fake / ("sent" if transport == "photon" else "relay-sent")
+        wait_for(lambda: "explicit group answer" in read_text(sent), "the explicit group reply")
         wait_for(lambda: not list((rig.state / "outbox").glob("*.json")), "the completed group reply")
         if transport == "bluebubbles":
             assert read_text(rig.fake / "relay-sent").splitlines() == [f"{group} explicit group answer"]
         else:
-            assert read_text(rig.fake / "send-targets").splitlines() == [group]
+            assert read_text(rig.fake / "sent").splitlines() == ["reply g1 explicit group answer"]
+            assert not read_text(rig.fake / "send-targets")
         if restart:
             rig.stop()
             rig.start()

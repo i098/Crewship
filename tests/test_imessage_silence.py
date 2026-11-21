@@ -397,12 +397,13 @@ def test_explicit_reply_confirms_current_edits(tmp_path, desk_clock, image, plai
             wait_for(lambda: f"photon-original-edit-{sequence} " in text(notes), "the edited request")
         arguments = ["--reply", "1", *(["--no-thread"] if plain else [])]
         expected = []
+        verb = "send" if plain else "reply original"
         if image:
             photo = tmp_path / "reply.png"
             photo.write_bytes(png(2, 2))
             arguments += ["--image", str(photo)]
-            expected.append("send [image reply.png image/png 2x2]")
-        expected.append("send The deploy job passed.")
+            expected.append(f"{verb} [image reply.png image/png 2x2]")
+        expected.append(f"{'send' if image else verb} The deploy job passed.")
         cli(*arguments, "The deploy job passed.")
         wait_for(lambda: len(text(fake / "sent").splitlines()) >= len(expected), "the explicit reply")
         wait_for(lambda: not list((state / "outbox").glob("*.json")), "the completed reply")

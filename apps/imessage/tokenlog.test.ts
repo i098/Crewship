@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { logTokens, tokenDir, usageTokens } from "./tokenlog.ts";
 
 const withDir = (run: (env: Record<string, string>, dir: string) => void) => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tokenlog-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "tokenlog-"));
   try { run({ STATE_DIRECTORY: dir }, dir); } finally { rmSync(dir, { recursive: true, force: true }); }
 };
 

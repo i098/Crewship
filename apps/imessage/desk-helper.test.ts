@@ -55,7 +55,7 @@ test("the helper environment is PATH, HOME and the model's own key only", () => 
 test("a spawned helper gets the kind's tools and the narrow environment", () => {
   const spawned: { argv: string[]; env: Record<string, string> }[] = [];
   const real = Bun.spawn;
-  const dir = `${process.env.TMPDIR ?? "/tmp"}/helper-spawn-${crypto.randomUUID()}`;
+  const dir = `${process.env.TMPDIR || "/tmp"}/helper-spawn-${crypto.randomUUID()}`;
   (Bun as { spawn: unknown }).spawn = (argv: string[], o: { env: Record<string, string> }) => (spawned.push({ argv, env: o.env }), { exited: Promise.resolve(0), stdout: new Blob([]) });
   try {
     for (const kind of ["install", "lookup"] as const) {

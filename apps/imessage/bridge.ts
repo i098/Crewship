@@ -265,7 +265,6 @@ type Line = {
   name: string;
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
-  separated(space: string, id: string): Promise<boolean>;
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
@@ -299,7 +298,6 @@ async function startLine(name: string): Promise<Line> {
       },
       messages: bb,
       find: (ref) => bb.message(ref.id),
-      separated: (space, id) => bb.separated(space, id),
       send: (space, text, reply, guid, beforeSend, sentId) => bb.send(space, text, reply, guid, beforeSend, sentId),
       sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
@@ -344,11 +342,6 @@ async function startLine(name: string): Promise<Line> {
       for await (const [, message] of app.messages) yield message;
     })(),
     find,
-    async separated(space, id) {
-      if (!photon) throw new Error("cannot check reply separation: Photon chat client is unavailable");
-      const last = (await photon.chats.get(space)).lastMessage?.guid;
-      return !!last && last !== id;
-    },
     async send(space, text, reply, _guid, beforeSend) {
       const thread = await threadOf(space, reply);
       if (thread) {
@@ -391,7 +384,7 @@ const startups = TRANSPORTS.map((name) => {
     throw Object.assign(new Error(`${name} is not ready`), { status: 503, maybeSent: false });
   };
   const line: Line = {
-    name, find: notReady, separated: notReady, send: notReady, react: notReady,
+    name, find: notReady, send: notReady, react: notReady,
     ...(name === "photon" ? { sendCard: notReady, sendImage: notReady } : {}),
     messages: (async function* () {
       const ready = await started;
@@ -976,21 +969,16 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
     const reply = own && i === 0 ? o.reply : undefined;
     return [{ name: line.name, send: async (bubble: Bubble) => {
       if (stopping) throw new Error("bridge stopping");
-      // A read-only lookup cannot have sent text, so its failure can use a fallback.
-      const separated = reply ? await line.separated(space, reply).catch((e: unknown) => {
-        throw Object.assign(e instanceof Error ? e : new Error(String(e)), { maybeSent: false });
-      }) : false;
-      const thread = separated ? reply : undefined;
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
         if (typeof bubble === "string") {
           let sentId: string | undefined;
-          const outcome = await line.send(space, bubble, thread, guid, () => checkDeskDelivery(o), (id) => { sentId = id; });
+          const outcome = await line.send(space, bubble, reply, guid, () => checkDeskDelivery(o), (id) => { sentId = id; });
           rememberSender(bubble, o.sender, sentId);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
-          await line.sendImage!(space, bubble, thread);
+          await line.sendImage!(space, bubble, reply);
           trace(o.id, "transport-accepted");
         }
       } catch (e) {

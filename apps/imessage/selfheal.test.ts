@@ -5,7 +5,7 @@ import { bridgeNatives, loadState, markHealthy, onStart, Turns } from "./selfhea
 
 // A fake omp that prints a version but unpacks no natives, so every start fails its natives check.
 const withHome = async (run: (env: Record<string, string>, dir: string) => Promise<void>) => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "selfheal-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "selfheal-"));
   writeFileSync(`${dir}/omp`, "#!/bin/sh\necho omp/0.0.1\n");
   chmodSync(`${dir}/omp`, 0o755);
   const env = { PATH: process.env.PATH ?? "", HOME: dir, TMPDIR: dir, STATE_DIRECTORY: `${dir}/state`, FM_IMESSAGE_OMP: `${dir}/omp`,
@@ -64,7 +64,7 @@ test("a healthy bridge gets no alert and its failure count is cleared", () => wi
 
 // A fake omp install whose pi-natives throws on import until native/a.node exists; the platform package holds a.node.
 const withInstall = async (platformHasNode: boolean, run: (env: Record<string, string>, native: string) => Promise<void>) => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "selfheal-bridge-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "selfheal-bridge-"));
   const pkg = `${dir}/node_modules/@oh-my-pi/pi-natives`;
   const platform = `${dir}/node_modules/@oh-my-pi/pi-natives-${process.platform}-${process.arch}`;
   mkdirSync(`${pkg}/native`, { recursive: true });
