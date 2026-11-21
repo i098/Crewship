@@ -31,6 +31,7 @@ With the `agents` profile on, `./ship.sh launch`:
 9. Installs the skills in [`blueprint/skills/`](../blueprint/skills/) for omp and Claude Code. See [Skills](#skills).
 10. Installs [`blueprint/config/AGENTS.md`](../blueprint/config/AGENTS.md) as the global instructions of Claude Code, omp and Codex, when `profiles.agent_instructions` is on. See [Global instructions](#global-instructions).
 11. Installs the omp rules in [`blueprint/rules/`](../blueprint/rules/) to omp's global rules folder. See [Rules](#rules).
+12a. Installs `~/.omp/agent/extensions/fm-browser-notice.ts` from [`blueprint/config/omp-browser-notice.ts`](../blueprint/config/omp-browser-notice.ts). When an agent starts a browser session with omp's `browser` tools, it runs `fleet-browser notice`, the same owner text as the `chrome-devtools-axi` wrapper, once per session. Both paths share one once-per-30-minutes claim, so they never send twice. Every apply rewrites it.
 12. Installs `~/.omp/agent/extensions/fm-opus-effort-cap.ts` from [`blueprint/config/omp-opus-effort-cap.ts`](../blueprint/config/omp-opus-effort-cap.ts). See [Spawned Opus effort cap](configuration.md#spawned-opus-effort-cap).
 13. Installs the opt-in extension [`fm-gluttony.ts`](../blueprint/config/fm-gluttony.ts) as `~/.omp/agent/extensions/fm-gluttony.ts`.
     See [Gluttony mode](#gluttony-mode).

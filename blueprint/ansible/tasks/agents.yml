@@ -305,6 +305,18 @@
     remote_src: true
   become: true
 
+# The omp extension that texts the owner when omp's own browser tools start a
+# session, like the chrome-devtools-axi wrapper does (docs/omp.md). Managed.
+- name: Install the browser notice omp extension
+  ansible.builtin.copy:
+    src: "{{ crewship_blueprint }}/config/omp-browser-notice.ts"
+    dest: "{{ crewship_omp_browser_notice_extension }}"
+    owner: "{{ crewship_cfg.user }}"
+    group: "{{ crewship_group }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+
 # The omp extension that starts a turn for an owner note or watcher wake left
 # queued in an idle firstmate home after a compaction (docs/omp.md). Managed.
 - name: Install the stranded-wake omp extension
