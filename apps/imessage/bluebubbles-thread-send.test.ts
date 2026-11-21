@@ -1,11 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlueBubbles } from "./bluebubbles.ts";
 
 const servers: { stop(force?: boolean): void }[] = [];
-afterEach(() => { for (const s of servers.splice(0)) s.stop(true); });
+const dirs: string[] = [];
+afterEach(() => {
+  for (const s of servers.splice(0)) s.stop(true);
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
 
 function relay(privateApi: boolean) {
   const sent: Record<string, unknown>[] = [];
@@ -22,7 +26,9 @@ function relay(privateApi: boolean) {
     },
   });
   servers.push(server);
-  const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], mkdtempSync(join(tmpdir(), "bb-thread-")), {}, () => {});
+  const dir = mkdtempSync(join(tmpdir(), "bb-thread-"));
+  dirs.push(dir);
+  const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], dir, {}, () => {});
   return { bb, sent };
 }
 
