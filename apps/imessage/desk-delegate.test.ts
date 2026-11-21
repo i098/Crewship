@@ -10,7 +10,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 function rig(over: Partial<DelegateHost<string>> = {}) {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-delegate-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-delegate-"));
   dirs.push(dir);
   const sent: { target: DelegateTarget; text: string }[] = [];
   const reports: { parts: string[]; origin: string }[] = [];
@@ -182,7 +182,7 @@ test("an empty answer file is not an answer: the job waits for its content", asy
 });
 
 test("with the bridge's keyed outbox, the follow-up and the late answer are both delivered", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "desk-outbox-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-outbox-"));
   dirs.push(dir);
   const delivered: string[][] = [];
   const outbox = new Queue<{ requestId: string; bubbles: string[] }>(join(dir, "outbox"), "outbox item", async (item) => void delivered.push(item.bubbles), 10, undefined, (item) => item.requestId);

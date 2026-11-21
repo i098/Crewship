@@ -35,3 +35,4 @@ blueprint/rules/private/*
 target/
 pr-body.md
 .lavish/
+apps/imessage/status-*/
