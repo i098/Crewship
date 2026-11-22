@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ def _mode(repo):
     fake = repo.parent / (repo.name + "-bin")
     fake.mkdir(exist_ok=True)
     (fake / "cf-sandbox").write_text(
-        '#!/bin/sh\nfor a; do case $a in --testmon*) echo "$a";; esac; done\n'
+        '#!/bin/sh\nfor a; do case $a in --testmon*|tests*|test) printf "%s " "$a";; esac; done; echo\n'
     )
     (fake / "cf-sandbox").chmod(0o755)
     env = {
@@ -30,7 +31,7 @@ def _mode(repo):
     out = subprocess.run(
         [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
     )
-    return out.stdout.strip()
+    return [line.strip() for line in out.stdout.splitlines()]
 
 
 def _repo(tmp_path):
@@ -45,14 +46,14 @@ def _repo(tmp_path):
 def test_python_only_change_selects(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
-    assert _mode(repo) == "--testmon"
+    assert _mode(repo) == ["--testmon tests"]
 
 
 def test_untracked_non_python_file_runs_everything(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
     (repo / "play.yml").write_text("- hosts: all\n")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_committed_non_python_change_runs_everything(tmp_path):
@@ -60,7 +61,7 @@ def test_committed_non_python_change_runs_everything(tmp_path):
     (repo / "run.sh").write_text("true\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "sh")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_unknown_merge_base_runs_everything(tmp_path):
@@ -68,14 +69,14 @@ def test_unknown_merge_base_runs_everything(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-m", "base")
-    assert _mode(tmp_path) == "--testmon-noselect"
+    assert _mode(tmp_path) == ["--testmon-noselect tests"]
 
 
 def test_git_failure_runs_everything(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
     (repo / ".git" / "index").write_text("corrupt")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_default_data_dir_is_per_checkout(tmp_path):
@@ -123,7 +124,9 @@ def test_stale_own_data_dir_survives_and_is_seeded(tmp_path):
 def test_seed_published_only_after_successful_run(tmp_path, exit_code, published):
     fake = tmp_path / "bin"
     fake.mkdir()
-    (fake / "cf-sandbox").write_text(f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n')
+    (fake / "cf-sandbox").write_text(
+        f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n'
+    )
     (fake / "cf-sandbox").chmod(0o755)
     home = tmp_path / "home"
     env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
@@ -131,3 +134,45 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
     proc = subprocess.run([str(SCRIPT)], cwd=_repo(tmp_path), env=env)
     assert proc.returncode == exit_code
     assert (home / ".cache" / "crewship-testmon" / "seed").exists() is published
+
+
+@pytest.mark.parametrize(
+    ("path", "runs"),
+    [
+        ("changelog.d/1.fixed.md", ["--testmon tests"]),
+        ("docs/features.md", ["--testmon-noselect tests"]),
+        ("README.md", ["--testmon-noselect tests"]),
+        ("tests/rules/x.md", ["--testmon-noselect tests"]),
+        (
+            "apps/imessage/bridge.ts",
+            ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"],
+        ),
+        ("scripts/x.sh", ["--testmon-noselect tests"]),
+        ("Makefile apps/imessage/bridge.ts", ["--testmon-noselect tests", "test"]),
+    ],
+)
+def test_path_maps_to_suite(tmp_path, path, runs):
+    repo = _repo(tmp_path)
+    for name in path.split():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("x\n")
+    assert _mode(repo) == runs
+
+
+def test_timeout_scale_applies_once(tmp_path):
+    code = (
+        "import sys, time, subprocess; sys.path.insert(0, 'tests'); import conftest\n"
+        "p = subprocess.Popen(['sleep', '2']); p.communicate(timeout=1)\n"
+        "t = time.time()\n"
+        "try:\n    subprocess.run(['sleep', '20'], timeout=1)\nexcept subprocess.TimeoutExpired:\n    print(time.time() - t)\n"
+    )
+    env = os.environ | {"CREWSHIP_TEST_TIMEOUT_SCALE": "3"}
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=SCRIPT.parent.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert 2.5 < float(out.stdout) < 6, out

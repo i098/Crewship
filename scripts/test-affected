@@ -5,6 +5,8 @@
 # The first run on a host has no data and runs the whole suite. GitHub CI stays on the full suite.
 # testmon sees only Python that runs in the pytest process. Any changed non-.py file (playbook, shell, .ts, ...)
 # or an unknown merge base runs the full suite; testmon still records data (--testmon-noselect).
+# Exceptions: changelog.d/ never selects tests (docs and *.md stay on the full suite: tests read them); apps/imessage/ runs its bun tests and tests/test_imessage*.py.
+# CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies subprocess timeouts in tests (tests/conftest.py).
 set -euo pipefail
 
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
@@ -20,6 +22,7 @@ export TESTMON_DATAFILE="$data_dir/testmondata"
 export CF_SANDBOX_RW="$data_dir${CF_SANDBOX_RW:+:$CF_SANDBOX_RW}"
 
 mode=--testmon-noselect
+imessage=
 base=
 for ref in origin/HEAD origin/main origin/master main master; do
     if git rev-parse --verify -q "$ref^{commit}" >/dev/null; then base=$(git merge-base HEAD "$ref" 2>/dev/null) && break; base=; fi
@@ -27,12 +30,22 @@ done
 if [ -n "$base" ] && changed=$(git diff --no-renames --name-only "$base" && git ls-files --others --exclude-standard); then
     mode=--testmon
     while IFS= read -r path; do
-        case $path in "" | *.py) ;; *) mode=--testmon-noselect; break ;; esac
+        case $path in
+        "" | *.py | changelog.d/*) ;;
+        apps/imessage/*) imessage=1 ;;
+        *) mode=--testmon-noselect ;;
+        esac
     done <<<"$changed"
 fi
 
 rc=0
 cf-sandbox -- uv run pytest -n 4 --dist worksteal "$mode" "$@" tests || rc=$?
+if [ -n "$imessage" ]; then
+    if [ "$mode" != --testmon-noselect ]; then
+        cf-sandbox -- uv run pytest -n 4 --dist worksteal --testmon-noselect "$@" tests/test_imessage*.py || rc=$?
+    fi
+    cf-sandbox -- bun test apps/imessage || rc=$?
+fi
 if [ "$rc" -eq 0 ] && [ -z "${CF_TESTMON_DIR:-}" ] && [ -f "$data_dir/testmondata" ]; then
     cp "$data_dir/testmondata" "$cache/seed.$$" && mv -f "$cache/seed.$$" "$cache/seed" || rm -f "$cache/seed.$$"
 fi

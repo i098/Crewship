@@ -6,6 +6,7 @@ A real Herdr is reached only through tests/herdr-lab (CONTRIBUTING.md).
 """
 
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,27 @@ REFUSE.chmod(0o755)
 os.environ["PATH"] = f"{REFUSE.parent}{os.pathsep}{os.environ.get('PATH', '')}"
 for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
     os.environ.pop(name, None)
+
+# CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies every subprocess timeout (the 10 s and 30 s limits) on slow hosts.
+_SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))
+if _SCALE != 1:
+    _communicate, _wait = subprocess.Popen.communicate, subprocess.Popen.wait
+
+    def _scale(timeout):
+        return None if timeout is None else timeout * _SCALE
+
+    def _communicate_scaled(self, input=None, timeout=None):
+        self._in_communicate = True
+        try:
+            return _communicate(self, input, _scale(timeout))
+        finally:
+            self._in_communicate = False
+
+    def _wait_scaled(self, timeout=None):
+        return _wait(self, timeout if getattr(self, "_in_communicate", False) else _scale(timeout))
+
+    subprocess.Popen.communicate = _communicate_scaled
+    subprocess.Popen.wait = _wait_scaled
 
 
 def pytest_collection_modifyitems(config, items):
