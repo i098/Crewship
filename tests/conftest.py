@@ -26,12 +26,13 @@ for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
 # CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies every subprocess timeout (the 10 s and 30 s limits) on slow hosts.
 _SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))
 if _SCALE != 1:
-    for _name in ("communicate", "wait"):
+    _communicate, _wait = subprocess.Popen.communicate, subprocess.Popen.wait
 
-        def _scaled(self, *args, timeout=None, _orig=getattr(subprocess.Popen, _name), **kwargs):
-            return _orig(self, *args, timeout=None if timeout is None else timeout * _SCALE, **kwargs)
+    def _scale(timeout):
+        return None if timeout is None else timeout * _SCALE
 
-        setattr(subprocess.Popen, _name, _scaled)
+    subprocess.Popen.communicate = lambda self, input=None, timeout=None: _communicate(self, input, _scale(timeout))
+    subprocess.Popen.wait = lambda self, timeout=None: _wait(self, _scale(timeout))
 
 
 def pytest_collection_modifyitems(config, items):
