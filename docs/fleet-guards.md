@@ -208,7 +208,7 @@ Dia, the owner's Mac browser, is no tier: use it only for a cookie pull (`fleet-
 
 Owner notice: `use-notice.ts` texts the owner through `FLEET_BROWSER_SEND` (default `fm-imessage`, text on stdin) and counts open tabs in each browser, Dia over `ssh` to `DIA_COOKIES_HOST` (default `mac`).
 `FLEET_BROWSER_NOTICE_WINDOW_MIN` (default 30) sets the window of one text per agent and browser.
-The `chrome-devtools-axi` wrapper in the same directory is one trigger. The agent contract is in the [fleet-browser skill](../blueprint/skills/public/fleet-browser/SKILL.md#owner-notice).
+The `chrome-devtools-axi` wrapper in the same directory is one trigger; the omp extension `fm-browser-notice.ts` is the other, for omp's own browser tools ([omp](omp.md)). The agent contract is in the [fleet-browser skill](../blueprint/skills/public/fleet-browser/SKILL.md#owner-notice).
 
 A tier reaches Geonode through `geonode-proxy.py`, a loopback forwarder that adds the credentials
 Chrome cannot carry. It reads `GEONODE_GATEWAY`, `GEONODE_USERNAME`, `GEONODE_PASSWORD`, `GEONODE_STICKY_PORT_BASE` and
