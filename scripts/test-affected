@@ -33,19 +33,19 @@ if [ -n "$base" ] && changed=$(git diff --no-renames --name-only "$base" && git 
         case $path in
         "" | *.py | changelog.d/* | docs/*) ;;
         apps/imessage/*) imessage=1 ;;
-        */*.md) mode=--testmon-noselect; break ;;
+        */*.md) mode=--testmon-noselect ;;
         *.md) ;;
-        *) mode=--testmon-noselect; break ;;
+        *) mode=--testmon-noselect ;;
         esac
     done <<<"$changed"
 fi
 
 rc=0
-if [ "$mode" = --testmon-noselect ] || [ -z "$imessage" ]; then
-    cf-sandbox -- uv run pytest -n 4 --dist worksteal "$mode" "$@" tests || rc=$?
-else
-    cf-sandbox -- uv run pytest -n 4 --dist worksteal --testmon "$@" tests || rc=$?
-    cf-sandbox -- uv run pytest -n 4 --dist worksteal --testmon-noselect "$@" tests/test_imessage*.py || rc=$?
+cf-sandbox -- uv run pytest -n 4 --dist worksteal "$mode" "$@" tests || rc=$?
+if [ -n "$imessage" ]; then
+    if [ "$mode" != --testmon-noselect ]; then
+        cf-sandbox -- uv run pytest -n 4 --dist worksteal --testmon-noselect "$@" tests/test_imessage*.py || rc=$?
+    fi
     cf-sandbox -- bun test apps/imessage || rc=$?
 fi
 if [ "$rc" -eq 0 ] && [ -z "${CF_TESTMON_DIR:-}" ] && [ -f "$data_dir/testmondata" ]; then

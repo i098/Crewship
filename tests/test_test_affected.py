@@ -142,10 +142,13 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
         ("tests/rules/x.md", ["--testmon-noselect tests"]),
         ("apps/imessage/bridge.ts", ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"]),
         ("scripts/x.sh", ["--testmon-noselect tests"]),
+        ("scripts/x.sh apps/imessage/bridge.ts", ["--testmon-noselect tests", "test"]),
+        ("apps/imessage/bridge.ts scripts/x.sh", ["--testmon-noselect tests", "test"]),
     ],
 )
 def test_path_maps_to_suite(tmp_path, path, runs):
     repo = _repo(tmp_path)
-    (repo / path).parent.mkdir(parents=True, exist_ok=True)
-    (repo / path).write_text("x\n")
+    for name in path.split():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("x\n")
     assert _mode(repo) == runs
