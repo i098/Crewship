@@ -139,6 +139,7 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
         ("changelog.d/1.fixed.md", ["--testmon tests"]),
         ("docs/a.txt", ["--testmon tests"]),
         ("README.md", ["--testmon tests"]),
+        ("tests/rules/x.md", ["--testmon-noselect tests"]),
         ("apps/imessage/bridge.ts", ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"]),
         ("scripts/x.sh", ["--testmon-noselect tests"]),
     ],

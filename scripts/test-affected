@@ -5,7 +5,7 @@
 # The first run on a host has no data and runs the whole suite. GitHub CI stays on the full suite.
 # testmon sees only Python that runs in the pytest process. Any changed non-.py file (playbook, shell, .ts, ...)
 # or an unknown merge base runs the full suite; testmon still records data (--testmon-noselect).
-# Exceptions: changelog.d/, docs/ and *.md never select tests; apps/imessage/ runs its bun tests and tests/test_imessage*.py.
+# Exceptions: changelog.d/, docs/ and root-level *.md never select tests; apps/imessage/ runs its bun tests and tests/test_imessage*.py.
 # CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies subprocess timeouts in tests (tests/conftest.py).
 set -euo pipefail
 
@@ -31,8 +31,10 @@ if [ -n "$base" ] && changed=$(git diff --no-renames --name-only "$base" && git 
     mode=--testmon
     while IFS= read -r path; do
         case $path in
-        "" | *.py | changelog.d/* | docs/* | *.md) ;;
+        "" | *.py | changelog.d/* | docs/*) ;;
         apps/imessage/*) imessage=1 ;;
+        */*.md) mode=--testmon-noselect; break ;;
+        *.md) ;;
         *) mode=--testmon-noselect; break ;;
         esac
     done <<<"$changed"
