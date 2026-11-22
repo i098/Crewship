@@ -19,7 +19,7 @@ def _mode(repo):
     fake = repo.parent / (repo.name + "-bin")
     fake.mkdir(exist_ok=True)
     (fake / "cf-sandbox").write_text(
-        '#!/bin/sh\nfor a; do case $a in --testmon*) echo "$a";; esac; done\n'
+        '#!/bin/sh\nfor a; do case $a in --testmon*|tests*|test) printf "%s " "$a";; esac; done; echo\n'
     )
     (fake / "cf-sandbox").chmod(0o755)
     env = {
@@ -30,7 +30,7 @@ def _mode(repo):
     out = subprocess.run(
         [str(SCRIPT)], cwd=repo, env=env, check=True, capture_output=True, text=True
     )
-    return out.stdout.strip()
+    return [line.strip() for line in out.stdout.splitlines()]
 
 
 def _repo(tmp_path):
@@ -45,14 +45,14 @@ def _repo(tmp_path):
 def test_python_only_change_selects(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
-    assert _mode(repo) == "--testmon"
+    assert _mode(repo) == ["--testmon tests"]
 
 
 def test_untracked_non_python_file_runs_everything(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
     (repo / "play.yml").write_text("- hosts: all\n")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_committed_non_python_change_runs_everything(tmp_path):
@@ -60,7 +60,7 @@ def test_committed_non_python_change_runs_everything(tmp_path):
     (repo / "run.sh").write_text("true\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "sh")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_unknown_merge_base_runs_everything(tmp_path):
@@ -68,14 +68,14 @@ def test_unknown_merge_base_runs_everything(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-m", "base")
-    assert _mode(tmp_path) == "--testmon-noselect"
+    assert _mode(tmp_path) == ["--testmon-noselect tests"]
 
 
 def test_git_failure_runs_everything(tmp_path):
     repo = _repo(tmp_path)
     (repo / "a.py").write_text("x = 2\n")
     (repo / ".git" / "index").write_text("corrupt")
-    assert _mode(repo) == "--testmon-noselect"
+    assert _mode(repo) == ["--testmon-noselect tests"]
 
 
 def test_default_data_dir_is_per_checkout(tmp_path):
@@ -131,3 +131,20 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
     proc = subprocess.run([str(SCRIPT)], cwd=_repo(tmp_path), env=env)
     assert proc.returncode == exit_code
     assert (home / ".cache" / "crewship-testmon" / "seed").exists() is published
+
+
+@pytest.mark.parametrize(
+    ("path", "runs"),
+    [
+        ("changelog.d/1.fixed.md", ["--testmon tests"]),
+        ("docs/a.txt", ["--testmon tests"]),
+        ("README.md", ["--testmon tests"]),
+        ("apps/imessage/bridge.ts", ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"]),
+        ("scripts/x.sh", ["--testmon-noselect tests"]),
+    ],
+)
+def test_path_maps_to_suite(tmp_path, path, runs):
+    repo = _repo(tmp_path)
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text("x\n")
+    assert _mode(repo) == runs
