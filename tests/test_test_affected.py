@@ -1,6 +1,6 @@
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -124,7 +124,9 @@ def test_stale_own_data_dir_survives_and_is_seeded(tmp_path):
 def test_seed_published_only_after_successful_run(tmp_path, exit_code, published):
     fake = tmp_path / "bin"
     fake.mkdir()
-    (fake / "cf-sandbox").write_text(f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n')
+    (fake / "cf-sandbox").write_text(
+        f'#!/bin/sh\necho db > "$TESTMON_DATAFILE"\nexit {exit_code}\n'
+    )
     (fake / "cf-sandbox").chmod(0o755)
     home = tmp_path / "home"
     env = {k: v for k, v in os.environ.items() if k != "CF_TESTMON_DIR"}
@@ -141,7 +143,10 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
         ("docs/a.txt", ["--testmon tests"]),
         ("README.md", ["--testmon tests"]),
         ("tests/rules/x.md", ["--testmon-noselect tests"]),
-        ("apps/imessage/bridge.ts", ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"]),
+        (
+            "apps/imessage/bridge.ts",
+            ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"],
+        ),
         ("scripts/x.sh", ["--testmon-noselect tests"]),
         ("Makefile apps/imessage/bridge.ts", ["--testmon-noselect tests", "test"]),
     ],
@@ -162,5 +167,12 @@ def test_timeout_scale_applies_once(tmp_path):
         "try:\n    subprocess.run(['sleep', '20'], timeout=1)\nexcept subprocess.TimeoutExpired:\n    print(time.time() - t)\n"
     )
     env = os.environ | {"CREWSHIP_TEST_TIMEOUT_SCALE": "3"}
-    out = subprocess.run([sys.executable, "-c", code], cwd=SCRIPT.parent.parent, env=env, capture_output=True, text=True, timeout=60)
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=SCRIPT.parent.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     assert 2.5 < float(out.stdout) < 6, out
