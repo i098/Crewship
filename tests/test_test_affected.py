@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -142,8 +143,7 @@ def test_seed_published_only_after_successful_run(tmp_path, exit_code, published
         ("tests/rules/x.md", ["--testmon-noselect tests"]),
         ("apps/imessage/bridge.ts", ["--testmon tests", "--testmon-noselect tests/test_imessage*.py", "test"]),
         ("scripts/x.sh", ["--testmon-noselect tests"]),
-        ("scripts/x.sh apps/imessage/bridge.ts", ["--testmon-noselect tests", "test"]),
-        ("apps/imessage/bridge.ts scripts/x.sh", ["--testmon-noselect tests", "test"]),
+        ("Makefile apps/imessage/bridge.ts", ["--testmon-noselect tests", "test"]),
     ],
 )
 def test_path_maps_to_suite(tmp_path, path, runs):
@@ -152,3 +152,15 @@ def test_path_maps_to_suite(tmp_path, path, runs):
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_text("x\n")
     assert _mode(repo) == runs
+
+
+def test_timeout_scale_applies_once(tmp_path):
+    code = (
+        "import sys, time, subprocess; sys.path.insert(0, 'tests'); import conftest\n"
+        "p = subprocess.Popen(['sleep', '2']); p.communicate(timeout=1)\n"
+        "t = time.time()\n"
+        "try:\n    subprocess.run(['sleep', '20'], timeout=1)\nexcept subprocess.TimeoutExpired:\n    print(time.time() - t)\n"
+    )
+    env = os.environ | {"CREWSHIP_TEST_TIMEOUT_SCALE": "3"}
+    out = subprocess.run([sys.executable, "-c", code], cwd=SCRIPT.parent.parent, env=env, capture_output=True, text=True, timeout=60)
+    assert 2.5 < float(out.stdout) < 6, out

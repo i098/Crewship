@@ -31,8 +31,18 @@ if _SCALE != 1:
     def _scale(timeout):
         return None if timeout is None else timeout * _SCALE
 
-    subprocess.Popen.communicate = lambda self, input=None, timeout=None: _communicate(self, input, _scale(timeout))
-    subprocess.Popen.wait = lambda self, timeout=None: _wait(self, _scale(timeout))
+    def _communicate_scaled(self, input=None, timeout=None):
+        self._in_communicate = True
+        try:
+            return _communicate(self, input, _scale(timeout))
+        finally:
+            self._in_communicate = False
+
+    def _wait_scaled(self, timeout=None):
+        return _wait(self, timeout if getattr(self, "_in_communicate", False) else _scale(timeout))
+
+    subprocess.Popen.communicate = _communicate_scaled
+    subprocess.Popen.wait = _wait_scaled
 
 
 def pytest_collection_modifyitems(config, items):
