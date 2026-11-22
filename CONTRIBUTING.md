@@ -101,7 +101,7 @@ uv run pytest -n auto --dist worksteal
 
 # Only the tests that your change affects (pytest-testmon; the validation step runs this in cf-sandbox).
 # The first run on a host has no data and runs everything. A change that touches any other non-.py file
-# (compared with the merge base, untracked files included; changelog.d/, docs/ and root-level *.md do not count, and apps/imessage/ changes also run its bun tests and tests/test_imessage*.py), or an unknown merge base, also runs everything. CREWSHIP_TEST_TIMEOUT_SCALE multiplies test subprocess timeouts on slow hosts. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon/<hash of the checkout path> (one database per checkout, so parallel runs do not collide; a new checkout starts from a seed copied from the last fully passing run, and checkout dirs unused for 14 days are deleted).
+# (compared with the merge base, untracked files included; changelog.d/ does not count, and apps/imessage/ changes also run its bun tests and tests/test_imessage*.py), or an unknown merge base, also runs everything. CREWSHIP_TEST_TIMEOUT_SCALE multiplies test subprocess timeouts on slow hosts. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon/<hash of the checkout path> (one database per checkout, so parallel runs do not collide; a new checkout starts from a seed copied from the last fully passing run, and checkout dirs unused for 14 days are deleted).
 scripts/test-affected
 
 # Ansible syntax check
