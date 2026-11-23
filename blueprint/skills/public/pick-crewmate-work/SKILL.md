@@ -16,7 +16,7 @@ Do not select work that has an active owner unless that owner hands it off.
 Skip held work, including work with a hold on a linked record.
 Skip work that needs an unresolved decision, permission, or prerequisite.
 Use only read-only sources when picking work.
-For stalled tasks and linked outcomes, read existing Firstmate status lines, handoff records, and current PR state.
+For stalled tasks and linked outcomes, read existing Firstmate task records, status lines, handoff records, and current PR state.
 Exclude a task or linked outcome as complete or in review only if the evidence shows it landed or only awaits review.
 A raw `done:` line or a passed run alone does not prove either.
 Run the forge lists for each GitHub repository in scope.
@@ -30,14 +30,16 @@ If an in-scope prerequisite is actionable, consider it as its own item in the or
 ## Take the first actionable item in this order
 
 1. **Open pull requests with failed checks or blockers (unfinished).** List open pull requests with `gh-axi pr list --state open --repo OWNER/REPO --limit 30`.
-   Read the current checks with `gh-axi pr view <number> --checks --repo OWNER/REPO`.
+   Read the current checks and `merge_state` with `gh-axi pr view <number> --checks --repo OWNER/REPO`.
+   If the branch is `BEHIND`, check whether the base branch's merge rules require an update.
    Read the review history with `gh-axi pr view <number> --reviews --repo OWNER/REPO`.
    Confirm that a specific change request still applies to the current PR before selecting it.
    Do not use a request that a later approval from the same reviewer, a dismissal, or a PR update invalidates.
-   Pick a specific failed check, merge conflict, or current change request the crewmate can fix.
+   Pick a failed check, merge conflict, current change request, or confirmed required branch update the crewmate can fix.
    Skip pull requests that only await checks, review, or an external decision.
-2. **Stalled tasks (unfinished).** Check the existing task records and current PR state.
-   Run `bin/fm-tasks-axi.sh list --state in_flight` from the Firstmate home to find task records, not to prove a stall.
+2. **Stalled tasks (unfinished).** Find candidates in `state/<task-id>.meta` records from the Firstmate home.
+   Skip records with `mode=secondmate` because they describe persistent agents, not work items.
+   Use linked backlog rows as evidence, not as a requirement for a candidate.
    Confirm that unfinished work stopped and no worker or pipeline still owns the next action.
    If validation passed but a required PR was never opened, consider opening it as the next action.
    Pick up from the last verified result and name the next action.
@@ -46,8 +48,9 @@ If an in-scope prerequisite is actionable, consider it as its own item in the or
    Treat access failures and unknown results as unavailable, not as disabled.
    Check dependency records, linked work, and assignments before selecting an issue.
    Choose an actionable issue based on the current goal.
-4. **Backlog (next).** Run `bin/fm-tasks-axi.sh ready --repo <name>` from the Firstmate home for each repository in scope.
+4. **Backlog (next).** Run `bin/fm-tasks-axi.sh ready` once from the Firstmate home.
    Select only actionable entries from `ready`, not from `ready_public_followups`.
+   Apply the repository scope to the returned entries, including untagged entries that identify their repository through a link.
 5. **New research.** Propose research only after checking all applicable sources and finding no actionable item.
    Pick one unanswered question that affects the current goal.
    Ask for evidence, a recommendation, and the decision the result will inform.
