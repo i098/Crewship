@@ -11,6 +11,7 @@ Do not run install commands.
 Do not use stored credentials.
 
 Do not use this skill for private, signed, or credential-bearing links.
+Use only HTTP or HTTPS for supplied URLs. This restriction does not apply to redirects or mirrors.
 
 ## Direct file URL: aria2c
 
@@ -54,18 +55,21 @@ yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 --simul
 ```
 
 Continue only if the check succeeds and prints one line with type `video`. This also covers audio-only items.
-Refuse items with status `is_live` or `is_upcoming`. Do not download live HLS. Finished public HLS recordings are allowed.
+Continue only for status `not_live` or `was_live`. Finished public HLS recordings are allowed.
+Refuse missing status (`NA`) because the check cannot confirm that the media is not live.
 For a collection, use the requested item's individual URL and repeat the check.
 Set `DOWNLOAD_DIR` to an unused directory for each download, including a new format of the same resource.
-Check the exit status and confirm the requested output; a skipped collection can exit without an error or output.
+Check the exit status and confirm the requested output; yt-dlp can skip an item without an error.
 
 ```bash
 yt-dlp --ignore-config --no-cache-dir --quiet --no-playlist --playlist-items 1:0 -F -- "$VIDEO_URL"
 yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 \
-  --match-filters 'live_status !=? is_live & live_status !=? is_upcoming' \
+  --match-filters 'live_status = not_live' --match-filters 'live_status = was_live' \
+  --abort-on-unavailable-fragments \
   -P "$DOWNLOAD_DIR" -o 'video.%(ext)s' -- "$VIDEO_URL"
 yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 \
-  --match-filters 'live_status !=? is_live & live_status !=? is_upcoming' \
+  --match-filters 'live_status = not_live' --match-filters 'live_status = was_live' \
+  --abort-on-unavailable-fragments \
   -P "$DOWNLOAD_DIR" -x -o 'audio.%(ext)s' -- "$VIDEO_URL"
 ```
 
