@@ -122,9 +122,10 @@ The disk rule keeps its own units: no unit the disk rule stopped starts while th
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
-`runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
-On a Docker-in-Docker host, coordinator start also ensures the derived image and checks the Sysbox runtime.
-Apply checks the same runtime before it publishes the config when `start_services` is enabled.
+`runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
+A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
+Managed apply checks the same runtime before it publishes the config.
+With `start_services: false`, apply leaves a live coordinator's config unchanged if the new config includes Docker-in-Docker places.
 The runner-up image timer refreshes the derived image even if the CI pool owns the base image.
 
 ## Cut over one repository
@@ -208,9 +209,9 @@ Each place uses a separate outer bridge network with outbound access and no host
 The shim removes the network when the place exits.
 Docker images and volumes inside the job go away with the place container.
 
-For a smoke test, add a Docker-in-Docker pool for Crewship.
+For a smoke test, add a dedicated Docker-in-Docker pool for Crewship with one local slot.
 Run [`ci-pool-smoke`](../.github/workflows/ci-pool-smoke.yml) manually with `dind_pool` set to that pool label.
-The first job must print `runner-up-dind-ok`. The second job must report a different daemon ID.
+The first job must print `runner-up-dind-ok`. The second job must use the same place and report a different daemon ID.
 While the Compose service is active, run `sh tests/runner-up-dind-smoke.sh --host <outer-container-name>` on the host with Docker access.
 The host check must print cgroup paths under `runnerup.slice` for `dockerd` and the nested process.
 

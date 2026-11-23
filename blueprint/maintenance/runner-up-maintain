@@ -19,6 +19,25 @@ have_image() { docker image inspect "$1" >/dev/null 2>&1; }
 have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
 
 case "${1-}" in
+start)
+  : "${2:?Specify the coordinator config}"
+  if [ -n "$dind_recipe" ]; then
+    needs_dind=$(python3 -c '
+import json, sys
+
+with open(sys.argv[1]) as source:
+    config = json.load(source)
+print(any(place.get("provider") == "docker" and place.get("image") == sys.argv[2]
+          for machine in config["machines"] if machine["name"] == "local"
+          for place in machine["places"]))
+' "$2" "$dind_image")
+    if [ "$needs_dind" = True ]; then
+      "$0" image --ensure
+      exec docker check-dind-runtime
+    fi
+  fi
+  unset RUNNER_UP_DIND_DOCKERFILE
+  exec "$0" image --ensure ;;
 image)
   [ -z "$dind_recipe" ] || : "${dind_image:?Set RUNNER_UP_DIND_IMAGE}"
   [ "${2-}" = --ensure ] && have_images && exit 0
@@ -138,6 +157,6 @@ io-pause)
   done
   rm -f "$io_state.calm" ;;
 *)
-  echo "usage: runner-up-maintain image [--ensure] | clean | guard | io-pause <unit...>" >&2
+  echo "usage: runner-up-maintain start <config> | image [--ensure] | clean | guard | io-pause <unit...>" >&2
   exit 2 ;;
 esac

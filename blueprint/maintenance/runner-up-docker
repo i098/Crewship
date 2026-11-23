@@ -15,7 +15,7 @@ check_dind_host() {
     exit 125
   fi
 }
-dind_image_file=${RUNNER_UP_DIND_IMAGE_FILE:-$(dirname "$0")/dind-image}
+dind_image_file=$(dirname "$0")/dind-image
 dind_image=
 
 case "${1-}" in
@@ -25,8 +25,8 @@ check-dind-host)
 check-dind-runtime)
   read -r dind_image < "$dind_image_file"
   [ -n "$dind_image" ] || exit 125
-  RUNNER_UP_BUILD_GATE= exec "$0" run --rm --entrypoint /bin/sh "$dind_image" -ec \
-    'test -w /home/runner/.cargo && test -w /home/runner/.cache' ;;
+  RUNNER_UP_BUILD_GATE= exec timeout --kill-after=10s 90s "$0" run --rm \
+    --entrypoint /home/runner/run.sh "$dind_image" --check-dind-runtime ;;
 run)
   shift
   network=

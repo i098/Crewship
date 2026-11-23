@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -124,6 +125,7 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
         "crewship_become_target": False,
         "crewship_runner_up_slice_dir": str(home.parent / "etc"),
         "crewship_runner_up_check": validator(),
+        "crewship_user_runtime_dir": str(home.parent / "runtime"),
         "ansible_facts": facts or {},
         "crewship": crewship,
     }
@@ -349,7 +351,9 @@ def test_the_slice_and_the_units_carry_the_caps(home):
     assert any(
         v.startswith(f"PATH={home}/.local/share/runner-up/shim:") for v in service["Environment"]
     )
-    assert any("image --ensure" in v for v in service["ExecStartPre"])
+    assert service["ExecStartPre"] == [
+        f"{home}/.local/bin/runner-up-maintain start {home}/.config/runner-up/%i.json"
+    ]
     clean = unit_sections(units(home) / "runner-up-clean.service")["Service"]
     assert "RUNNER_UP_DISK_MAX_GB=50" in clean["Environment"]
     assert clean["IOSchedulingClass"] == ["idle"]
@@ -442,7 +446,8 @@ def test_inspect_refuses_runner_up_without_repos_even_beside_a_ci_pool():
         ship.validate_config(document(ci_pool=POOL_DOC, runner_up={}))
 
 
-def test_dind_places_only_serve_their_pool_locally(home):
+@pytest.mark.parametrize("custom_image", [False, True])
+def test_dind_places_only_serve_their_pool_locally(home, custom_image):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     plain = {**dind, "name": "plain", "labels": ["plain"]}
     del plain["docker"]
@@ -450,7 +455,10 @@ def test_dind_places_only_serve_their_pool_locally(home):
     settings = runner(home, repos=[dind, plain], machines=[machine])
     ship.validate_config(document(runner_up=settings))
     facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
-    apply(home, settings, facts=facts)
+    ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
+    if custom_image:
+        ci_pool["image"] = "acme/ci:latest"
+    apply(home, settings, facts=facts, ci_pool=ci_pool)
     local, remote = config(home, "acme-e2e-tests")["machines"]
     by_pool = {place["pools"][0]: place["image"] for place in local["places"]}
     assert by_pool == {"e2e": "crewship-ci-runner-dind:latest", "plain": "crewship-ci-runner:latest"}
@@ -461,7 +469,10 @@ def test_dind_places_only_serve_their_pool_locally(home):
     assert f"RUNNER_UP_DIND_IMAGE={by_pool['e2e']}" in service["Environment"]
     assert (directory / "runner-up-dind.Dockerfile").is_file()
     assert (directory / "shim/dind-image").read_text().strip() == by_pool["e2e"]
-    assert apply(home, settings, facts=facts) == 0
+    image_service = unit_sections(units(home) / "runner-up-image.service")["Service"]
+    refresh = int(custom_image)
+    assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
+    assert apply(home, settings, facts=facts, ci_pool=ci_pool) == 0
 
 
 def test_apply_refuses_dind_on_ubuntu_2604(home):
@@ -472,12 +483,39 @@ def test_apply_refuses_dind_on_ubuntu_2604(home):
     assert instances(home) == []
 
 
-def test_inspect_rejects_a_pool_shared_by_plain_and_dind_places():
+def test_deferred_apply_keeps_live_config_and_writes_stopped_config(home, monkeypatch):
+    apply(home, runner(home))
+    original = config(home)
+    live = {**REPOS[0], "docker": "dind", "labels": ["web-dind"]}
+    stopped = {**REPOS[3], "docker": "dind", "labels": ["api-dind"]}
+    facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
+    systemctl = home / ".local/bin/systemctl"
+    systemctl.write_text(
+        "#!/bin/sh\n"
+        '[ "$1 $2" = "--user list-units" ] || exit 1\n'
+        "echo 'runner-up@acme-web.service loaded active running'\n"
+    )
+    systemctl.chmod(0o755)
+    manager = home.parent / "runtime/systemd"
+    manager.mkdir(parents=True)
+    monkeypatch.chdir(manager)
+    with socket.socket(socket.AF_UNIX) as manager_socket:
+        manager_socket.bind("private")
+        apply(home, runner(home, repos=[live, stopped]), facts=facts)
+    assert config(home) == original
+    (pool,) = config(home, "acme-api")["pools"]
+    assert pool["label"] == "api-dind"
+
+
+def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     plain = {**dind, "name": "plain", "labels": ["E2E"]}
     del plain["docker"]
     with pytest.raises(ValueError, match="both plain and Docker-in-Docker"):
         ship.validate_config(document(runner_up={"repos": [dind, plain]}))
+    with pytest.raises(AssertionError, match="both plain and Docker-in-Docker"):
+        apply(home, runner(home, repos=[dind, plain]))
+    assert instances(home) == []
 
 
 @pytest.mark.parametrize(
@@ -502,6 +540,7 @@ def stubs(tmp_path):
     bin_dir.mkdir()
     log = tmp_path / "calls"
     (tmp_path / "images").mkdir()
+    shutil.copy2(MAINTENANCE / "runner-up-docker", bin_dir / "runner-up-docker")
     for name in ("docker", "sudo"):
         stub = bin_dir / name
         stub.write_text(
@@ -537,8 +576,9 @@ def run_script(script, stubs, *args, env=None, code=0, **kwargs):
         "IMAGES": str(log.parent / "images"),
         **(env or {}),
     }
+    program = bin_dir / script if script == "runner-up-docker" else MAINTENANCE / script
     done = subprocess.run(
-        [str(MAINTENANCE / script), *args],
+        [str(program), *args],
         env=environment,
         capture_output=True,
         text=True,
@@ -578,10 +618,9 @@ def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
         "RUNNER_UP_OS_RELEASE": str(release),
         "RUNNER_UP_SHARED_CACHE": str(tmp_path / "cache"),
         "DOCKER_CGROUP_DRIVER": driver,
-        "RUNNER_UP_DIND_IMAGE_FILE": str(tmp_path / "dind-image"),
     }
     image = "crewship-ci-runner-dind:latest"
-    (tmp_path / "dind-image").write_text(f"{image}\n")
+    (stubs[0] / "dind-image").write_text(f"{image}\n")
     (tmp_path / "images" / image).touch()
     calls = run_script("runner-up-docker", stubs, "run", "--rm", image, env=env, code=code)
     expected = [] if version == "26.04" else ["docker info --format {{.CgroupDriver}}"]
@@ -597,7 +636,7 @@ def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
 def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, tmp_path):
     image = "crewship-ci-runner-dind:latest"
     (tmp_path / "images" / image).touch()
-    tag = tmp_path / "dind-image"
+    tag = stubs[0] / "dind-image"
     tag.write_text(f"{image}\n")
     release = tmp_path / "os-release"
     release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
@@ -605,7 +644,6 @@ def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, t
     socket.touch()
     env = {
         "RUNNER_UP_DOCKER_SOCK": str(socket),
-        "RUNNER_UP_DIND_IMAGE_FILE": str(tag),
         "RUNNER_UP_OS_RELEASE": str(release),
         "DOCKER_CGROUP_DRIVER": "systemd",
         "DOCKER_FAILS": "second-place",
@@ -623,6 +661,51 @@ def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, t
         assert remove == f"docker network rm {network}"
         networks.append(network)
     assert networks[0] != networks[1]
+
+
+@pytest.mark.parametrize(("dind", "code"), [(False, 0), (True, 0), (True, 125)])
+def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs, tmp_path, dind, code):
+    bin_dir, _ = stubs
+    base = "crewship-ci-runner:latest"
+    derived = "crewship-ci-runner-dind:latest"
+    (tmp_path / "images" / base).touch()
+    (bin_dir / "dind-image").write_text(f"{derived}\n")
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "docker").symlink_to(bin_dir / "runner-up-docker")
+    (shim / "dind-image").symlink_to(bin_dir / "dind-image")
+    release = tmp_path / "os-release"
+    release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    recipe = tmp_path / "Dockerfile"
+    recipe.write_text("FROM scratch\n")
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"machines": [
+        {"name": "local", "places": [{"provider": "docker", "image": derived if dind else base}]},
+        {"name": "remote", "places": [{"provider": "docker", "image": derived}]},
+    ]}))
+    env = {
+        "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_OS_RELEASE": str(release),
+        "RUNNER_UP_DIND_IMAGE": derived,
+        "RUNNER_UP_DOCKERFILE": str(recipe),
+        "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
+        "DOCKER_CGROUP_DRIVER": "systemd",
+        "DOCKER_FAILS": "--check-dind-runtime" if code else "@none@",
+        "DOCKER_FAIL_CODE": "125",
+    }
+    calls = run_script(
+        "runner-up-maintain", stubs, "start", str(config_file), env=env, code=code
+    )
+    assert (tmp_path / "images" / derived).exists() == dind
+    if dind:
+        assert "--entrypoint /home/runner/run.sh" in calls[-2]
+        assert calls[-2].endswith(f"{derived} --check-dind-runtime")
+        assert calls[-1].startswith("docker network rm ")
+    else:
+        assert calls == [f"docker image inspect {base}"]
 
 
 def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):

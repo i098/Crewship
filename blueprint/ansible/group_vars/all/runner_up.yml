@@ -88,9 +88,12 @@ crewship_build_gate_cargo: "{{ crewship_local_bin }}/cargo"
 crewship_runner_up_bin: "{{ crewship_local_bin }}/runner-up"
 # Validates each config before it replaces the live one; the coordinator ignores a bad file and keeps the old setup.
 crewship_runner_up_check: "{{ crewship_runner_up_bin }} check-config --config %s"
-# The CI pool's own hourly timer builds the same image, so the second builder runs only without it.
-crewship_runner_up_build_image: "{{ crewship_cfg.ci_pool is not defined }}"
-crewship_runner_up_dind: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | list | length > 0 }}"
+crewship_runner_up_build_image: >-
+  {{ crewship_cfg.ci_pool is not defined
+     or (crewship_cfg.ci_pool.image | default('crewship-ci-runner:latest')) != 'crewship-ci-runner:latest'
+     or crewship_runner_up_image != 'crewship-ci-runner:latest' }}
+crewship_runner_up_dind_repos: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | map(attribute='repo') | unique | list }}"
+crewship_runner_up_dind: "{{ crewship_runner_up_dind_repos | length > 0 }}"
 crewship_runner_up_image_timer: "{{ (crewship_runner_up_build_image | bool) or (crewship_runner_up_dind | bool) }}"
 crewship_runner_up_units: [runner-up@.service, runner-up-clean.service, runner-up-clean.timer,
   runner-up-guard.service, runner-up-guard.timer]

@@ -78,6 +78,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       daemon_id: ${{ steps.smoke.outputs.id }}
+      place: ${{ steps.smoke.outputs.place }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,7 +86,11 @@ jobs:
           persist-credentials: false
       - name: Build with Buildx and run a Compose service
         id: smoke
-        run: sh tests/runner-up-dind-smoke.sh
+        run: |
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          case "$RUNNER_NAME" in runner-up-?*) ;; *) exit 1 ;; esac
+          printf 'place=%s\n' "$RUNNER_NAME" >> "$GITHUB_OUTPUT"
+          sh tests/runner-up-dind-smoke.sh
 
   docker-in-docker-isolation:
     needs: docker-in-docker
@@ -95,7 +100,11 @@ jobs:
       - name: Require an independent empty Docker daemon
         env:
           FIRST_DAEMON_ID: ${{ needs.docker-in-docker.outputs.daemon_id }}
+          FIRST_PLACE: ${{ needs.docker-in-docker.outputs.place }}
         run: |
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test -n "$FIRST_PLACE"
+          test "$RUNNER_NAME" = "$FIRST_PLACE"
           daemon=$(docker info --format '{{.ID}}')
           containers=$(docker ps -aq)
           test -n "$FIRST_DAEMON_ID"

@@ -10,6 +10,19 @@
 #
 # Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
 
+- name: Validate the runner-up pool labels before configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - "import json, runpy, sys; runpy.run_path(sys.argv[1])['validate_runner_up_pools'](json.load(sys.stdin))"
+      - "{{ crewship_repo }}/scripts/ship.py"
+    stdin: "{{ crewship_runner_up_repos | to_json }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+
 - name: Require a supported Docker-in-Docker host
   ansible.builtin.command:
     argv: ["{{ crewship_blueprint }}/maintenance/runner-up-docker", check-dind-host]
@@ -132,6 +145,31 @@
         that: crewship_runner_up_instances | unique | length == crewship_runner_up_instances | length
         fail_msg: Two repositories map to one runner-up instance name
 
+    - name: Check for a user manager during deferred apply
+      ansible.builtin.stat:
+        path: "{{ crewship_user_runtime_dir }}/systemd/private"
+      register: crewship_runner_up_manager
+      when:
+        - crewship_runner_up_dind | bool
+        - not crewship_manage_services | bool
+
+    - name: Find live coordinators that must keep their config during deferred apply
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - --user
+          - list-units
+          - --all
+          - --plain
+          - --no-legend
+          - --state=active,activating,reloading,deactivating,refreshing
+          - "runner-up@*.service"
+      environment: "{{ crewship_user_systemd_env }}"
+      register: crewship_runner_up_live
+      check_mode: false
+      changed_when: false
+      when: crewship_runner_up_manager.stat.issock | default(false)
+
     - name: Write the runner-up config of each repository
       ansible.builtin.template:
         src: runner-up.config.json.j2
@@ -142,6 +180,10 @@
         crewship_runner_up_repo: "{{ item.0 }}"
         crewship_runner_up_instance: "{{ item.1 }}"
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+      when: >-
+        item.0 not in crewship_runner_up_dind_repos or
+        ('runner-up@' ~ item.1 ~ '.service') not in
+        (crewship_runner_up_live.stdout_lines | default([]) | map('split') | map('first') | list)
 
     - name: Stop and disable the single coordinator of the earlier layout
       ansible.builtin.systemd_service:

@@ -88,6 +88,13 @@ def validate_runner_up(config):
         raise ValueError("runner_up needs repos: the repositories it runs jobs for")
     if len(set(entry_slugs(entries))) != len(entries):
         raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
+    validate_runner_up_pools(entries)
+    names = [m["name"] for m in runner.get("machines", [])]
+    if len(set(names)) != len(names) or "local" in names:
+        raise ValueError("runner_up.machines names must be unique and not `local`")
+
+
+def validate_runner_up_pools(entries):
     pool_modes = {}
     for entry in entries:
         pools = [
@@ -105,9 +112,6 @@ def validate_runner_up(config):
             mode = entry.get("docker")
             if pool_modes.setdefault(key, mode) != mode:
                 raise ValueError(f"{entry['repo']}: pool {label} serves both plain and Docker-in-Docker places")
-    names = [m["name"] for m in runner.get("machines", [])]
-    if len(set(names)) != len(names) or "local" in names:
-        raise ValueError("runner_up.machines names must be unique and not `local`")
 
 
 def validate_cloudflare_runner(config):
