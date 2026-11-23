@@ -778,7 +778,7 @@
                     "uniqueItems": true
                   },
                   "docker": {
-                    "description": "Refused by scripts/ship.py with a clear error: runner-up has no Docker daemon in the job.",
+                    "description": "Run this entry's jobs on local places with a per-job Docker daemon.",
                     "const": "dind"
                   }
                 },

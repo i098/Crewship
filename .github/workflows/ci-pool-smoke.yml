@@ -6,6 +6,10 @@ name: ci-pool-smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      dind_pool:
+        description: 'Optional runner-up pool label for a docker: dind entry'
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +20,7 @@ defaults:
 
 jobs:
   config-and-python:
+    if: inputs.dind_pool == ''
     name: configuration and python checks (runner-up)
     runs-on: crewship
     timeout-minutes: 20
@@ -63,3 +68,15 @@ jobs:
 
       - name: Validate container configuration
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
+
+  docker-in-docker:
+    if: inputs.dind_pool != ''
+    runs-on: ${{ inputs.dind_pool }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and run a Compose service
+        run: sh tests/runner-up-dind-smoke.sh

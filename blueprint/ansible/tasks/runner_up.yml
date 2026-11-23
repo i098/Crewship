@@ -10,6 +10,12 @@
 #
 # Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
 
+- name: Reject Docker-in-Docker on Ubuntu 26.04
+  ansible.builtin.assert:
+    that: ansible_facts.distribution != 'Ubuntu' or ansible_facts.distribution_version != '26.04'
+    fail_msg: Docker-in-Docker is not supported on Ubuntu 26.04 because AppArmor blocks Sysbox FUSE mounts. Keep these jobs on the CI pool.
+  when: crewship_runner_up_dind | bool
+
 - name: Cap CI jobs in a systemd slice
   become: true
   block:
@@ -78,12 +84,44 @@
             mode: "0755"
             remote_src: true
 
-    - name: Install the job image recipe
+    - name: Install the job image recipes
       ansible.builtin.copy:
-        src: "{{ crewship_blueprint }}/containers/ci-runner.Dockerfile"
-        dest: "{{ crewship_runner_up_dockerfile }}"
+        src: "{{ crewship_blueprint }}/containers/{{ item }}"
+        dest: "{{ crewship_runner_up_dir }}/{{ item }}"
         mode: "0644"
         remote_src: true
+      loop: [ci-runner.Dockerfile, runner-up-dind.Dockerfile]
+
+    - name: Prepare Docker-in-Docker before publishing the runner config
+      when:
+        - crewship_runner_up_dind | bool
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+      block:
+        - name: Check the Docker runtime and cgroup driver
+          ansible.builtin.command:
+            argv:
+              - "{{ crewship_runner_up_shim_dir }}/docker"
+              - info
+              - --format
+              - "{% raw %}{{.CgroupDriver}} {{if index .Runtimes \"sysbox-runc\"}}sysbox-runc{{end}}{% endraw %}"
+          register: crewship_runner_up_docker_info
+          changed_when: false
+        - name: Require Sysbox and the systemd cgroup driver
+          ansible.builtin.assert:
+            that: crewship_runner_up_docker_info.stdout == 'systemd sysbox-runc'
+            fail_msg: Register sysbox-runc with Docker and set the Docker cgroup driver to systemd.
+        - name: Build the initial Docker-in-Docker image
+          ansible.builtin.command:
+            argv: ["{{ crewship_runner_up_maintain }}", image, --ensure]
+          environment:
+            PATH: "{{ crewship_runner_up_shim_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            RUNNER_UP_IMAGE: "{{ crewship_runner_up_image }}"
+            RUNNER_UP_DOCKERFILE: "{{ crewship_runner_up_dockerfile }}"
+            RUNNER_UP_DIND_DOCKERFILE: "{{ crewship_runner_up_dind_dockerfile }}"
+            RUNNER_UP_SLICE: "{{ crewship_runner_up_slice }}"
+          register: crewship_runner_up_dind_build
+          changed_when: "'Built the runner-up Docker-in-Docker image.' in crewship_runner_up_dind_build.stdout"
 
     - name: Check that each repository has its own instance name
       ansible.builtin.assert:
@@ -164,15 +202,15 @@
         src: "{{ item }}.j2"
         dest: "{{ crewship_user_units }}/{{ item }}"
         mode: "0644"
-      loop: "{{ crewship_runner_up_units + (crewship_runner_up_image_units if crewship_runner_up_build_image | bool else []) }}"
+      loop: "{{ crewship_runner_up_units + (crewship_runner_up_image_units if crewship_runner_up_image_timer | bool else []) }}"
       notify: reload user systemd
 
-    - name: Remove the image timer while the CI pool builds the image
+    - name: Remove the image timer when the CI pool owns all image builds
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop: >-
-        {{ [] if crewship_runner_up_build_image | bool else
+        {{ [] if crewship_runner_up_image_timer | bool else
            [crewship_user_units ~ '/runner-up-image.service',
             crewship_user_units ~ '/runner-up-image.timer',
             crewship_user_units ~ '/timers.target.wants/runner-up-image.timer'] }}
@@ -196,7 +234,7 @@
         follow: false
       loop: >-
         {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
-           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
+           + (['runner-up-image.timer'] if crewship_runner_up_image_timer | bool else []) }}
 
     - name: Check for the installed runner-up unit
       ansible.builtin.stat:
@@ -224,7 +262,7 @@
         state: started
       loop: >-
         {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
-           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
+           + (['runner-up-image.timer'] if crewship_runner_up_image_timer | bool else []) }}
       environment: "{{ crewship_user_systemd_env }}"
       when:
         - crewship_manage_services | bool

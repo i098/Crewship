@@ -11,6 +11,7 @@
 {% set repos = [] %}
 {% set pools = [] %}
 {% set pool_labels = [] %}
+{% set remote_pools = [] %}
 {% set places = [] %}
 {% for entry in crewship_runner_up_repos | selectattr('repo', 'equalto', crewship_runner_up_repo) | list %}
 {%   set slug = entry.name | default(entry.repo | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-|-$', ''), true) %}
@@ -19,18 +20,20 @@
 {%   for label in entry.labels if label | lower not in crewship_runner_up_reserved_labels %}
 {%     set _ = entry_pools.append(label) %}
 {%     if label not in pool_labels %}{% set _ = pool_labels.append(label) %}{% set _ = pools.append({'label': label}) %}{% endif %}
+{%     if entry.docker | default('') != 'dind' and label not in remote_pools %}{% set _ = remote_pools.append(label) %}{% endif %}
 {%   endfor %}
 {%   for n in range(1, entry.slots + 1) %}
 {%     set _ = places.append({'id': slug ~ '-' ~ n, 'provider': 'docker', 'pools': entry_pools,
-                              'cores': cpus, 'memoryMB': memory, 'image': crewship_runner_up_image}) %}
+                              'cores': cpus, 'memoryMB': memory,
+                              'image': 'crewship-ci-runner-dind:latest' if entry.docker | default('') == 'dind' else crewship_runner_up_image}) %}
 {%   endfor %}
 {% endfor %}
 {% set machines = [{'name': 'local', 'cores': total * cpus, 'memoryMB': total * memory, 'places': places}] %}
-{% for machine in crewship_runner_up.machines | default([]) if crewship_runner_up_repo == crewship_runner_up_machines_repo %}
+{% for machine in crewship_runner_up.machines | default([]) if crewship_runner_up_repo == crewship_runner_up_machines_repo and remote_pools %}
 {%   set machine_places = [] %}
 {%   for n in range(1, machine.slots | default(1) + 1) %}
 {%     set _ = machine_places.append({'id': machine.name ~ '-' ~ n, 'provider': machine.provider | default('docker'),
-                                      'pools': pool_labels, 'cores': machine.job_cpus | default(cpus),
+                                      'pools': remote_pools, 'cores': machine.job_cpus | default(cpus),
                                       'memoryMB': machine.job_memory_gb | default(memory // 1024) * 1024}
                                      | combine({'image': machine.image} if machine.image is defined else {})) %}
 {%   endfor %}

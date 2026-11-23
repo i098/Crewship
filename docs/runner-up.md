@@ -1,7 +1,7 @@
 # runner-up
 
 [runner-up](https://github.com/kunchenguid/runner-up) runs GitHub Actions jobs on this host, one fresh Docker container per job.
-It replaces the [CI pool](ci-pool.md), which is deprecated: it is removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands.
+It replaces the deprecated [CI pool](ci-pool.md).
 The CI pool keeps one idle runner container for every slot.
 runner-up starts a container only when a job waits, so an idle host runs one small coordinator process and no job container.
 
@@ -53,7 +53,7 @@ Every coordinator runs in `runnerup.slice` and keeps its own state in `<state di
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
 | `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place; `job_cpus` is also the default `CARGO_BUILD_JOBS` of each job, so a Rust job does not start a compile for every CPU of the host, and each job also gets `MOLD_JOBS=1` (one mold link at a time; harmless without mold). The thread count of one link stays bounded by the container `--cpus` quota, not reduced. A job's own value of either variable wins. To cap a heavy repository, give its entry fewer `slots` (for example `slots: 2`) |
 | `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
-| `docker: dind` | refused: runner-up has no Docker daemon in the job, so the entry stays on the CI pool (see [Not covered](#not-covered)) |
+| `repos[].docker: dind` | local places with one Docker daemon per job (see [Docker in a job](#docker-in-a-job)) |
 
 A pool is a scale set of GitHub, and it is global to its coordinator: it opens in every repository that the coordinator serves.
 That is why each repository has a coordinator of its own, with only its own labels.
@@ -123,13 +123,16 @@ Each guard run also starts a coordinator in the failed state when no pause holds
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
+When any entry uses `docker: dind`, apply builds the derived image before publishing the config.
+The runner-up image timer refreshes the derived image even if the CI pool owns the base image.
 
 ## Cut over one repository
 
 Run the CI pool and runner-up side by side, and move a repository only after a real job passed on runner-up.
 No step stops a busy runner.
 
-1. Add the repository's entry to `runner_up.repos` (the same entry as in `ci_pool.repos`, without `docker`) and apply.
+1. Add the repository's entry to `runner_up.repos` and apply.
+   For a `docker: dind` entry, complete the [Docker setup](#docker-in-a-job) first and omit the CI pool's `userns` switch.
    `runner_up.repos` is the full list; every repository that already moved stays in it.
    Apply starts `runner-up@<repo>` for the new repository and leaves the other coordinators alone.
    The CI pool keeps all of its slots.
@@ -142,7 +145,8 @@ No step stops a busy runner.
    A busy slot is disabled and leaves after its job, so no job is cut.
 5. Repeat for the next repository.
 
-Keep `crewship.ci_pool` only for repositories that did not move yet and for `docker: dind` entries, until [#1179](https://github.com/i098/Crewship/issues/1179) lands.
+Keep `crewship.ci_pool` only for repositories that did not move yet.
+On Ubuntu 26.04, keep Docker-in-Docker repositories on the CI pool.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
@@ -182,13 +186,36 @@ On Linux, keep Docker.
 Podman with its Docker socket is also a drop-in, but it would save only dockerd itself: on the Crewship host that is 141 MB of memory and 0.5% of one core while idle.
 `fleet_guards` and `project_databases` need dockerd on the same host anyway, and a rootless engine cannot put a container in the system slice that carries the caps.
 
+## Docker in a job
+
+Install [Sysbox](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md) on the Linux host and register `sysbox-runc` with Docker.
+Use a [distribution that Sysbox supports](https://github.com/nestybox/sysbox/blob/master/docs/distro-compat.md).
+Apply rejects Docker-in-Docker places on Ubuntu 26.04 because its AppArmor policy blocks Sysbox FUSE mounts.
+Use Ubuntu 24.04 for these places, or keep these jobs on the CI pool.
+Keep the host's default Docker runtime unchanged.
+Use Docker with the systemd cgroup driver.
+Check the runtime and driver with `sudo docker info --format '{{json .Runtimes}} {{.CgroupDriver}}'`.
+
+Set `docker: dind` on an entry in `runner_up.repos`.
+Use a separate pool label for that entry if the same repository also has plain places.
+Remote machines do not serve Docker-in-Docker pools.
+
+The job starts only after its own Docker daemon answers on a Unix socket inside its container.
+The job can use `docker`, `docker compose`, and `docker buildx`.
+The job, daemon, and nested containers stay under the job's CPU, memory, and process caps in `runnerup.slice`.
+The job does not get the host Docker socket or the shared build cache.
+Docker images and volumes inside the job go away with the place container.
+
+For a smoke test, add a Docker-in-Docker pool for Crewship.
+Run [`ci-pool-smoke`](../.github/workflows/ci-pool-smoke.yml) manually with `dind_pool` set to that pool label.
+The Docker job must print `runner-up-dind-ok` and exit successfully.
+
 ## Not covered
 
-- **Docker in the job.** runner-up's Docker place is a plain container with no daemon, and no sidecar.
-  A `docker: dind` entry stays in `ci_pool.repos`; `inspect` refuses it in `runner_up.repos`.
+- **Docker in plain places.** Use a local `docker: dind` entry for workflows that need a Docker daemon.
 - **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
-  The exception is the [shared build cache](#shared-build-cache): the docker shim mounts it into every local job.
+  Plain local places use the [shared build cache](#shared-build-cache).
 - **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.
   Put that root on a data disk with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
 - **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart 'runner-up@*'`.
@@ -196,7 +223,9 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 
 ## Shared build cache
 
-Jobs do not build the same crate twice. Every local runner-up job shares one directory, `<data_dir>/ci-shared-cache/` (`~/.local/share/ci-shared-cache/` without a data directory). Apply never deletes it. Jobs on other [machines](#other-machines) do not get it.
+Plain local runner-up jobs share one directory, `<data_dir>/ci-shared-cache/` (`~/.local/share/ci-shared-cache/` without a data directory).
+Apply never deletes it.
+Jobs on other [machines](#other-machines) and Docker-in-Docker jobs do not get it.
 
 | Directory | Mounted at | Use |
 | --- | --- | --- |

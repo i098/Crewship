@@ -40,7 +40,7 @@ REPOS = [
     {"repo": "acme/api", "slots": 1, "labels": ["linux", "api"]},
     {"repo": "acme/mixed", "slots": 1, "labels": ["self-hosted", "Linux", "one", "two"]},
 ]
-# A Docker-in-job entry: it stays on the CI pool.
+# A CI pool entry with the legacy AppArmor switch.
 DIND = {
     "repo": "acme/e2e.tests",
     "slots": 1,
@@ -443,10 +443,36 @@ def test_inspect_refuses_runner_up_without_repos_even_beside_a_ci_pool():
         ship.validate_config(document(ci_pool=POOL_DOC, runner_up={}))
 
 
-def test_inspect_refuses_a_dind_entry_in_runner_up():
+def test_dind_places_only_serve_their_pool_locally(home):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
-    with pytest.raises(ValueError, match="acme/e2e.tests: runner-up has no Docker daemon"):
-        ship.validate_config(document(runner_up={"repos": [REPOS[0], dind]}))
+    plain = {**dind, "name": "plain", "labels": ["plain"]}
+    del plain["docker"]
+    machine = {"name": "laptop", "ssh": ["ci@laptop"], "cores": 2, "memory_gb": 8}
+    settings = runner(home, repos=[dind, plain], machines=[machine])
+    ship.validate_config(document(runner_up=settings))
+    facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
+    apply(home, settings, facts=facts)
+    local, remote = config(home, "acme-e2e-tests")["machines"]
+    by_pool = {place["pools"][0]: place["image"] for place in local["places"]}
+    assert by_pool == {"e2e": "crewship-ci-runner-dind:latest", "plain": "crewship-ci-runner:latest"}
+    assert remote["places"][0]["pools"] == ["plain"]
+    assert apply(home, settings, facts=facts) == 0
+
+
+def test_apply_refuses_dind_on_ubuntu_2604(home):
+    dind = {key: value for key, value in DIND.items() if key != "userns"}
+    facts = {"distribution": "Ubuntu", "distribution_version": "26.04"}
+    with pytest.raises(AssertionError, match="Docker-in-Docker is not supported on Ubuntu 26.04"):
+        apply(home, runner(home, repos=[dind]), facts=facts)
+    assert instances(home) == []
+
+
+def test_inspect_rejects_a_pool_shared_by_plain_and_dind_places():
+    dind = {key: value for key, value in DIND.items() if key != "userns"}
+    plain = {**dind, "name": "plain", "labels": ["E2E"]}
+    del plain["docker"]
+    with pytest.raises(ValueError, match="both plain and Docker-in-Docker"):
+        ship.validate_config(document(runner_up={"repos": [dind, plain]}))
 
 
 @pytest.mark.parametrize(
@@ -484,6 +510,7 @@ def stubs(tmp_path):
             "  done\n"
             "fi\n"
             'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit 1;; esac\n'
+            'if [ "$1" = info ]; then printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}"; fi\n'
             '[ "$1 $2" = "image inspect" ] && [ ! -e "$IMAGE_EXISTS" ] && exit 1\n'
             "exit 0\n"
         )
@@ -521,6 +548,36 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
     calls = run_script("runner-up-docker", stubs, "ps", "-a", env=env)
     assert calls[-1] == "docker ps -a"
     assert "sudo" not in "".join(calls)
+
+
+@pytest.mark.parametrize(("version", "driver", "code"), [
+    ("26.04", "systemd", 125),
+    ("24.04", "cgroupfs", 125),
+    ("24.04", "systemd", 0),
+])
+def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
+    stubs, tmp_path, version, driver, code
+):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    release = tmp_path / "os-release"
+    release.write_text(f"ID=ubuntu\nVERSION_ID={version}\n")
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_OS_RELEASE": str(release),
+        "RUNNER_UP_SHARED_CACHE": str(tmp_path / "cache"),
+        "DOCKER_CGROUP_DRIVER": driver,
+        "IMAGE_EXISTS": str(sock),
+    }
+    image = "crewship-ci-runner-dind:latest"
+    calls = run_script("runner-up-docker", stubs, "run", "--rm", image, env=env, code=code)
+    expected = [] if version == "26.04" else ["docker info --format {{.CgroupDriver}}"]
+    if not code:
+        expected += [
+            f"docker image inspect {image}",
+            f"docker run --cgroup-parent runnerup.slice --pids-limit 8192 --runtime=sysbox-runc --rm {image}",
+        ]
+    assert calls == expected
 
 
 def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
@@ -824,6 +881,25 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
     assert calls == ["docker image inspect crewship-ci-runner:latest"]
     calls = run_script("runner-up-maintain", stubs, "image", env=env)
     assert any(c.startswith("docker build") for c in calls[1:])
+
+
+def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_path):
+    base = tmp_path / "base"
+    recipe = tmp_path / "Dockerfile"
+    base.touch()
+    recipe.write_text("FROM scratch\n")
+    env = {
+        "IMAGE_EXISTS": str(base),
+        "RUNNER_UP_DOCKERFILE": str(recipe),
+        "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
+        "RUNNER_UP_REFRESH_BASE": "0",
+    }
+    calls = run_script("runner-up-maintain", stubs, "image", "--ensure", env=env)
+    assert not any(call.startswith("docker build") for call in calls)
+    calls = run_script("runner-up-maintain", stubs, "image", env=env)
+    (build,) = [call for call in calls if call.startswith("docker build")]
+    assert "--build-arg BASE_IMAGE=crewship-ci-runner:latest" in build
+    assert "--tag crewship-ci-runner-dind:latest" in build
 
 
 def gate(tmp_path, *args, env=None, timeout=20, stdin=None):

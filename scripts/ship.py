@@ -88,12 +88,8 @@ def validate_runner_up(config):
         raise ValueError("runner_up needs repos: the repositories it runs jobs for")
     if len(set(entry_slugs(entries))) != len(entries):
         raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
+    pool_modes = {}
     for entry in entries:
-        if "docker" in entry:
-            raise ValueError(
-                f"{entry['repo']}: runner-up has no Docker daemon in the job (docker: dind);"
-                " keep this repository on ci_pool"
-            )
         pools = [
             label for label in entry["labels"] if label.lower() not in RUNNER_UP_RESERVED_LABELS
         ]
@@ -105,6 +101,10 @@ def validate_runner_up(config):
         for label in pools:
             if label.lower().startswith(RUNNER_UP_HOSTED_PREFIXES):
                 raise ValueError(f"{entry['repo']}: label {label} looks like a GitHub-hosted runner")
+            key = (entry["repo"].lower(), label.lower())
+            mode = entry.get("docker")
+            if pool_modes.setdefault(key, mode) != mode:
+                raise ValueError(f"{entry['repo']}: pool {label} serves both plain and Docker-in-Docker places")
     names = [m["name"] for m in runner.get("machines", [])]
     if len(set(names)) != len(names) or "local" in names:
         raise ValueError("runner_up.machines names must be unique and not `local`")
