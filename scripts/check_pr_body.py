@@ -152,12 +152,12 @@ def git(*args):
     ).stdout
 
 
-def changes_ui(base):
+def changes_ui(base, *, head="HEAD"):
     paths = git(
         "diff",
         "--name-only",
         "--no-renames",
-        f"{base}...HEAD",
+        f"{base}...{head}",
         "--",
         *(f":(top,icase,glob){pattern}" for pattern in UI_GLOBS),
         *(f":(top,exclude,icase,glob){pattern}" for pattern in UI_EXCLUDES),
@@ -207,10 +207,11 @@ def main():
     parser = argparse.ArgumentParser(description="Check a PR body against the repository template.")
     parser.add_argument("body_file", nargs="?", default="-", help="body file, or - for stdin")
     parser.add_argument("--base", help="detect UI changes against this Git revision")
+    parser.add_argument("--head", default="HEAD", help="Git revision to check for UI changes")
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     try:
-        ui = bool(args.base) and changes_ui(args.base)
+        ui = bool(args.base) and changes_ui(args.base, head=args.head)
     except subprocess.CalledProcessError as error:
         print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)
         return 2

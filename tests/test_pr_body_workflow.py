@@ -33,7 +33,9 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/pr-body.yml").read_text())
     steps = workflow["jobs"]["pr-body"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
-    depth = checkout.get("with", {}).get("fetch-depth", 1)
+    checkout_inputs = checkout.get("with", {})
+    assert not checkout_inputs.get("ref"), "Use the pull_request event's synthetic merge checkout"
+    depth = checkout_inputs.get("fetch-depth", 1)
     body_step = next(step for step in steps if "PR_BODY" in step.get("env", {}))
     source = tmp_path / "source"
     source.mkdir()
@@ -55,19 +57,26 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
     git("checkout", "pr")
     git("cherry-pick", "--no-commit", "main")
     git("commit", "-m", "Same stylesheet change on PR")
+    git("checkout", "main")
+    for path in ("scripts/check_pr_body.py", ".github/PULL_REQUEST_TEMPLATE.md"):
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / path).read_bytes())
+    git("add", ".")
+    git("commit", "-m", "Roll out new body checker")
+    git("merge", "--no-ff", "-m", "Synthetic pull request merge", "pr")
 
     worktree = tmp_path / "checkout"
     clone_depth = ["--depth", str(depth)] if depth else []
-    git("clone", *clone_depth, "--branch", "pr", source.as_uri(), str(worktree))
+    git("clone", *clone_depth, source.as_uri(), str(worktree))
     result = subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", body_step["run"]],
-        cwd=ROOT,
+        cwd=worktree,
         env={
             **os.environ,
-            "GIT_DIR": str(worktree / ".git"),
-            "GIT_WORK_TREE": str(worktree),
             "PR_BODY": VALID_BODY,
-            "PR_BASE": "origin/main",
+            "PR_BASE": "HEAD^1",
+            "PR_HEAD": "HEAD^2",
         },
         text=True,
         capture_output=True,
@@ -110,7 +119,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         result = subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
             cwd=ROOT,
-            env={**env, "PR_BODY": body, "PR_BASE": "HEAD^"},
+            env={**env, "PR_BODY": body, "PR_BASE": "HEAD^", "PR_HEAD": "HEAD"},
             text=True,
             capture_output=True,
             timeout=10,
