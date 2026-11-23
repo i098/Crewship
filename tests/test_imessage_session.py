@@ -349,10 +349,12 @@ def mate_script(tmp_path, message):
     script.chmod(0o755)
 
 
-def send_bubble(rig, text, home, count):
+def send_bubble(rig, text, home, count, *, accepted=True):
     sent = subprocess.run([str(SEND), text], capture_output=True, text=True, env={**rig.env, "FM_HOME": home}, timeout=30)
     assert sent.returncode == 0, sent.stderr
     wait_for(lambda: len(texts(rig)) == count, "the bubble", timeout=120)
+    if accepted:
+        wait_for(lambda: not rig.outbox(), "the accepted bubble to leave the outbox", timeout=120)
 
 
 def sent_guids(rig, text):
@@ -383,6 +385,7 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
                                     env={**rig.env, "FM_MATE_ID": sender}, timeout=30)
             assert result.returncode == 0, result.stderr
             wait_for(lambda: sent in read_text(rig.fake / "sent"), "the Photon mate bubble", timeout=120)
+            wait_for(lambda: not rig.outbox(), "the Photon bubble to leave the outbox", timeout=120)
             guid = next(rig.fake.glob("last-*")).read_text()
         else:
             deliver(rig, "m1", "how are you")
@@ -450,7 +453,7 @@ def test_thread_reply_without_a_relay_match_reaches_firstmate(tmp_path):
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
         rig.relay_mode("garbled")
-        send_bubble(rig, "On it.", f"{tmp_path}/atlas", 3)
+        send_bubble(rig, "On it.", f"{tmp_path}/atlas", 3, accepted=False)
         wait_for(lambda: any(item.get("maybe") for item in rig.outbox()), "the uncertain send", timeout=120)
         rig.relay_mode("")
         reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
