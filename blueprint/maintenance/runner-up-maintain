@@ -29,6 +29,13 @@ probe_dind() {
   fi
 }
 
+io_paused() {
+  case "$1" in
+    runner-up@*.service) grep -qxF -e "$1" -e "${1%.service}" "$io_state" 2>/dev/null ;;
+    *) grep -qxF "$1" "$io_state" 2>/dev/null ;;
+  esac
+}
+
 case "${1-}" in
 start)
   : "${2:?Specify the coordinator config}"
@@ -117,7 +124,7 @@ guard)
       managed "$i" || continue
       unit=runner-up@$i.service
       systemctl --user is-active --quiet "$unit" && continue
-      grep -qxF "$unit" "$io_state" 2>/dev/null && continue
+      io_paused "$unit" && continue
       printf '%s\n' "$i" >> "$state.new"
       set -- "$@" "$unit"
     done < "$state"
@@ -132,8 +139,6 @@ guard)
   avg=$(awk '$1 == "full" { sub("avg60=", "", $3); print $3 }' "${RUNNER_UP_PRESSURE_FILE:-/proc/pressure/io}" 2>/dev/null) || avg=
   io_above() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a > m) }'; }
   io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
-  # IO resume: below the level for the whole window, then one unit per run.
-  # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
   (
     flock 8
     if ! io_below; then
@@ -145,7 +150,8 @@ guard)
           i=${unit#runner-up@}
           i=${i%.service}
           tail -n +2 "$io_state" > "$io_state.new"
-          if [ "$unit" = "runner-up@$i.service" ] && managed "$i"; then
+          if [ "${unit%.service}" = "runner-up@$i" ] && managed "$i"; then
+            unit=runner-up@$i.service
             if ! systemctl --user is-active --quiet "$unit"; then
               printf '%s\n' "$unit" >> "$io_state.new"
               queue_start "$unit" || :
@@ -186,7 +192,7 @@ guard)
       u=runner-up@$i.service
       systemctl --user is-failed --quiet "$u" || continue
       grep -qxF "$i" "$state" 2>/dev/null && continue
-      grep -qxF "$u" "$io_state" 2>/dev/null && continue
+      io_paused "$u" && continue
       case " ${RUNNER_UP_IO_HEAVY-} " in *" $i "*) ! io_above || continue ;; esac
       set -- "$@" "$u"
     done
@@ -201,8 +207,9 @@ io-pause)
   exec 8>"$io_state.lock"
   flock 8
   for u in "$@"; do
+    case "$u" in runner-up@*.*|runner-up@) ;; runner-up@*) u=$u.service ;; esac
     systemctl --user stop "$u" || continue
-    grep -qxF "$u" "$io_state" 2>/dev/null || echo "$u" >> "$io_state"
+    io_paused "$u" || echo "$u" >> "$io_state"
   done
   rm -f "$io_state.calm" ;;
 *)

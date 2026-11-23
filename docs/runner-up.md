@@ -160,7 +160,7 @@ Keep `crewship.ci_pool` only for repositories that did not move yet.
 Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
-Before changing Docker-in-Docker pools, storage, or slice limits, drain their places and stop and disable their coordinators.
+Pause the runner-up guard before changing Docker-in-Docker pools, `data_dir`, `io_write_device`, or slice limits. Stop and disable all Docker-in-Docker places and coordinators before making those changes.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
 
 ## Other machines

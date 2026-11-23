@@ -23,34 +23,6 @@
   check_mode: false
   changed_when: false
 
-- name: Render the requested Docker-in-Docker configs for preflight
-  ansible.builtin.set_fact:
-    crewship_runner_up_requested: >-
-      {{ crewship_runner_up_requested | default({}) |
-         combine({item.1: lookup('ansible.builtin.template', 'runner-up.config.json.j2')}) }}
-  vars:
-    crewship_runner_up_repo: "{{ item.0 }}"
-    crewship_runner_up_instance: "{{ item.1 }}"
-  loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
-  when: item.0 in crewship_runner_up_dind_repos
-
-- name: Refuse changes while Docker-in-Docker is in use
-  become: "{{ crewship_become_target | bool }}"
-  become_user: "{{ crewship_cfg.user }}"
-  environment: "{{ crewship_user_systemd_env }}"
-  ansible.builtin.command:
-    argv:
-      - python3
-      - "{{ crewship_blueprint }}/maintenance/runner-up-preflight.py"
-      - "{{ crewship_runner_up_config_dir }}"
-      - "{{ crewship_user_units }}"
-      - "{{ crewship_runner_up_slice_dir }}/{{ crewship_runner_up_slice }}"
-      - "{{ crewship_runner_up_shim_dir }}/dind-image"
-      - "{{ crewship_runner_up_dind_image }}"
-    stdin: "{{ {'configs': crewship_runner_up_requested | default({}), 'slice': lookup('ansible.builtin.template', 'runner-up.slice.j2')} | to_json }}"
-  check_mode: false
-  changed_when: false
-
 - name: Require a supported Docker-in-Docker host
   ansible.builtin.command:
     argv:

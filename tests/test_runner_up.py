@@ -138,9 +138,8 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         )
         lsblk.chmod(0o755)
         environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
-    socket = home.parent / ("docker.sock" if docker_stub else "no-docker.sock")
-    environment["RUNNER_UP_DOCKER_SOCK"] = str(socket)
     if docker_stub:
+        socket = home.parent / "docker.sock"
         socket.touch()
         bin_dir, log = docker_stub
         shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
@@ -148,13 +147,13 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         systemctl.write_text(
             '#!/bin/sh\n'
             f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
-            'case " $* " in *" show "*) printf "%s\\n" '
-            'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\nexit 0\n'
+            'exit 0\n'
         )
         systemctl.chmod(0o755)
         variables["crewship_user_runtime_dir"] = str(home.parent)
         environment.update(
             RUNNER_UP_DOCKER=str(bin_dir / "docker"),
+            RUNNER_UP_DOCKER_SOCK=str(socket),
             IMAGES=str(home.parent / "images"),
             DOCKER_CGROUP_DRIVER="systemd",
         )
@@ -480,7 +479,6 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
         home,
         repos=[plain, dind, REPOS[1]],
         machines=[machine],
-        machines_repo="Acme/E2E.Tests",
         io_write_device=str(home.parent / "test-block-device"),
         io_write_mb=200,
         io_write_iops=500,
@@ -542,9 +540,6 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     assert "acme-e2e-tests" not in instances(home)
     wants = units(home) / "default.target.wants"
     assert not (wants / "runner-up@acme-e2e-tests.service").exists()
-    apply(home, runner(home, repos=[existing, new]), facts=facts)
-    assert config(home) == original
-    assert not (wants / "runner-up@acme-e2e-tests.service").exists()
     apply(home, runner(home, repos=[REPOS[1]]))
     assert "acme-web" not in instances(home)
     apply(home, runner(home, repos=[existing]), facts=facts)
@@ -559,13 +554,6 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     calls = stubs[1].read_text().splitlines()
     reload = calls.index("systemctl daemon-reload")
     assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker image inspect "))
-    for docker_stub in (None, stubs):
-        settings = runner(home, repos=[REPOS[1]])
-        with pytest.raises(AssertionError, match="Stop all Docker-in-Docker places"):
-            apply(home, settings, docker_stub=docker_stub)
-        assert slice_file.stat().st_mtime_ns == before
-        assert stubs[1].read_text().splitlines() == calls
-        assert config(home)["pools"][0]["label"] == "web-dind"
 
 
 def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
@@ -1012,10 +1000,10 @@ def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
 def test_disk_resume_leaves_io_paused_units_until_io_recovers(stubs, tmp_path):
     unit = "runner-up@a-b.service"
     calls, left = io_guard(
-        stubs, tmp_path, "60.00", now=1000, io=f"{unit}\n", disk_paused="a-b\nc-d\n"
+        stubs, tmp_path, "60.00", now=1000, io="runner-up@a-b\n", disk_paused="a-b\nc-d\n"
     )
     assert calls == ["systemctl --user --no-block start runner-up@c-d.service"]
-    assert left == [unit]
+    assert left == ["runner-up@a-b"]
     assert (tmp_path / "paused").read_text() == "c-d\n"
     calls, _ = io_guard(
         stubs, tmp_path, "5.00", now=1100, io="", active_units="runner-up@c-d.service"
@@ -1034,7 +1022,7 @@ def test_guard_discards_removed_coordinators_from_both_pause_records(stubs, tmp_
         "5.00",
         now=1200,
         calm=1000,
-        io=f"runner-up@removed.service\n{unit}\n",
+        io="runner-up@removed.service\nrunner-up@a-b\n",
         disk_paused="removed\n",
     )
     assert calls == [f"systemctl --user --no-block start {unit}"]
@@ -1074,7 +1062,7 @@ def test_guard_leaves_a_coordinator_alone_while_a_pause_holds_it(stubs, tmp_path
         "systemctl --user --no-block start runner-up@c-d.service"
     ]
     (tmp_path / "paused").unlink()
-    assert heal(stubs, tmp_path, 10, io_paused="runner-up@a-b.service\n") == [
+    assert heal(stubs, tmp_path, 10, io_paused="runner-up@a-b\n") == [
         "systemctl --user --no-block start runner-up@c-d.service"
     ]
 
@@ -1133,8 +1121,11 @@ def test_io_pause_stops_and_records_units_once(stubs, tmp_path):
     (bin_dir / "systemctl").chmod(0o755)
     state = tmp_path / "io.paused"
     env = {"RUNNER_UP_IO_STATE": str(state)}
-    run_script("runner-up-maintain", stubs, "io-pause", "a", "bad", "a", "b", env=env)
-    assert state.read_text() == "a\nb\n"
+    run_script(
+        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", "bad", "runner-up@a-b.service", "b",
+        env=env,
+    )
+    assert state.read_text() == "runner-up@a-b.service\nb\n"
 
 
 def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
