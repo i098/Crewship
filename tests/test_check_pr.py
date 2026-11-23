@@ -70,8 +70,11 @@ def test_main_checks_base_range_and_detects_ui(check_pr, tmp_path, monkeypatch, 
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "Old bad subject")
     site = tmp_path / "site"
-    (site / "public").mkdir(parents=True)
-    (site / "public/harbor.css").write_text("body { color: red; }")
+    site.mkdir()
+    tui = tmp_path / "tools/runs-tui"
+    tui.mkdir(parents=True)
+    (tui / "runs-tui.ts").write_text("view source\n")
+    _git(tmp_path, "config", "diff.relative", "true")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "feat(ui): style")
     body = tmp_path / "body.md"

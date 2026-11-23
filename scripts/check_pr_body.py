@@ -64,8 +64,9 @@ def strip_comments(line, comment, *, token_pattern=COMMENT_TOKEN):
 def literal_html_lines(tag, line, lines):
     end = re.compile(rf"</{tag}>", re.I)
     comment = False
+    token_pattern = HTML_COMMENT if tag.lower() == "pre" else COMMENT_TOKEN
     while line is not None:
-        line, comment = strip_comments(line, comment, token_pattern=HTML_COMMENT)
+        line, comment = strip_comments(line, comment, token_pattern=token_pattern)
         yield line, "html"
         if end.search(line):
             return comment
@@ -157,6 +158,7 @@ def changes_ui(base, *, head="HEAD"):
         "diff",
         "--name-only",
         "--no-renames",
+        "--no-relative",
         f"{base}...{head}",
         "--",
         *(f":(top,icase,glob){pattern}" for pattern in UI_GLOBS),
