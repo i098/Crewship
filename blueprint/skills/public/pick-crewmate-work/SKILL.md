@@ -8,6 +8,8 @@ description: Use when Firstmate needs to pick the next crewmate task from the wo
 Covers GitHub repositories; for a Forgejo-hosted project, list its issues and PRs with that forge's tool.
 
 Use the current goal, the repositories in scope, and the latest task status.
+Before checking any tier, skip work in a secondmate's `scope` in the current home's `data/secondmates.md`.
+Let the responsible home pick its own work. Do not read any other home.
 Pick at most one actionable item for each available crewmate.
 Check for active owners and duplicate records across issues, pull requests, tasks, and backlog entries.
 Treat records for the same outcome as one item.
@@ -64,7 +66,7 @@ Do not treat such a source as empty or use it to justify a lower-priority pick.
 
 - **Source:** Name the tier and give the issue or pull request URL, task ID, or backlog reference.
   For research, cite the goal or decision that needs evidence.
-- **Why now:** Give the evidence that the item is actionable and that no higher tier has an actionable item.
+- **Why now:** Show that the item is actionable and no higher tier has an eligible item left after earlier picks.
 - **Outcome:** State one result and name the repository and scope.
 - **Start here:** Give the first action and the relevant links, files, or last verified result.
 - **Done when:** Give a check or a deliverable that proves the result.
