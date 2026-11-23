@@ -353,7 +353,8 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   `fm-imessage` sends `X-Fm-Sender` from `FM_MATE_ID` or, if unset, `FM_HOME`.
   The bridge stores the sender with the exact text message ID from Photon or BlueBubbles in `thread-senders.sqlite`.
   This includes photo captions, but not the photos themselves.
-  If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
+  If the BlueBubbles send response is lost or lacks a usable message ID, an outbound webhook can still identify the bubble.
+  The bridge matches the webhook's `tempGuid` to the pending send and verifies the message ID, outbound direction, and chat through the authenticated relay API.
   The bridge skips attribution for unresolved sends with the same normalized text in the same chat within ten seconds.
   It also skips attribution if an older send is still unresolved within the relay's 120-second match window.
   A text match in history can prevent a duplicate send, but does not resolve uncertainty about its sender.
@@ -788,7 +789,11 @@ First [enable the bridge](#enable-it). Then add `transports` and the `bluebubble
       webhook_listen: <agent host address>:8766   # where the relays post their webhooks
 ```
 
-`webhook_listen` must be an address that the relays reach and nothing else does, such as the agent host's address on your private network. Its port must not be the standby port (`FM_IMESSAGE_NEXT_PORT`, 8766 by default) on a wildcard or loopback address: the standby slot would fail to bind it while the live slot holds the webhook, and every deploy would fail. To use Photon alone again, remove `transports` and the `bluebubbles` block.
+Use an address that only the configured relays can reach for `webhook_listen`, such as the agent host's private network address.
+The bridge trusts the webhook's `tempGuid` for sender attribution because the authenticated message lookup does not verify that association.
+Do not use the standby port (`FM_IMESSAGE_NEXT_PORT`, 8766 by default) on a wildcard or loopback address.
+The standby slot cannot bind that port while the live slot holds the webhook, so deployment fails.
+To use Photon alone again, remove `transports` and the `bluebubbles` block.
 
 The bridge uses these routing rules with one or both transports:
 
@@ -851,18 +856,22 @@ The bridge uses these routing rules with one or both transports:
   Thread support follows the Private API rule above.
 - **No double sends.** Each outbox item keeps a client GUID, and each bubble sends with its own one (BlueBubbles `tempGuid`). If a relay may have sent a text but did not answer (a timeout, a server error, or an answer that cannot be read), the bridge asks the relays whether the text is in the chat before it sends that bubble again, on any relay or transport (see above). It looks for the same text from the line in the last minute or so. The relay that may have sent is asked first, even when its health check says it is down. Known limits: when that relay cannot answer, another relay can still send the text a second time; a text that reaches the other Macs through iCloud late can be sent twice; a text identical to one sent in the same minute counts as sent; and a text that may be out on Photon cannot be checked, so Photon sends it again (at least once).
   History must match the complete message text, including leading and trailing whitespace.
-- **Inbound.** Every relay posts its webhook.
-  A webhook carries only the message GUID that the bridge acts on.
+- **Inbound.** Each relay posts a webhook for new messages.
+  For inbound messages, the bridge uses the webhook's GUID to fetch the message.
   The bridge reads the message back from a relay with the password, so a forged webhook cannot inject text.
   The bridge keeps the last 1000 message GUIDs in `~/.local/state/fm-imessage/bluebubbles-seen`.
   It records a GUID only after it durably saves the request or ignores the message.
-  It ignores other senders, outbound texts, tapbacks, and other signals.
+  It ignores messages from other senders, tapbacks, and other signals.
+  It does not queue outbound texts as inbound requests.
   If handling fails or the bridge stops before completion, the next webhook or catch-up retries the message.
   See [What it does](#what-it-does) for durable routing and duplicate suppression.
   At start and each minute, the bridge asks every reachable relay for the last 15 minutes of messages.
   It handles each unseen message.
   This recovers a missed webhook or restart gap if a relay is reachable within 15 minutes.
   It does not recover older messages that missed their webhooks.
+- **Outbound attribution.** An outbound new-message webhook can complete a pending sender match using its `tempGuid`.
+  The bridge reads the message through the authenticated API to verify its GUID, outbound direction, and chat.
+  The API read does not verify the `tempGuid`, so only the configured relays must have access to `webhook_listen`.
 - **Attachments.** The bridge downloads a file from whichever relay has it. The first try runs while the bridge handles the message, so it has the short bound of 15 seconds, body included, and never holds up the next message. If it fails or is too slow, the note says that the attachment could not be saved yet, and the download queue tries again with a bound of 10 minutes, like a Photon download. A download that is cut off fails as a timeout, and the queue retries it. The item moves to the dead-letter folder only when every configured relay was asked and every one answered 404 (or another permanent error). If a relay is down, or its download was cut off, the queue retries, so a relay that comes back is asked again. The same rule holds for reading a message.
 - **Tapbacks.** BlueBubbles has six: ❤️ 👍 👎 😂 ‼️ ❓. A tapback with another emoji moves to the dead-letter folder.
 - **Location.** `fm-location` works only with Photon.

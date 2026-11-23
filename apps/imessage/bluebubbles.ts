@@ -212,7 +212,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
               else this.rejectSend(tempGuid, pendingAt);
               throw e;
             }) as { guid?: unknown } | undefined;
-          this.recordSend(tempGuid, typeof sent?.guid === "string" ? sent.guid : undefined);
+          this.recordSend(tempGuid, sent?.guid);
         }
         this.suspects.clear();
         return reconciled ? "reconciled" : "accepted";
@@ -274,10 +274,11 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     else match.at = pendingAt;
   }
 
-  private recordSend(tempGuid: string, id?: string) {
+  private recordSend(tempGuid: string, id: unknown) {
+    if (typeof id !== "string" || !id.trim()) return;
     const match = this.sendMatches.get(tempGuid);
     this.sendMatches.delete(tempGuid);
-    if (id && match && !match.ambiguous) match.record?.(id);
+    if (match && !match.ambiguous) match.record?.(id);
   }
 
   async sent(chat: string, text: string, since: number): Promise<boolean> {

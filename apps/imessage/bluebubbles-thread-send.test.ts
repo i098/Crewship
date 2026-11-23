@@ -11,7 +11,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-function relay(privateApi: boolean) {
+function relay(privateApi: boolean, sendResponse: { guid?: unknown } = { guid: "sent-1" }) {
   const sent: Record<string, unknown>[] = [];
   let rejected = false;
   const server = Bun.serve({
@@ -22,8 +22,11 @@ function relay(privateApi: boolean) {
       if (path.endsWith("/message/text")) {
         sent.push((await req.json()) as Record<string, unknown>);
         if (rejected) return new Response("rejected", { status: 400 });
-        return Response.json({ data: { guid: "sent-1" } });
+        return Response.json({ data: sendResponse });
       }
+      if (path.endsWith("/message/sent-1")) return Response.json({
+        data: { guid: "sent-1", isFromMe: true, chats: [{ guid: "iMessage;-;+15550000000" }] },
+      });
       return new Response("no", { status: 404 });
     },
   });
@@ -52,6 +55,20 @@ test("a send without a reply target is not threaded", async () => {
   const { bb, sent } = relay(true);
   await bb.send("iMessage;-;+15550000000", "hello");
   expect(sent[0]!.selectedMessageGuid).toBeUndefined();
+});
+
+test.each([{}, { guid: "" }, { guid: " " }, { guid: 42 }])("an accepted send without a usable GUID keeps its webhook match (%j)", async (response) => {
+  const { bb, sent } = relay(true, response);
+  const tempGuid = crypto.randomUUID();
+  const recorded: string[] = [];
+  expect(await bb.send("iMessage;-;+15550000000", "hello", undefined, tempGuid, undefined, (id) => recorded.push(id))).toBe("accepted");
+  expect(recorded).toEqual([]);
+  await bb.webhook(new Request("http://localhost/bluebubbles", {
+    method: "POST",
+    body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid, guid: "sent-1" } }),
+  }));
+  expect(recorded).toEqual(["sent-1"]);
+  expect(sent).toHaveLength(1);
 });
 
 for (const retry of ["relay", "outbox", "restart"]) {

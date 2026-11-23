@@ -127,8 +127,7 @@ function createDeskHelper<R extends TurnRequest>(host: SessionHost<R>) {
 }
 
 export function sessionMayAct(pending: readonly RelayRequest[], { vetted, muted, safe }: Pick<SessionHost<TurnRequest>, "vetted" | "muted" | "safe">) {
-  return vetted && !muted() && !!safe && !pending.some((r) => r.mutationPath)
-    && deskMayAct(pending) && pending.every((r) => safe(r.text) === r.text);
+  return vetted && !muted() && !!safe && deskMayAct(pending) && pending.every((r) => safe(r.text) === r.text);
 }
 
 export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
