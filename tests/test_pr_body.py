@@ -98,6 +98,7 @@ class PRBodyTests(unittest.TestCase):
             for content in (
                 "", "-", "<!-- Fill this in. -->", "```text\n```", "<br>", "<div></div>",
                 "<div>&nbsp;</div>", "&#160;", "&#xA0;", "&Tab;&NewLine;", "&ensp;",
+                "<pre>&nbsp;</pre>", "<pre>\n&nbsp;\n</pre>",
                 "[ref]: https://example.com",
                 "   [ref]: <https://example.com> 'A title'",
                 '[ref]: https://example.com\n  "A title"',
@@ -118,6 +119,8 @@ class PRBodyTests(unittest.TestCase):
                 "&lt;br&gt;", "<div>A change.</div>",
                 "<pre>All tests passed.\n</pre>",
                 "<pre>\nAll tests passed.</pre>",
+                "<pre>\n</pre>All tests passed.",
+                "<div>`pytest`</div>",
                 "[ref]: https://example.com\n\nRead [ref].",
                 '[ref]: https://example.com\n  "A title"\n\nVisible text.',
             ):

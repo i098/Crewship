@@ -20,7 +20,7 @@ Use each row that applies to your change.
    If GitHub inserts an HTML tag, copy its `src` URL into the Markdown image.
    Use a separate upload for each revision.
    For a new view, put `Before: none, new view` on its own line in place of the Before image.
-   Put image and new-view marker lines outside raw HTML blocks.
+   Start each evidence line with Markdown, not an HTML tag or comment.
    Link the recording or board with a descriptive label, such as `[Recording of the setup flow](https://…)`.
    Open each link as a reviewer to check access.
 
