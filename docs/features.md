@@ -35,3 +35,17 @@ These features turn one server into a self-hosted AI coding agent server where y
 - [Tailscale](security.md#remote-access): the Tailscale daemon for a private network, an option beside the gateway (opt-in)
 - [Agent host move](agent-host-move.md): move the agents to a new host with parity checks
 - [Security](security.md): the password gateway, Tailscale, and credentials
+
+## Live view and replay
+
+Use [Witch](https://github.com/i098/witch) to watch agent sessions live and replay recordings by device.
+You need access to the private Witch repository.
+Crewship does not install or configure Witch.
+Set up a Witch server with voxl for real screen capture. Without voxl, Witch records synthetic frames.
+
+On each Linux or macOS device you want to record, run this command from a Witch checkout with `cargo` installed.
+Replace the server URL and device ID, set `TOKEN` to your server token, and omit the optional arguments if you do not need them.
+
+```sh
+WITCH_TOKEN="$TOKEN" scripts/bootstrap.sh --server https://witch.example.com --device laptop [--agent NAME] [-- COMMAND...]
+```
