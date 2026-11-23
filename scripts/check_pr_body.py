@@ -89,9 +89,7 @@ def body_lines(markdown):
             comment = yield from literal_html_lines(opening[1], raw, lines)
             continue
         raw_html = comment or RAW_HTML.match(raw)
-        line, comment = strip_comments(
-            raw, comment, token_pattern=HTML_COMMENT if raw_html else COMMENT_TOKEN
-        )
+        line, comment = strip_comments(raw, comment)
         if raw_html:
             yield line, "html"
         elif marker := FENCE.match(line):

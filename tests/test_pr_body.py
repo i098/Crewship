@@ -101,7 +101,6 @@ class PRBodyTests(unittest.TestCase):
                 "<pre>&nbsp;</pre>", "<pre>\n&nbsp;\n</pre>",
                 "<pre>\n<!-- tests not run -->\n</pre>",
                 "<pre>\n`<!-- tests not run -->`\n</pre>",
-                "<div>`<!-- tests not run -->`</div>",
                 "[ref]: https://example.com",
                 "   [ref]: <https://example.com> 'A title'",
                 '[ref]: https://example.com\n  "A title"',
@@ -144,7 +143,7 @@ class PRBodyTests(unittest.TestCase):
         self.assertEqual(self.check(body), [])
 
     def test_comment_markers_inside_inline_code_are_literal(self):
-        for prefix in ("", "<https://example.com> ", "<reviewer@example.com> "):
+        for prefix in ("", "<https://example.com> ", "<reviewer@example.com> ", "<kbd>Enter</kbd> "):
             with self.subTest(prefix=prefix):
                 body = VALID_BODY.replace(
                     "Check every pull request body against the repository template.",

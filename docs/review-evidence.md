@@ -10,8 +10,8 @@ Use each row that applies to your change.
 | CLI, API, runtime, or infrastructure | Command, scenario, and observed result | Terminal or CI job | PR text or GitHub Actions run | `Test evidence` |
 | Documentation or tests only | Rendered page or targeted test result | Markdown preview or test runner | PR text, GitHub upload, or GitHub Actions run | `Test evidence` |
 
-1. Capture the actual surface on the base and head revisions with the same input.
-   Capture only the head revision for a new view.
+1. For the screenshot row, capture the same view with the same input on the base and head revisions.
+   For a new view, capture only the head revision.
    Remove secrets and private data before you upload anything.
    Use synthetic input or redact live costs, quota balances, and plan names before uploading public screenshots or recordings.
 2. [Attach screenshots and recordings to the PR on GitHub](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files).
