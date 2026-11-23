@@ -29,16 +29,18 @@ case $cmd in
     [ "$slot" = front ] && ! [ -f "$RUN/front.legacy" ] && exit 0
     alive && exit 0
     [ -f "$RUN/$slot.failed" ] && exit 1
+    if [ -f "$RUN/$slot.spent" ]; then touch "$RUN/$slot.failed"; exit 1; fi
     if [ "$slot" = front ]; then cd "$DIR"; else cd "$DIR/$slot"; export FM_IMESSAGE_SLOT=$slot; fi
     setsid bun bridge.ts >> "$RUN/$slot.log" 2>&1 < /dev/null &
     echo $! > "$pidf" ;;
   stop)
+    rm -f "$RUN/$slot.failed"
     alive || exit 0
     pid=$(cat "$pidf"); kill -TERM "$pid"
     for _ in $(seq 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
     kill -KILL "$pid" 2>/dev/null; rm -f "$pidf"; [ "$slot" = front ] && rm -f "$RUN/front.legacy"; exit 0 ;;
   is-active) alive && ! [ -f "$RUN/$slot.activating" ] ;;
-  reset-failed) rm -f "$RUN/$slot.failed" ;;
+  reset-failed) rm -f "$RUN/$slot.failed" "$RUN/$slot.spent" ;;
   show)
     case "$*" in
       *MainPID*) if [ "$slot" = front ] && alive; then cat "$pidf"; else echo 0; fi ;;
@@ -270,21 +272,16 @@ def test_a_failed_first_install_leaves_the_legacy_slot_and_the_next_deploy_still
     assert rig.needed() == 3
 
 
-def test_only_a_new_build_can_reset_an_exhausted_rollout_target(rig):
+@pytest.mark.parametrize("new_build", [False, True])
+def test_rollout_does_not_reset_an_exhausted_target(rig, new_build):
     rig.legacy()
     rig.inbound("m1")
     rig.stage()
     assert rig.deploy().returncode == 0 and rig.active() == "blue"
     start_limit = rig.run / "green.failed"
     start_limit.touch()
-    assert rig.deploy().returncode == 1
-    assert start_limit.exists() and rig.active() == "blue" and rig.health()
-
-    rig.stage(plant_after_handover)
-    failed = rig.deploy()
-    assert failed.returncode == 1 and "rolling back to blue" in failed.stdout, failed.stdout + failed.stderr
-    assert not start_limit.exists()
-    start_limit.touch()
+    if new_build:
+        rig.stage(plant_after_handover)
     assert rig.deploy().returncode == 1
     assert start_limit.exists() and rig.active() == "blue" and rig.health()
 
@@ -336,16 +333,26 @@ def test_texts_sent_through_the_handover_wait_for_the_line_and_go_out_exactly_on
     assert_each_text_went_out_once(rig, results)
 
 
-def test_texts_sent_through_a_rollback_wait_for_the_old_slot_and_go_out_exactly_once(rig):
+@pytest.mark.parametrize("spent", [False, True])
+def test_rollback_respects_the_old_slots_start_budget(rig, spent):
     rig.legacy()
     rig.inbound("m1")
     rig.stage()
     assert rig.deploy().returncode == 0  # first rolling install: legacy to blue
-    (rig.run / "blue.failed").touch()  # the running slot will refuse another start until reset
+    old_pid = (rig.run / "blue.pid").read_text()
     rig.stage(plant_after_handover)  # green passes the gate, takes the line and dies: blue is stopped, then restarted
+    if spent:
+        budget = rig.run / "blue.spent"
+        budget.touch()
+        deploy = rig.deploy()
+        assert deploy.returncode == 1 and "rolling back to blue" in deploy.stdout, deploy.stdout + deploy.stderr
+        assert rig.active() == "blue" and not rig.alive("blue") and not rig.health()
+        assert budget.exists() and (rig.run / "blue.failed").exists()
+        return
     deploy, results = deploy_while_sending(rig)
     assert deploy.returncode == 1 and "rolling back to blue" in deploy.stdout, deploy.stdout + deploy.stderr
     assert rig.active() == "blue" and rig.health()
+    assert (rig.run / "blue.pid").read_text() != old_pid
     assert_each_text_went_out_once(rig, results)
 
 

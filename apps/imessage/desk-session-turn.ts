@@ -126,6 +126,11 @@ function createDeskHelper<R extends TurnRequest>(host: SessionHost<R>) {
   };
 }
 
+export function sessionMayAct(pending: readonly RelayRequest[], { vetted, muted, safe }: Pick<SessionHost<TurnRequest>, "vetted" | "muted" | "safe">) {
+  return vetted && !muted() && !!safe && !pending.some((r) => r.mutationPath)
+    && deskMayAct(pending) && pending.every((r) => safe(r.text) === r.text);
+}
+
 export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   const seenPath = `${host.stateDir}/desk-session.seen`; // memory messages the session has been shown, as a count
   let child: DeskSession | undefined;
@@ -141,9 +146,6 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   const seen = (): number => {
     try { return Number(readFileSync(seenPath, "utf8")) || 0; } catch { return 0; }
   };
-
-  const refused = (pending: R[], original: string[]) => !host.vetted || host.muted() || !host.safe || pending.some((r) => r.mutationPath)
-    || !deskMayAct(pending) || original.some((text) => host.safe!(text) !== text);
 
   function missedLines(ids: Set<string>, last: number, safe: (text: string) => string) {
     return host.memory.msgs.slice(Math.min(seen(), last + 1), last + 1)
@@ -163,8 +165,8 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
   // The session reads, then ends in one bridge-checked action. No action hands the burst to Firstmate.
   return async function runSessionTurn(pending: R[], controller: AbortController, current: () => boolean) {
     if (!current()) return;
+    if (!sessionMayAct(pending, host)) return host.handoff(pending);
     const original = pending.map((r) => r.text);
-    if (refused(pending, original)) return host.handoff(pending);
     const safe = host.safe!;
     const mates = secondmates(host.fmHome);
     const actions = createActions({

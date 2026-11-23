@@ -40,7 +40,7 @@ import { sizeView } from "./desk.ts";
 import { type DispatchModel, dispatchSelection, loadDispatchModels } from "./dispatch-policy.ts";
 import { answerStatus, type FrontInput, type FrontIntent, type FrontResult, loadFrontRedactor, runFront } from "./front.ts";
 import { deskMayAct, deskRequestMarker, directChat, mateInboxHas, mayNotice, relayNotice, relayTarget, relayTargetCurrent } from "./relay.ts";
-import { ACK_GUID_PREFIX, createSessionTurn, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
+import { ACK_GUID_PREFIX, createSessionTurn, sessionMayAct, TASK_GUID_PREFIX } from "./desk-session-turn.ts";
 import { runSubagent } from "./subagent.ts";
 import { ImageError, type Picture, type PreparedImage, prepareImage } from "./image.ts";
 import { instagramWebhook } from "./instagram-webhook.ts";
@@ -273,7 +273,7 @@ async function startLine(name: string): Promise<Line> {
       const [url = "", variable = ""] = item.split(",");
       return { url, password: need(variable) };
     });
-    const bb = new BlueBubbles(relays, STATE);
+    const bb = new BlueBubbles(relays, STATE, { trackPending: DESK_SESSION });
     // The relays post their webhooks to this address:port; bluebubbles.ts reads each message back with the password.
     const listen = new URL(`http://${need("FM_BLUEBUBBLES_WEBHOOK")}`);
     return {
@@ -1584,11 +1584,6 @@ function isThreadReply(item: Received) {
   return item.threadTarget !== undefined || item.threadMate !== undefined;
 }
 
-function mayRelayThread(item: Routing) {
-  return DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
-    && deskSafe?.(item.text) === item.text;
-}
-
 async function relayThreadReplies(pending: Routing[], current: () => boolean) {
   const mates = secondmates(FM_HOME);
   const remaining: Routing[] = [];
@@ -1601,7 +1596,7 @@ async function relayThreadReplies(pending: Routing[], current: () => boolean) {
       continue;
     }
     const mate = sender && mates.find((m) => m.home === sender || m.id === sender);
-    if (mate && mayRelayThread(item)) await handoffToMate([item], mate, current);
+    if (mate && sessionMayAct([item], { vetted: DESK_VETTED, muted, safe: deskSafe })) await handoffToMate([item], mate, current);
     else handoffV2([item]);
   }
   return remaining;

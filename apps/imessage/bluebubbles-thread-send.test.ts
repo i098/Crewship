@@ -117,7 +117,7 @@ test("a definite rejection does not block attribution for the next send", async 
   expect(recorded).toEqual(["sent-1"]);
 });
 
-test("ambiguous relay matches record no sender through either response path", async () => {
+test.each([false, true])("overlapping sends block attribution (replay: %s)", async (replayed) => {
   const chat = "iMessage;-;+15550000000";
   const firstGuid = crypto.randomUUID();
   const { promise: held, resolve: release } = Promise.withResolvers<void>();
@@ -142,10 +142,10 @@ test("ambiguous relay matches record no sender through either response path", as
   servers.push(server);
   const dir = mkdtempSync(join(tmpdir(), "bb-thread-"));
   dirs.push(dir);
-  const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], dir, {}, () => {});
+  const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], dir, { trackPending: true }, () => {});
   const recorded: string[] = [];
   const record = (id: string) => recorded.push(id);
-  const first = bb.send(chat, "Done!", undefined, firstGuid, undefined, record);
+  const first = bb.send(chat, "Done!", undefined, firstGuid, undefined, replayed ? undefined : record);
   await started;
   const secondGuid = crypto.randomUUID();
   try {

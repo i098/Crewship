@@ -34,6 +34,7 @@ const DEFAULTS = {
   seenMax: 1000, // message GUIDs kept for de-duplication
   catchUpMs: 60_000, // between catch-up queries
   lookbackMs: 15 * 60_000, // how far back a catch-up query looks
+  trackPending: false,
 };
 
 // The tapbacks BlueBubbles can send, by emoji.
@@ -57,7 +58,7 @@ type BBMessage = {
   associatedMessageGuid?: string | null; threadOriginatorGuid?: string | null;
 };
 
-type SendMatch = { chat: string; text: string; at: number; ambiguous: boolean; reconciled?: true; record: (id: string) => void };
+type SendMatch = { chat: string; text: string; at: number; ambiguous: boolean; reconciled?: true; record?: (id: string) => void };
 const SEND_MATCH_MS = 10_000;
 
 export class BlueBubbles implements AsyncIterable<Bubble> {
@@ -201,7 +202,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         const reconciled = maybeSent && await this.sent(chat, text, started, tempGuid);
         if (!reconciled) {
           beforeSend?.();
-          if (sentId) this.trackSend(tempGuid, chat, text, Date.now(), sentId);
+          if (this.opts.trackPending || sentId) this.trackSend(tempGuid, chat, text, Date.now(), sentId);
           const sent = await this.call(r, "POST", "message/text", undefined,
             { chatGuid: chat, tempGuid, message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
             .catch((e) => {
@@ -250,7 +251,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     return (await this.first((r) => this.call(r, "GET", `message/${encodeURIComponent(guid)}`, { with: "chats,attachments" }))) as BBMessage;
   }
 
-  private trackSend(tempGuid: string, chat: string, text: string, at: number, record: (id: string) => void) {
+  private trackSend(tempGuid: string, chat: string, text: string, at: number, record?: (id: string) => void) {
     const normalized = text.replace(/[\W_]+/g, "");
     const match = { chat, text: normalized, at, record, ambiguous: this.sendMatches.get(tempGuid)?.ambiguous ?? false };
     this.sendMatches.delete(tempGuid);
@@ -265,7 +266,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   private recordSend(tempGuid: string, id?: string) {
     const match = this.sendMatches.get(tempGuid);
     this.sendMatches.delete(tempGuid);
-    if (id && match && !match.ambiguous) match.record(id);
+    if (id && match && !match.ambiguous) match.record?.(id);
   }
 
   async sent(chat: string, text: string, since: number, tempGuid?: string): Promise<boolean> {

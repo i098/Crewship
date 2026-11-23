@@ -357,6 +357,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   The bridge skips attribution if another unresolved send to the same chat has the same normalized text within ten seconds.
   A history match by text can prevent a duplicate send, but cannot register a sender match.
   The bridge does not register a sender when it resumes an outbox item after restart, even if it sends the text again.
+  An unresolved replay still counts when the bridge checks for an ambiguous match.
   The store retains up to 5,000 entries for 30 days and prunes them on write.
   When session mode opens the store, it removes `senders.json` without importing entries because they have no individual timestamps.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
@@ -550,10 +551,11 @@ The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
   The probe reads the owner's latest text back from the transport and sends no text.
   With no latest text known, the probe fails.
   If the new slot fails the health check or probe, the deploy stops it and restores the previous `active` value.
-  The deploy restarts the previous slot unless it was already failed at handover.
+  The deploy tries to restart the previous slot if it is not failed.
   Both slots cannot hold the port and the outbox at the same time.
 - **Retry after a failure.** A deploy records a hash of the staged files and the rendered units in `~/.local/state/fm-imessage/deployed` only when it succeeds. The Ansible role runs `imessage-deploy.ts needed` on every apply (exit 3: not deployed) and deploys whenever it answers 3, so a failed deploy runs again at the next apply.
-  A new build can reset a failed target slot. A retry of the same build cannot.
+  A rollout or rollback does not reset a slot's start limit.
+  Use `recover` to reset the start limit of the active slot.
 - **No slot serving.** A deploy first waits up to 120 s (`FM_DEPLOY_SETTLE_MS`) for a slot that is starting or waiting to restart.
   If the slot settles `active`, the deploy uses the health gate.
   If the old slot is down, the new slot starts as the owner and must answer `/health` in time.
