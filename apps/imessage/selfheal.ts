@@ -5,7 +5,7 @@
 // `bun selfheal.ts failed` from the OnFailure unit.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
 type Env = Record<string, string | undefined>;
@@ -40,8 +40,18 @@ const run = async (cmd: string[], env: Env, timeout = 30_000) => {
   return { out, code };
 };
 
+// omp 19.1 unpacks natives into <version>/embedded-<hash>/; older omp put the .node files in <version>/ itself.
+export function nativesDir(dir: string): string {
+  if (!existsSync(dir)) return dir;
+  const names = readdirSync(dir);
+  if (names.some((f) => f.endsWith(".node"))) return dir;
+  const embedded = names.filter((f) => f.startsWith("embedded-"));
+  return embedded.length === 1 ? join(dir, embedded[0]) : dir;
+}
+
 // Does every pi-natives .node under ~/.omp/natives/<omp version> load? Run in a child so a bad file cannot crash the bridge.
-async function loads(dir: string, env: Env): Promise<boolean> {
+async function loads(base: string, env: Env): Promise<boolean> {
+  const dir = nativesDir(base);
   const want = `pi_natives.linux-x64-${/\bavx2\b/.test(readFileSync("/proc/cpuinfo", "utf8")) ? "modern" : "baseline"}.node`;
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".node")) : [];
   if (!files.includes(want)) return false;
@@ -63,12 +73,14 @@ async function ompNatives(env: Env): Promise<"ok" | "repaired"> {
   const scratch = mkdtempSync(join(env.TMPDIR || "/tmp", "fm-natives-"));
   try {
     await run([omp, "--help"], { ...env, HOME: scratch }, 60_000);
-    const fresh = `${scratch}/.omp/natives/${version}`;
-    if (!(await loads(fresh, env))) throw new Error(`omp ${version} did not unpack natives that load`);
-    mkdirSync(dir, { recursive: true });
+    const freshBase = `${scratch}/.omp/natives/${version}`;
+    if (!(await loads(freshBase, env))) throw new Error(`omp ${version} did not unpack natives that load`);
+    const fresh = nativesDir(freshBase);
+    const target = join(dir, relative(freshBase, fresh));
+    mkdirSync(target, { recursive: true });
     for (const file of readdirSync(fresh)) {
-      copyFileSync(join(fresh, file), join(dir, `${file}.tmp`));
-      renameSync(join(dir, `${file}.tmp`), join(dir, file));
+      copyFileSync(join(fresh, file), join(target, `${file}.tmp`));
+      renameSync(join(target, `${file}.tmp`), join(target, file));
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });

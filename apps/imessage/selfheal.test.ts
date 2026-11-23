@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bridgeNatives, loadState, markHealthy, onStart, Turns } from "./selfheal.ts";
+import { bridgeNatives, loadState, markHealthy, nativesDir, onStart, Turns } from "./selfheal.ts";
 
 // A fake omp that prints a version but unpacks no natives, so every start fails its natives check.
 const withHome = async (run: (env: Record<string, string>, dir: string) => Promise<void>) => {
@@ -87,3 +88,16 @@ test("a pi-natives install with its .node missing is repaired from the platform 
 test("a pi-natives install that cannot be repaired fails, so the start exits non-zero", () => withInstall(false, async (env) => {
   await expect(bridgeNatives(env)).rejects.toThrow(/no \.node to copy/);
 }));
+
+test("natives are found in a single embedded-* folder when the version folder has no .node", () => {
+  const dir = mkdtempSync(join(tmpdir(), "natives-"));
+  try {
+    expect(nativesDir(dir)).toBe(dir);
+    mkdirSync(`${dir}/embedded-abc`);
+    expect(nativesDir(dir)).toBe(`${dir}/embedded-abc`);
+    writeFileSync(`${dir}/a.node`, "");
+    expect(nativesDir(dir)).toBe(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
