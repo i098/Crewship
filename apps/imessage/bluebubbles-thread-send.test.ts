@@ -101,3 +101,48 @@ for (const retry of ["relay", "outbox"]) {
     expect(recorded).toEqual(["sent-by-relay"]);
   });
 }
+
+test("ambiguous relay matches record no sender through either response path", async () => {
+  const chat = "iMessage;-;+15550000000";
+  const firstGuid = crypto.randomUUID();
+  const { promise: held, resolve: release } = Promise.withResolvers<void>();
+  const { promise: started, resolve: arrived } = Promise.withResolvers<void>();
+  const bubble = { guid: "first-bubble", text: "Done!", isFromMe: true, chats: [{ guid: chat }] };
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const path = new URL(req.url).pathname;
+      if (path.endsWith("/server/info")) return Response.json({ data: {} });
+      if (path.endsWith("/message/text")) {
+        if ((await req.json()).tempGuid === firstGuid) {
+          arrived();
+          await held;
+        }
+        return Response.json({ data: { guid: bubble.guid } });
+      }
+      return Response.json({ data: path.endsWith(`/message/${bubble.guid}`) ? bubble : [bubble] });
+    },
+  });
+  servers.push(server);
+  const dir = mkdtempSync(join(tmpdir(), "bb-thread-"));
+  dirs.push(dir);
+  const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], dir, {}, () => {});
+  const recorded: string[] = [];
+  const record = (id: string) => recorded.push(id);
+  const first = bb.send(chat, "Done!", undefined, firstGuid, undefined, record);
+  await started;
+  const secondGuid = crypto.randomUUID();
+  try {
+    expect(await bb.send(chat, "Done?", undefined, secondGuid, undefined, record)).toBe("accepted");
+    expect(await bb.sent(chat, "Done!", Date.now(), firstGuid, record)).toBe(true);
+    await bb.webhook(new Request("http://localhost/bluebubbles", {
+      method: "POST",
+      body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: firstGuid, guid: bubble.guid } }),
+    }));
+  } finally {
+    release();
+    await first;
+  }
+  expect(recorded).toEqual([]);
+});

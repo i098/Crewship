@@ -233,8 +233,8 @@ function quotedTarget(c: LineMessage["content"]): { id: string } | undefined {
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
-const isOwnerBubble = (id: string) => said.has(id)
-  || routing.get(`photon-${id}`)?.ref.id === id || routing.get(`bluebubbles-${id}`)?.ref.id === id;
+const ownerBubbles = new Set<string>();
+const isOwnerBubble = (id: string) => said.has(id) || ownerBubbles.has(id);
 const whoSent = (id: string) => {
   if (isOwnerBubble(id)) return "the owner";
   const sender = threadSenders.find(id);
@@ -1293,11 +1293,13 @@ const runSessionTurn = createSessionTurn<Routing>({
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (!current()) return;
-  if (pending.some(isThreadReply)) {
-    pending = await relayThreadReplies(pending, current);
-    if (!pending.length || !current()) return;
+  if (DESK_SESSION) {
+    if (pending.some(isThreadReply)) {
+      pending = await relayThreadReplies(pending, current);
+      if (!pending.length || !current()) return;
+    }
+    return runSessionTurn(pending, controller, current);
   }
-  if (DESK_SESSION) return runSessionTurn(pending, controller, current);
   return runV2FrontTurn(pending, controller, current);
 }
 
@@ -1437,11 +1439,7 @@ function deskTypingCurrent(pending: Routing[], current: () => boolean) {
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
-  let pending = pendingRoutes();
-  if (pending.some(isThreadReply)) {
-    pending = await relayThreadReplies(pending, current);
-    if (stopping || !current()) return;
-  }
+  const pending = pendingRoutes();
   if (!pending.length) return;
   if (pending.some((item) => item.mutationPath)) return handoffPending();
   const registered = secondmates(FM_HOME);
@@ -1590,7 +1588,7 @@ function isThreadReply(item: Received) {
 
 function mayRelayThread(item: Routing) {
   return DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
-    && (!DESK_V2 || deskSafe?.(item.text) === item.text);
+    && deskSafe?.(item.text) === item.text;
 }
 
 async function relayThreadReplies(pending: Routing[], current: () => boolean) {
@@ -1648,7 +1646,9 @@ function applyRoute(event: RouteEvent) {
   if ("deskCancelled" in event) deskGeneration++;
   else if ("received" in event) {
     deskGeneration++;
-    routing.set(event.received.requestId, { ...event.received, route: "pending" });
+    const { received } = event;
+    if (DESK_SESSION && !received.requestId.startsWith("web-")) ownerBubbles.add(received.ref.id);
+    routing.set(received.requestId, { ...received, route: "pending" });
   } else if ("v2" in event) {
     for (const id of event.ids) routing.get(id)!.v2 = event.v2;
   } else if ("stale" in event) {
@@ -1813,7 +1813,7 @@ async function handle(line: Line, message: LineMessage) {
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
   const authored = authoredText(message.content);
-  const target = quotedTarget(message.content);
+  const target = DESK_SESSION ? quotedTarget(message.content) : undefined;
   receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, target ? target.id ?? "" : undefined);
   heard(message.id, text);
   if (failed !== undefined) {
@@ -1838,7 +1838,7 @@ async function handle(line: Line, message: LineMessage) {
   reads.add(ref); // the text is durable in routing: it is taken in, whichever way it is answered
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
-  if (!DESK_V2 && !pending.some(isThreadReply) && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
+  if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
 
 // Persist the full input before marking it read or seen. A duplicate never opens another routing decision.

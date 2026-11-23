@@ -1,7 +1,7 @@
 // The log of every text that went to the owner: topic key, sender, content hash, time. One file in the state dir.
 // A keyed text is skipped when the same key and the same content were already sent on the same local day.
 import { Database } from "bun:sqlite";
-import { appendFileSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync } from "node:fs";
 
 export const KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 const FILE = "sent.jsonl";
@@ -36,24 +36,11 @@ export function logSend(dir: string, o: Send, now = Date.now()): void {
 
 const THREAD_MAX_AGE_MS = 30 * 86_400_000;
 
-export function openThreadSenders(dir: string, now = Date.now()) {
+export function openThreadSenders(dir: string) {
   const db = new Database(`${dir}/thread-senders.sqlite`);
-  if (!db.query("SELECT 1 FROM sqlite_schema WHERE name = 'thread_sender'").get()) db.transaction(() => {
-    db.exec("CREATE TABLE thread_sender (id TEXT PRIMARY KEY, sender TEXT NOT NULL, at INTEGER NOT NULL)");
-    db.exec("CREATE INDEX thread_sender_at ON thread_sender (at)");
-    const path = `${dir}/senders.json`;
-    let legacy: unknown;
-    let at = 0;
-    try {
-      at = Math.floor(statSync(path).mtimeMs);
-      if (at >= now - THREAD_MAX_AGE_MS) legacy = JSON.parse(readFileSync(path, "utf8"));
-    } catch { /* no usable legacy records */ }
-    if (!Array.isArray(legacy)) return;
-    const insert = db.query("INSERT OR IGNORE INTO thread_sender VALUES (?, ?, ?)");
-    for (const row of legacy.slice(-5000)) {
-      if (typeof row?.id === "string" && row.id && typeof row.sender === "string") insert.run(row.id, row.sender, at);
-    }
-  })();
+  db.exec("CREATE TABLE IF NOT EXISTS thread_sender (id TEXT PRIMARY KEY, sender TEXT NOT NULL, at INTEGER NOT NULL)");
+  db.exec("CREATE INDEX IF NOT EXISTS thread_sender_at ON thread_sender (at)");
+  rmSync(`${dir}/senders.json`, { force: true });
   const insert = db.query("INSERT OR IGNORE INTO thread_sender VALUES (?, ?, ?)");
   const expire = db.query("DELETE FROM thread_sender WHERE at < ?");
   const cap = db.query("DELETE FROM thread_sender WHERE rowid <= (SELECT rowid FROM thread_sender ORDER BY rowid DESC LIMIT 1 OFFSET 5000)");

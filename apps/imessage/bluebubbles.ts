@@ -57,6 +57,9 @@ type BBMessage = {
   associatedMessageGuid?: string | null; threadOriginatorGuid?: string | null;
 };
 
+type SendMatch = { chat: string; text: string; at: number; ambiguous: boolean; record?: (id: string) => void };
+const SEND_MATCH_MS = 10_000;
+
 export class BlueBubbles implements AsyncIterable<Bubble> {
   private opts: typeof DEFAULTS;
   private health = new Map<Relay, { ok: boolean; at: number }>();
@@ -64,7 +67,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   private seen = new Set<string>(); // message GUIDs handled by the bridge, oldest first, kept on disk
   private pending = new Set<string>(); // message GUIDs queued for the bridge and not handled yet
   private suspects = new Set<Relay>(); // relays whose last send may have gone out without an answer, to ask first
-  private sendMatches = new Map<string, { chat: string; record: (id: string) => void }>();
+  private sendMatches = new Map<string, SendMatch>();
   private seenFile: string;
   private appended = 0;
   private queue: Bubble[] = [];
@@ -110,13 +113,13 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     if (event?.type === "new-message" && typeof data?.guid === "string") {
       if (!data.isFromMe) void this.accept(data.guid);
       else if (data.isFromMe === true && typeof data.tempGuid === "string") {
-        const match = this.sendMatches.get(data.tempGuid);
-        if (match) {
+        const { tempGuid } = data;
+        const match = this.sendMatches.get(tempGuid);
+        if (match?.record && !match.ambiguous) {
           const message = await this.read(data.guid).catch(() => undefined);
           if (message?.guid === data.guid && message.isFromMe === true && message.chats?.some((c) => c.guid === match.chat)
-            && this.sendMatches.get(data.tempGuid) === match) {
-            this.sendMatches.delete(data.tempGuid);
-            match.record(message.guid);
+            && this.sendMatches.get(tempGuid) === match) {
+            this.recordSend(tempGuid, message.guid);
           }
         }
       }
@@ -198,14 +201,11 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         const reconciled = maybeSent && await this.sent(chat, text, started);
         if (!reconciled) {
           beforeSend?.();
-          if (sentId) this.trackSend(tempGuid, chat, sentId);
+          this.trackSend(tempGuid, chat, text, Date.now(), sentId);
           const sent = await this.call(r, "POST", "message/text", undefined,
             { chatGuid: chat, tempGuid, message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
             .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; }) as { guid?: unknown } | undefined;
-          if (typeof sent?.guid === "string" && sent.guid) {
-            this.sendMatches.delete(tempGuid);
-            sentId?.(sent.guid);
-          }
+          if (typeof sent?.guid === "string" && sent.guid) this.recordSend(tempGuid, sent.guid);
         }
         this.suspects.clear();
         return reconciled ? "reconciled" : "accepted";
@@ -246,14 +246,28 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     return (await this.first((r) => this.call(r, "GET", `message/${encodeURIComponent(guid)}`, { with: "chats,attachments" }))) as BBMessage;
   }
 
-  private trackSend(tempGuid: string, chat: string, record: (id: string) => void) {
+  private trackSend(tempGuid: string, chat: string, text: string, at: number, record?: (id: string) => void) {
+    const normalized = text.replace(/[\W_]+/g, "");
+    const match = { chat, text: normalized, at, record, ambiguous: this.sendMatches.get(tempGuid)?.ambiguous ?? false };
     this.sendMatches.delete(tempGuid);
-    this.sendMatches.set(tempGuid, { chat, record });
+    for (const other of this.sendMatches.values()) {
+      if (other.chat !== chat || other.text !== normalized || Math.abs(other.at - at) > SEND_MATCH_MS) continue;
+      other.ambiguous = match.ambiguous = true;
+    }
+    this.sendMatches.set(tempGuid, match);
     if (this.sendMatches.size > this.opts.seenMax) this.sendMatches.delete(this.sendMatches.keys().next().value!);
   }
 
+  private recordSend(tempGuid: string, id: string) {
+    const match = this.sendMatches.get(tempGuid);
+    if (!match || match.ambiguous) return;
+    const record = match.record;
+    match.record = undefined;
+    record?.(id);
+  }
+
   async sent(chat: string, text: string, since: number, tempGuid?: string, sentId?: (id: string) => void): Promise<boolean> {
-    if (tempGuid && sentId && !this.sendMatches.has(tempGuid)) this.trackSend(tempGuid, chat, sentId);
+    if (tempGuid && sentId && !this.sendMatches.has(tempGuid)) this.trackSend(tempGuid, chat, text, since, sentId);
     let asked = false;
     for (const r of new Set([...this.suspects, ...(await this.healthy())])) {
       try {

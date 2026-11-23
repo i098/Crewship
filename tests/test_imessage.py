@@ -2501,12 +2501,9 @@ def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
-def test_photon_thread_uses_the_sent_id_instead_of_another_mates_text(tmp_path):
+def test_legacy_photon_thread_does_not_route_directly_to_a_mate(tmp_path):
     (tmp_path / "data").mkdir()
-    (tmp_path / "data/secondmates.md").write_text(
-        "- render - Render mate (home: /srv/render; scope: render; projects: none)\n"
-        "- stars - Stargazing mate (home: /srv/stars; scope: astronomy; projects: none)\n"
-    )
+    (tmp_path / "data/secondmates.md").write_text("- render - Render mate (home: /srv/render; scope: render; projects: none)\n")
     fake, _, notes, _, start, inbound, cli, text = fake_bridge(tmp_path)
     deliveries = tmp_path / "deliveries"
     sender = tmp_path / "bin" / "fm-send.sh"
@@ -2519,26 +2516,14 @@ def test_photon_thread_uses_the_sent_id_instead_of_another_mates_text(tmp_path):
         cli("--reply", "1", "Render is ready.", mate="render")
         wait_for(lambda: "Render is ready." in text(fake / "sent"), "the render bubble")
         target = next(fake.glob("last-*")).read_text()
-        cli("The checks passed.", mate="stars")
-        wait_for(lambda: "The checks passed." in text(fake / "sent"), "the stargazing bubble")
         bridge.terminate()
         bridge.wait(10)
         bridge = start(2)
-        inbound("m2", wait_note=False, content={
+        inbound("m2", content={
             "type": "reply", "content": {"type": "text", "text": "What is next?"},
-            "target": {"id": target, "content": {"type": "text", "text": "The checks passed."}},
-        })
-        wait_for(deliveries.exists, "the render mate delivery")
-        inbound("m3", content={
-            "type": "reply", "content": {"type": "text", "text": "Can you check again?"},
-            "target": {"id": "unknown", "content": {"type": "text", "text": "The checks passed."}},
-        })
-        inbound("m4", content={
-            "type": "reply", "content": {"type": "text", "text": "Approve the deploy."},
             "target": {"id": target, "content": {"type": "text", "text": "Render is ready."}},
         })
-        assert text(deliveries).splitlines() == ["render"]
-        assert "photon-m2 " not in text(notes)
+        assert not deliveries.exists()
     finally:
         bridge.terminate()
         bridge.wait(10)

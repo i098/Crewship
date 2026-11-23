@@ -353,9 +353,10 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   `fm-imessage` sends `X-Fm-Sender` from `FM_MATE_ID` or, if unset, `FM_HOME`.
   The bridge stores the sender with the exact message ID from Photon or BlueBubbles in `thread-senders.sqlite` in the state directory.
   If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
+  The bridge does not record a sender when two sends to the same chat have the same normalized text within ten seconds.
   A history match by text can prevent a duplicate send, but cannot identify the sender.
   The store retains up to 5,000 entries for 30 days and prunes them on write.
-  On its first start, the bridge imports entries with message IDs from `senders.json` and uses the file's modification time for their age.
+  The bridge removes `senders.json` without importing its entries because they have no individual timestamps.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
   The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
   Replies to known desk, Firstmate, or owner messages keep the normal desk turn.

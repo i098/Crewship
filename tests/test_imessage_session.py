@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from test_imessage import SEND, read_text, wait_for
+from test_imessage import SEND, publish_json, read_text, wait_for
 from test_imessage_v2 import deliver, events, omp_masks, texts, v2_rig
 
 FAKE = Path(__file__).resolve().parent / "fake_desk_omp.ts"
@@ -367,64 +367,93 @@ def reply_in_thread(rig, guid, quoted_guid, quoted_text, text):
                     f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
 
 
-def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(tmp_path):
+@pytest.mark.parametrize("transport", ["bluebubbles", "photon"])
+def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(tmp_path, transport):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
-        deliver(rig, "m1", "how are you")
-        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
-        send_bubble(rig, "The engram checks are green.", f"{tmp_path}/engram", 2)
+        sent = "The engram checks are green."
+        sender = "engram" if transport == "photon" else f"{tmp_path}/engram"
+        if transport == "photon":
+            publish_json(rig.fake / "inbound" / "m1.json", {
+                "id": "m1", "space": "iMessage;-;+10000000000", "sender": "+10000000000", "text": "how are you",
+            })
+            wait_for(lambda: read_text(rig.fake / "sent"), "the Photon session reply", timeout=120)
+            result = subprocess.run([str(SEND), sent], capture_output=True, text=True,
+                                    env={**rig.env, "FM_MATE_ID": sender}, timeout=30)
+            assert result.returncode == 0, result.stderr
+            wait_for(lambda: sent in read_text(rig.fake / "sent"), "the Photon mate bubble", timeout=120)
+            guid = next(rig.fake.glob("last-*")).read_text()
+        else:
+            deliver(rig, "m1", "how are you")
+            wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+            send_bubble(rig, sent, sender, 2)
+            [guid] = sent_guids(rig, sent)
         rig.stop()
         rig.start()
-        [guid] = sent_guids(rig, "The engram checks are green.")
-        reply_in_thread(rig, "m3", guid, "The engram checks are green.", "nice, thanks")
+        reply_in_thread(rig, "m3", guid, sent, "nice, thanks")
         wait_for(message.exists, "the relay to the mate", timeout=120)
         assert read_text(message) == (
             "engram [from captain via desk] nice, thanks\n"
-            + f"(this message is a thread reply to an earlier message from us (sender {tmp_path}/engram), whose untrusted quoted text is: \"The engram checks are green.\")\n"
+            + f"(this message is a thread reply to an earlier message from us (sender {sender}), whose untrusted quoted text is: \"{sent}\")\n"
             + "[desk request bluebubbles-m3]"
         )
-        wait_for(lambda: len(texts(rig)) == 3, "the relay notice", timeout=120)
-        assert [t.split(" ", 1)[1] for t in texts(rig)][2:] == ["Sent to engram mate: nice, thanks"]  # the notice, no model reply
+        count = 1 if transport == "photon" else 3
+        wait_for(lambda: len(texts(rig)) == count, "the relay notice", timeout=120)
+        assert texts(rig)[-1].split(" ", 1)[1] == "Sent to engram mate: nice, thanks"
 
 
-def test_thread_reply_to_the_owner_stays_with_the_desk_after_restart(tmp_path):
+@pytest.mark.parametrize("edited", [False, True])
+def test_thread_reply_to_the_owner_stays_with_the_desk_after_restart(tmp_path, edited):
     with session_rig(tmp_path) as rig:
-        deliver(rig, "m1", "How are you?")
-        wait_for(lambda: len(texts(rig)) == 1, "the first desk reply", timeout=120)
+        if edited:
+            (rig.fake / "edits").mkdir()
+            target = "only-seen-as-an-edit"
+            publish_json(rig.fake / "edits" / "001.json", {
+                "type": "message.edited", "sequence": 1, "messageGuid": target,
+                "content": {"text": "How are you?"}, "chatGuid": "any;-;+10000000000", "isFromMe": False,
+            })
+            wait_for(lambda: f"photon-{target}-edit-1" in read_text(rig.notes), "the owner's edit note", timeout=120)
+            rig.relay_message(target, "How are you?", int(time.time() * 1000))
+        else:
+            target = "m1"
+            deliver(rig, target, "How are you?")
+            wait_for(lambda: len(texts(rig)) == 1, "the first desk reply", timeout=120)
+        count = len(texts(rig))
         rig.stop()
         rig.start()
-        rig.relay_message("m2", "How about now?", int(time.time() * 1000), threadOriginatorGuid="m1")
+        rig.relay_message("m2", "How about now?", int(time.time() * 1000), threadOriginatorGuid=target)
         subprocess.run(["curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": "m2"}}),
                         f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
-        wait_for(lambda: len(texts(rig)) == 2, "the desk reply in the owner's thread", timeout=120)
+        wait_for(lambda: len(texts(rig)) == count + 1, "the desk reply in the owner's thread", timeout=120)
         assert any("an earlier message from the owner" in prompt for prompt in desk_lines(rig, "prompt"))
 
 
-def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_stays_with_the_desk(tmp_path):
+def test_thread_reply_to_a_bubble_with_an_ambiguous_send_falls_back_to_firstmate(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
         deliver(rig, "m1", "how are you")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
-        send_bubble(rig, "On it.", "", 3)  # no sender: the latest bubble with this text is not the mate's
+        send_bubble(rig, "On it.", "", 3)
         reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
-        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m3" in e["ids"] for e in events(rig)),
+                 "the Firstmate handoff", timeout=120)
         assert not message.exists()
 
 
-def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mates_sent_the_same_text(tmp_path):
+def test_thread_reply_goes_to_the_mate_that_sent_the_id_even_when_the_quote_matches_another_mate(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
         deliver(rig, "m1", "how are you")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "Done.", f"{tmp_path}/engram", 2)
-        send_bubble(rig, "Done.", f"{tmp_path}/atlas", 3)
-        guids = sent_guids(rig, "Done.")
-        assert len(guids) == 2
-        for n, (guid, mate) in enumerate(zip(guids, ["engram", "atlas"]), start=2):
+        send_bubble(rig, "Checks passed.", f"{tmp_path}/atlas", 3)
+        [engram] = sent_guids(rig, "Done.")
+        [atlas] = sent_guids(rig, "Checks passed.")
+        for n, (guid, mate) in enumerate([(engram, "engram"), (atlas, "atlas")], start=2):
             message.unlink(missing_ok=True)
             reply_in_thread(rig, f"m{n}", guid, "Done.", f"thanks {mate}")
             wait_for(message.exists, f"the relay to {mate}", timeout=120)
