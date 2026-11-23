@@ -74,9 +74,10 @@ yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 \
 ```
 
 Use the default format selection unless the user requests a specific quality or format.
-Add `-f 'FORMAT_ID'` before `--` in the video or audio command.
-For separate streams, use `-f 'VIDEO_ID+AUDIO_ID'`.
-Shell-quote the complete selector as one argument.
+Add `-f 'all[format_id="FORMAT_ID"]'` before `--` in the video or audio command.
+For separate streams, use `-f 'bv[format_id="VIDEO_ID"]+ba[format_id="AUDIO_ID"]'`.
+Copy the IDs from the format list and escape `"` and `\` inside each filter value with `\`.
+Shell-quote the complete selector as one argument. In shell single quotes, write each apostrophe as `'\''`.
 For video with sound, select a combined format or pair separate streams.
 For audio extraction, select a format that contains audio.
 Check `command -v ffmpeg` before merging streams or extracting audio.
