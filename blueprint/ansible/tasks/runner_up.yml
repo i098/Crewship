@@ -25,9 +25,22 @@
 
 - name: Require a supported Docker-in-Docker host
   ansible.builtin.command:
-    argv: ["{{ crewship_blueprint }}/maintenance/runner-up-docker", check-dind-host]
-  environment:
-    RUNNER_UP_OS_RELEASE: "{{ crewship_runner_up_os_release | default('/etc/os-release') }}"
+    argv:
+      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
+      - check-dind-release
+      - "{{ ansible_facts.distribution | lower }}"
+      - "{{ ansible_facts.distribution_version }}"
+  check_mode: false
+  changed_when: false
+  when: crewship_runner_up_dind | bool
+
+- name: Require the Docker-in-Docker data directory on the capped device
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
+      - check-dind-storage
+      - "{{ crewship_runner_up_data_dir }}"
+      - "{{ crewship_runner_up_io_write_device }}"
   check_mode: false
   changed_when: false
   when: crewship_runner_up_dind | bool

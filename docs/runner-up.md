@@ -110,17 +110,19 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 - keeps the Docker build cache under `disk_max_gb`.
 
 Each step has a 210-second limit, with up to 5 more seconds for forced termination.
-Set `RUNNER_UP_PRUNE_TIMEOUT` to a smaller number of seconds if necessary.
 A failed or timed-out step does not skip the remaining steps, but the unit ends failed.
 It never touches a running container.
 
 `runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
-Below `resume_pct` (85) it starts again only the coordinators it stopped.
+Below `resume_pct` (85), the guard queues starts only for the coordinators it stopped.
+It keeps each entry until the coordinator is active.
 `runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
 The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
-When `full avg60` stays below 40% for 2 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 2 minutes.
+When `full avg60` stays below 40% for 2 minutes, each guard run checks one recorded unit.
+It removes the unit if active. Otherwise, it queues a start and moves the unit to the end of the list.
+A pressure spike resets the two minutes.
 The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
@@ -194,20 +196,19 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 
 ## Docker in a job
 
-Use Ubuntu 24.04 with [Sysbox](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md).
+Use Ubuntu 24.04 with [Sysbox 0.7.2 or later](https://github.com/nestybox/sysbox/releases/tag/v0.7.2).
 Register `sysbox-runc` with Docker.
 Apply and launch reject all other releases, including Ubuntu 26.04.
 Keep the host's default Docker runtime unchanged.
 Use Docker with the systemd cgroup driver.
 Check the runtime and driver with `sudo docker info --format '{{json .Runtimes}} {{.CgroupDriver}}'`.
-Put the Sysbox data store on the filesystem that the runner-up disk guard monitors.
-That filesystem contains `runner_up.data_dir`, or the account home if `runner_up.data_dir` is unset.
-On a split-disk host, set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/blob/master/main.go) to a directory on that filesystem.
-Use the device that `runner_up.io_write_device` names if you set a write cap.
+Set `runner_up.data_dir` to an existing directory on the block device named by `runner_up.io_write_device`.
+The disk guard monitors this directory, and `runnerup.slice` caps writes to that device.
+Set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/blob/master/main.go) to a directory on the same filesystem.
 Before managed apply, drain the Sysbox containers and use `sudo systemctl edit sysbox-mgr.service`.
-In `[Service]`, reset `ExecStart=` and add `ExecStart=/usr/bin/sysbox-mgr --data-root /path/to/data/sysbox`.
-Replace `/path/to/data` with the monitored path and restart `sysbox-mgr.service`.
-The readiness probe rejects an inner Docker store on a different filesystem.
+In `[Service]`, reset `ExecStart=` and repeat the existing command with all its flags and the new `--data-root`.
+Reload systemd and restart `sysbox.service`.
+Apply checks the storage placement. It does not move data or restart Sysbox.
 
 Set `docker: dind` on an entry in `runner_up.repos`.
 Use a separate pool label for that entry if the same repository also has plain places.

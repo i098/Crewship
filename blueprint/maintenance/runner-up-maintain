@@ -82,10 +82,8 @@ clean)
   # so one that is left here belongs to a place that crashed.
   # Each step runs on its own, with a time limit: a prune that fails (another prune runs) or hangs on a
   # busy disk must not skip the others, or the build cache grows past its cap. The unit still fails.
-  limit=${RUNNER_UP_PRUNE_TIMEOUT:-210}
-  if ! [ "$limit" -ge 1 ] || ! [ "$limit" -le 210 ]; then limit=210; fi
   failed=0
-  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || failed=1; }
+  prune() { timeout --kill-after=5s 210 docker "$@" >/dev/null || failed=1; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
   prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force
@@ -99,14 +97,26 @@ guard)
   resume=${RUNNER_UP_RESUME_PCT:-85}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
   used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
+  queue_start() { timeout --kill-after=1s 2s systemctl --user --no-block start "$@"; }
   if [ "$used" -ge "$pause" ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
-      systemctl --user is-active --quiet "runner-up@$i.service" || continue
-      systemctl --user stop "runner-up@$i.service" && echo "$i" >> "$state"
+      unit=runner-up@$i.service
+      case "$(systemctl --user is-active "$unit")" in active|reloading|activating) ;; *) continue ;; esac
+      if systemctl --user stop "$unit" && ! grep -qxF "$i" "$state" 2>/dev/null; then
+        printf '%s\n' "$i" >> "$state"
+      fi
     done
   elif [ "$used" -lt "$resume" ] && [ -s "$state" ]; then
-    while read -r i; do systemctl --user start "runner-up@$i.service"; done < "$state"
-    rm -f "$state"
+    : > "$state.new"
+    set --
+    while read -r i; do
+      unit=runner-up@$i.service
+      systemctl --user is-active --quiet "$unit" && continue
+      printf '%s\n' "$i" >> "$state.new"
+      set -- "$@" "$unit"
+    done < "$state"
+    if [ -s "$state.new" ]; then mv "$state.new" "$state"; else rm -f "$state.new" "$state"; fi
+    [ "$#" -eq 0 ] || queue_start "$@" || :
   fi
   # IO resume: /proc/pressure/io "full avg60" below the level for the whole window, then one unit per run.
   # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
@@ -124,11 +134,15 @@ guard)
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
       if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
         read -r unit < "$io_state"
-        if systemctl --user start "$unit"; then
-          grep -vxF "$unit" "$io_state" > "$io_state.new" || true
-          mv "$io_state.new" "$io_state"
-          [ -s "$io_state" ] || rm -f "$io_calm"
+        if systemctl --user is-active --quiet "$unit"; then
+          grep -vxF "$unit" "$io_state" > "$io_state.new" || :
+        else
+          tail -n +2 "$io_state" > "$io_state.new"
+          printf '%s\n' "$unit" >> "$io_state.new"
+          queue_start "$unit" || :
         fi
+        mv "$io_state.new" "$io_state"
+        [ -s "$io_state" ] || rm -f "$io_calm"
       fi
     else
       rm -f "$io_calm"
@@ -156,14 +170,16 @@ guard)
   # Heal: a coordinator in the failed state that neither the disk rule nor the IO rule holds starts again; an inactive one that a person stopped stays stopped.
   # Nothing starts at the pause level of the disk, nor while the IO pressure is high for a unit the IO rule may pause.
   if [ "$used" -lt "$pause" ]; then
+    set --
     for i in ${RUNNER_UP_INSTANCES-}; do
       u=runner-up@$i.service
       systemctl --user is-failed --quiet "$u" || continue
       grep -qxF "$i" "$state" 2>/dev/null && continue
       grep -qxF "$u" "$io_state" 2>/dev/null && continue
       case " ${RUNNER_UP_IO_HEAVY-} " in *" $i "*) ! io_above || continue ;; esac
-      systemctl --user start "$u" || true
+      set -- "$@" "$u"
     done
+    [ "$#" -eq 0 ] || queue_start "$@" || :
   fi
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;

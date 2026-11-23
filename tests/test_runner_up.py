@@ -128,8 +128,19 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         "crewship": crewship,
     }
     environment = os.environ.copy()
+    if facts and facts.get("distribution_version") == "24.04":
+        device = home.parent / "test-block-device"
+        runner_up.setdefault("io_write_device", str(device))
+        lsblk = home / ".local/bin/lsblk"
+        lsblk.write_text(
+            f'#!/bin/sh\n[ "$5" = {json.dumps(str(device))} ] || exit 1\n'
+            f'exec findmnt -rn -o MAJ:MIN -T {json.dumps(str(home))}\n'
+        )
+        lsblk.chmod(0o755)
+        environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
     if docker_stub:
         bin_dir, _ = docker_stub
+        shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         systemctl = home / ".local/bin/systemctl"
         systemctl.write_text(
             '#!/bin/sh\ncase " $* " in *" show "*) printf "%s\\n" '
@@ -145,13 +156,6 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
             IMAGES=str(home.parent / "images"),
             DOCKER_CGROUP_DRIVER="systemd",
         )
-    if facts and "distribution_version" in facts:
-        release = home.parent / "os-release"
-        release.write_text(
-            f"ID={facts['distribution'].lower()}\nVERSION_ID={facts['distribution_version']}\n"
-        )
-        variables["crewship_runner_up_os_release"] = str(release)
-        environment["RUNNER_UP_OS_RELEASE"] = str(release)
     (home.parent / "etc").mkdir(exist_ok=True)
     result = subprocess.run(
         [
@@ -507,6 +511,15 @@ def test_apply_refuses_dind_on_ubuntu_2604(home):
     assert instances(home) == []
 
 
+@pytest.mark.parametrize("settings", [{"data_dir": ""}, {"io_write_device": "/dev/null"}])
+def test_apply_refuses_dind_without_data_on_the_capped_device(home, settings):
+    dind = {key: value for key, value in DIND.items() if key != "userns"}
+    facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
+    with pytest.raises(AssertionError, match="data_dir must be on runner_up.io_write_device"):
+        apply(home, runner(home, repos=[dind], **settings), facts=facts)
+    assert instances(home) == []
+
+
 def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     apply(home, runner(home))
     original = config(home)
@@ -562,6 +575,16 @@ def stubs(tmp_path):
     log = tmp_path / "calls"
     (tmp_path / "images").mkdir()
     shutil.copy2(MAINTENANCE / "runner-up-docker", bin_dir / "runner-up-docker")
+    cat = bin_dir / "cat"
+    cat.write_text(
+        '#!/bin/sh\nif [ "$*" = /etc/os-release ]; then\n'
+        '  printf "%s\\n" ID=ubuntu VERSION_ID=24.04\n'
+        'else exec /bin/cat "$@"; fi\n'
+    )
+    cat.chmod(0o755)
+    runtime = bin_dir / "sysbox-runc"
+    runtime.write_text('#!/bin/sh\nprintf "version:\\t%s\\n" "${SYSBOX_VERSION:-0.7.2}"\n')
+    runtime.chmod(0o755)
     for name in ("docker", "sudo"):
         stub = bin_dir / name
         stub.write_text(
@@ -575,7 +598,10 @@ def stubs(tmp_path):
             "  done\n"
             "fi\n"
             'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit "${DOCKER_FAIL_CODE:-1}";; esac\n'
-            'if [ "$1" = info ]; then printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}"; fi\n'
+            'if [ "$1" = info ]; then\n'
+            '  case "$3" in *CgroupDriver*) printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}";;\n'
+            f'    *) printf "%s\\n" "{runtime}";; esac\n'
+            'fi\n'
             'if [ "$1 $2" = "image inspect" ]; then test -f "$IMAGES/$3"; exit $?; fi\n'
             'if [ "$1" = build ]; then\n'
             '  while [ "$1" != --tag ]; do shift; done\n'
@@ -626,21 +652,28 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
     assert "sudo" not in "".join(calls)
 
 
+@pytest.mark.parametrize(("release", "code"), [
+    ("26.04", 125),
+    ("24.04", 0),
+])
+def test_dind_release_policy(stubs, release, code):
+    run_script("runner-up-docker", stubs, "check-dind-release", "ubuntu", release, code=code)
+
+
 @pytest.mark.parametrize(("version", "driver", "code"), [
-    ("26.04", "systemd", 125),
-    ("24.04", "cgroupfs", 125),
-    ("24.04", "systemd", 0),
+    ("0.7.1", "systemd", 125),
+    ("0.7.2", "cgroupfs", 125),
+    ("0.7.2", "systemd", 0),
+    ("0.10.0", "systemd", 0),
 ])
 def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
     stubs, tmp_path, version, driver, code
 ):
     sock = tmp_path / "docker.sock"
     sock.touch()
-    release = tmp_path / "os-release"
-    release.write_text(f"ID=ubuntu\nVERSION_ID={version}\n")
     env = {
         "RUNNER_UP_DOCKER_SOCK": str(sock),
-        "RUNNER_UP_OS_RELEASE": str(release),
+        "SYSBOX_VERSION": version,
         "RUNNER_UP_SHARED_CACHE": str(tmp_path / "cache"),
         "DOCKER_CGROUP_DRIVER": driver,
     }
@@ -648,12 +681,14 @@ def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
     (stubs[0] / "dind-image").write_text(f"{image}\n")
     (tmp_path / "images" / image).touch()
     calls = run_script("runner-up-docker", stubs, "run", "--rm", image, env=env, code=code)
-    expected = [] if version == "26.04" else ["docker info --format {{.CgroupDriver}}"]
+    expected = ['docker info --format {{with index .Runtimes "sysbox-runc"}}{{.Path}}{{end}}']
+    if version != "0.7.1":
+        expected.append("docker info --format {{.CgroupDriver}}")
     if not code:
-        assert calls[:2] == [*expected, f"docker image inspect {image}"]
-        assert "--runtime=sysbox-runc" in calls[3]
-        assert "--cgroup-parent runnerup.slice" in calls[3]
-        assert "--volume" not in calls[3] and " -v " not in calls[3]
+        assert calls[:3] == [*expected, f"docker image inspect {image}"]
+        assert "--runtime=sysbox-runc" in calls[4]
+        assert "--cgroup-parent runnerup.slice" in calls[4]
+        assert "--volume" not in calls[4] and " -v " not in calls[4]
         return
     assert calls == expected
 
@@ -663,13 +698,10 @@ def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, t
     (tmp_path / "images" / image).touch()
     tag = stubs[0] / "dind-image"
     tag.write_text(f"{image}\n")
-    release = tmp_path / "os-release"
-    release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
     socket = tmp_path / "docker.sock"
     socket.touch()
     env = {
         "RUNNER_UP_DOCKER_SOCK": str(socket),
-        "RUNNER_UP_OS_RELEASE": str(release),
         "DOCKER_CGROUP_DRIVER": "systemd",
         "DOCKER_FAILS": "second-place",
         "DOCKER_FAIL_CODE": "125",
@@ -699,8 +731,6 @@ def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs,
     shim.mkdir()
     (shim / "docker").symlink_to(bin_dir / "runner-up-docker")
     (shim / "dind-image").symlink_to(bin_dir / "dind-image")
-    release = tmp_path / "os-release"
-    release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
     sock = tmp_path / "docker.sock"
     sock.touch()
     recipe = tmp_path / "Dockerfile"
@@ -713,7 +743,6 @@ def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs,
     env = {
         "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER_SOCK": str(sock),
-        "RUNNER_UP_OS_RELEASE": str(release),
         "RUNNER_UP_GUARD_PATH": str(tmp_path),
         "RUNNER_UP_DOCKERFILE": str(recipe),
         "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
@@ -782,14 +811,23 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
     ]
 
 
-def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
+def test_clean_runs_every_step_when_one_fails_and_fits_the_unit_deadline(stubs, home):
     bin_dir, log = stubs
     timeout = bin_dir / "timeout"
     timeout.write_text(f'#!/bin/sh\necho "timeout $1 $2" >> {log}\nshift 2\nexec "$@"\n')
     timeout.chmod(0o755)
-    env = {"DOCKER_FAILS": "container prune", "RUNNER_UP_PRUNE_TIMEOUT": "900"}
+    env = {"DOCKER_FAILS": "container prune"}
     calls = run_script("runner-up-maintain", stubs, "clean", env=env, code=1)
-    assert [c for c in calls if c.startswith("timeout ")] == ["timeout --kill-after=5s 210"] * 4
+    apply(home, runner(home))
+    service = unit_sections(units(home) / "runner-up-clean.service")["Service"]
+    (deadline,) = service["TimeoutStartSec"]
+    limits = [call.split()[1:] for call in calls if call.startswith("timeout ")]
+    assert len(limits) == 4
+    budget = sum(
+        int(kill.removeprefix("--kill-after=").removesuffix("s")) + int(limit)
+        for kill, limit in limits
+    )
+    assert budget < int(deadline)
     assert [c.split()[1] for c in calls if c.startswith("docker ")] == [
         "container", "network", "image", "builder"
     ]
@@ -801,7 +839,11 @@ def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=No
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
     (bin_dir / "systemctl").write_text(
         f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
-        + ("" if active else '[ "$2" = is-active ] && exit 3\n')
+        + (
+            'case "$2 $3" in "is-active --quiet") ;; "is-active "*) echo active;; esac\n'
+            if active else
+            '[ "$2" != is-active ] || { case " ${ACTIVE_UNITS:-} " in *" $4 "*) exit 0;; esac; exit 3; }\n'
+        )
         + ("" if failed else '[ "$2" = is-failed ] && exit 1\n')
         + "exit 0\n"
     )
@@ -837,9 +879,9 @@ def test_guard_pauses_even_when_the_prune_hangs(stubs, tmp_path):
 def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tmp_path):
     calls, state = guard(stubs, tmp_path, 88)
     assert calls == [
-        "systemctl --user is-active --quiet runner-up@a-b.service",
+        "systemctl --user is-active runner-up@a-b.service",
         "systemctl --user stop runner-up@a-b.service",
-        "systemctl --user is-active --quiet runner-up@c-d.service",
+        "systemctl --user is-active runner-up@c-d.service",
         "systemctl --user stop runner-up@c-d.service",
     ]
     assert state.read_text() == "a-b\nc-d\n"
@@ -852,9 +894,19 @@ def test_guard_does_not_stop_at_87_percent_or_remember_a_unit_that_was_not_runni
 
 
 def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, tmp_path):
-    calls, state = guard(stubs, tmp_path, 84, paused="a-b\n")
-    assert [c for c in calls if " start " in c] == ["systemctl --user start runner-up@a-b.service"]
-    assert not state.exists()
+    calls, state = guard(stubs, tmp_path, 84, paused="a-b\nc-d\n", active=False)
+    assert [c for c in calls if " start " in c] == [
+        "systemctl --user --no-block start runner-up@a-b.service runner-up@c-d.service",
+    ]
+    assert state.read_text() == "a-b\nc-d\n"
+    stubs[1].write_text("")
+    calls, state = guard(
+        stubs, tmp_path, 84, active=False, env={"ACTIVE_UNITS": "runner-up@c-d.service"}
+    )
+    assert [c for c in calls if " start " in c] == [
+        "systemctl --user --no-block start runner-up@a-b.service",
+    ]
+    assert state.read_text() == "a-b\n"
 
 
 def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
@@ -862,7 +914,9 @@ def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
     assert not any(" start " in c or " stop " in c for c in calls) and state.exists()
 
 
-def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None):
+def io_guard(
+    stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None, active_units=""
+):
     """Run `guard` at time `now` with a stub pressure file; state lives in tmp_path between runs."""
     pressure = tmp_path / "io"
     pressure.write_text(
@@ -878,9 +932,10 @@ def io_guard(stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="
         "RUNNER_UP_IO_STATE": str(io_state),
         "RUNNER_UP_NOW": str(now),
         "RUNNER_UP_INSTANCES": "",
+        "ACTIVE_UNITS": active_units,
     }
     stubs[1].write_text("")
-    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, env=env)
+    calls, _ = guard(stubs, tmp_path, used, paused=disk_paused, active=False, env=env)
     left = io_state.read_text().split() if io_state.exists() else []
     return [c for c in calls if " start " in c], left
 
@@ -889,9 +944,11 @@ def test_io_resume_waits_for_the_two_minute_window_then_starts_one_unit_per_run(
     assert io_guard(stubs, tmp_path, "12.50", now=1000) == ([], ["a", "b"])
     assert io_guard(stubs, tmp_path, "39.99", now=1119, io="")[0] == []
     calls, left = io_guard(stubs, tmp_path, "5.00", now=1120, io="")
-    assert calls == ["systemctl --user start a"] and left == ["b"]
+    assert calls == ["systemctl --user --no-block start a"] and left == ["b", "a"]
     calls, left = io_guard(stubs, tmp_path, "5.00", now=1240, io="")
-    assert calls == ["systemctl --user start b"] and left == []
+    assert calls == ["systemctl --user --no-block start b"] and left == ["a", "b"]
+    assert io_guard(stubs, tmp_path, "5.00", now=1360, io="", active_units="a b") == ([], ["b"])
+    assert io_guard(stubs, tmp_path, "5.00", now=1480, io="", active_units="a b") == ([], [])
     assert not (tmp_path / "io.paused.calm").exists()
 
 
@@ -900,7 +957,9 @@ def test_an_io_spike_resets_the_calm_window(stubs, tmp_path):
     assert io_guard(stubs, tmp_path, "40.00", now=1300, io="")[0] == []
     assert io_guard(stubs, tmp_path, "5.00", now=1700, io="")[0] == []
     assert io_guard(stubs, tmp_path, "5.00", now=1819, io="")[0] == []
-    assert io_guard(stubs, tmp_path, "5.00", now=1820, io="")[0] == ["systemctl --user start a"]
+    assert io_guard(stubs, tmp_path, "5.00", now=1820, io="")[0] == [
+        "systemctl --user --no-block start a"
+    ]
 
 
 def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
@@ -926,8 +985,7 @@ def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, en
 
 def test_guard_restarts_a_failed_coordinator_held_by_no_pause(stubs, tmp_path):
     assert heal(stubs, tmp_path, 10) == [
-        "systemctl --user start runner-up@a-b.service",
-        "systemctl --user start runner-up@c-d.service",
+        "systemctl --user --no-block start runner-up@a-b.service runner-up@c-d.service",
     ]
 
 
@@ -938,11 +996,11 @@ def test_guard_leaves_a_coordinator_stopped_by_hand_alone(stubs, tmp_path):
 def test_guard_leaves_a_coordinator_alone_while_a_pause_holds_it(stubs, tmp_path):
     assert heal(stubs, tmp_path, 95) == []
     assert heal(stubs, tmp_path, 86, disk_paused="a-b\n") == [
-        "systemctl --user start runner-up@c-d.service"
+        "systemctl --user --no-block start runner-up@c-d.service"
     ]
     (tmp_path / "paused").unlink()
     assert heal(stubs, tmp_path, 10, io_paused="runner-up@a-b.service\n") == [
-        "systemctl --user start runner-up@c-d.service"
+        "systemctl --user --no-block start runner-up@c-d.service"
     ]
 
 
@@ -950,7 +1008,9 @@ def test_guard_keeps_a_heavy_coordinator_down_while_the_io_pressure_is_high(stub
     pressure = tmp_path / "hot"
     pressure.write_text("full avg10=1.00 avg60=64.00 avg300=0.00 total=1\n")
     env = {"RUNNER_UP_PRESSURE_FILE": str(pressure), "RUNNER_UP_IO_HEAVY": "a-b"}
-    assert heal(stubs, tmp_path, 10, env=env) == ["systemctl --user start runner-up@c-d.service"]
+    assert heal(stubs, tmp_path, 10, env=env) == [
+        "systemctl --user --no-block start runner-up@c-d.service"
+    ]
 
 
 def io_hot_guard(stubs, tmp_path, avg60, now, heavy="h1 h2 h3"):
@@ -1053,8 +1113,6 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
     shim.mkdir()
     (shim / "docker").symlink_to(bin_dir / "runner-up-docker")
     (shim / "dind-image").write_text(f"{derived}\n")
-    release = tmp_path / "os-release"
-    release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
     sock = tmp_path / "docker.sock"
     sock.touch()
     recipe = tmp_path / "Dockerfile"
@@ -1062,7 +1120,6 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
     env = {
         "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER_SOCK": str(sock),
-        "RUNNER_UP_OS_RELEASE": str(release),
         "DOCKER_CGROUP_DRIVER": "systemd",
         "RUNNER_UP_GUARD_PATH": str(tmp_path),
         "RUNNER_UP_DOCKERFILE": str(recipe),
