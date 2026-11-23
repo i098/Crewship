@@ -4,8 +4,8 @@ Use each row that applies to your change.
 
 | Change kind | Required evidence | Capture tool | Host | PR body section |
 | --- | --- | --- | --- | --- |
-| Visible UI (web, desktop, or terminal) | Before and after screenshots of the same view and state; for a new view, the After image only | `chrome-devtools-axi` for web; OS screenshot tool for desktop or terminal | GitHub upload | `Review evidence` |
-| UI motion or interaction | Screenshots plus a short recording of the changed flow | Browser or OS screen recorder | GitHub upload | `Review evidence` |
+| UI changes on the paths below | Before and after screenshots of the same view and state; for a new view, the After image only | `chrome-devtools-axi` for web; OS screenshot tool for terminal | GitHub upload | `Review evidence` |
+| UI motion or interaction | A short recording of the changed flow, plus screenshots if the path list applies | Browser or OS screen recorder | GitHub upload | `Review evidence` |
 | Design choice that needs reviewer input | A bearings board with the options and the decision to review | Lavish board export as PNG or HTML | GitHub upload | `Review evidence` |
 | CLI, API, runtime, or infrastructure | Command, scenario, and observed result | Terminal or CI job | PR text or GitHub Actions run | `Test evidence` |
 | Documentation or tests only | Rendered page or targeted test result | Markdown preview or test runner | PR text, GitHub upload, or GitHub Actions run | `Test evidence` |
@@ -20,19 +20,19 @@ Use each row that applies to your change.
    If GitHub inserts an HTML tag, copy its `src` URL into the Markdown image.
    Use a separate upload for each revision.
    For a new view, put `Before: none, new view` on its own line in place of the Before image.
+   Put image and new-view marker lines outside raw HTML blocks.
    Link the recording or board with a descriptive label, such as `[Recording of the setup flow](https://…)`.
    Open each link as a reviewer to check access.
 
 ## Automatic screenshot checks
 
-The local pre-push check and CI use the same case-insensitive Git path globs:
+The local pre-push check and CI use the same case-insensitive Git globs from the repository root:
 
-- Web views, components, and styles: `**/*.html`, `**/*.tsx`, `**/*.jsx`, `**/*.vue`, `**/*.svelte`, `**/*.css`, `**/*.scss`.
-- Site rendering code: `site/public/**/*.js`, `site/build.py`.
+- Site pages, templates, styles, and scripts: `site/public/**/*.html`, `site/public/**/*.css`, `site/public/**/*.js`, `site/build.py`.
 - Terminal UI source: `tools/*-tui/**/*.ts`, `tools/fleet-health/**/*.ts`, `tools/tui-theme/**/*.ts`.
 
 The checks exclude `tools/**/*.test.ts` and `site/public/google2a77445d3f9ccb0e.html`, a site verification file.
-Supply screenshots for other visible changes even if the check does not require them.
+Other paths do not require screenshots.
 Omit the `Review evidence` section only when no row calls for it.
 The checker reads link format and upload IDs, but does not fetch attachments.
 Reviewers open the links and verify that the evidence covers the change.

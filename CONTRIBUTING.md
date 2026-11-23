@@ -220,7 +220,7 @@ The script applies the form's label and rejects missing required fields or commi
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
   Put the opening reference on its own line, outside a code block.
   Fill `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
-  Add screenshots under `Review evidence` for visible UI changes. See [Review evidence](docs/review-evidence.md).
+  Follow the [Review evidence guide](docs/review-evidence.md) for screenshot paths, recordings, and boards.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
   Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
@@ -262,7 +262,7 @@ python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
 It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
 It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or fails the same screenshot check as CI.
-See [automatic screenshot checks](docs/review-evidence.md#automatic-screenshot-checks) for the path list and manual review rule.
+See [automatic screenshot checks](docs/review-evidence.md#automatic-screenshot-checks) for the paths that require screenshots.
 Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
 
 ## Branch rules

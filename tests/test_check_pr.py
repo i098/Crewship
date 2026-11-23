@@ -69,15 +69,17 @@ def test_main_checks_base_range_and_detects_ui(check_pr, tmp_path, monkeypatch, 
     (tmp_path / "a.txt").write_text("a")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "Old bad subject")
-    (tmp_path / "ui.css").write_text("x")
+    site = tmp_path / "site"
+    (site / "public").mkdir(parents=True)
+    (site / "public/harbor.css").write_text("body { color: red; }")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "feat(ui): style")
     body = tmp_path / "body.md"
     body.write_text(BODY)
-    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 1
+    assert _run(check_pr, site, monkeypatch, str(body), "--base", "HEAD~1") == 1
     assert "## Review evidence" in capsys.readouterr().err
     body.write_text(BODY + SHOT)
-    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 0
+    assert _run(check_pr, site, monkeypatch, str(body), "--base", "HEAD~1") == 0
     (tmp_path / "b.txt").write_text("b")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "Merge branch cleanup into utils")

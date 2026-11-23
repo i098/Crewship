@@ -61,7 +61,7 @@ class PRBodyTests(unittest.TestCase):
     def body_with_section(self, heading, content):
         before, marker, after = VALID_BODY.partition(f"## {heading}\n")
         _, next_heading, rest = after.partition("\n## ")
-        return before + marker + "\n" + content + "\n" + next_heading + rest
+        return before + marker + "\n" + content + "\n\n" + next_heading + rest
 
     def test_pipeline_style_body_with_collapsed_evidence_passes(self):
         self.assertEqual(self.check(VALID_BODY), [])
@@ -116,6 +116,8 @@ class PRBodyTests(unittest.TestCase):
                 "~~~markdown\n[ref]: https://example.com\n~~~",
                 "    <div>&nbsp;</div>", "\t[ref]: https://example.com",
                 "&lt;br&gt;", "<div>A change.</div>",
+                "<pre>All tests passed.\n</pre>",
+                "<pre>\nAll tests passed.</pre>",
                 "[ref]: https://example.com\n\nRead [ref].",
                 '[ref]: https://example.com\n  "A title"\n\nVisible text.',
             ):

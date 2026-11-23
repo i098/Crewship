@@ -16,7 +16,7 @@ Closes #
 
 ## Review evidence
 
-<!-- For UI changes, embed separate GitHub uploads as ![Before](URL) and ![After](URL), each on its own line.
+<!-- For listed UI paths, embed separate GitHub uploads as ![Before](URL) and ![After](URL), each on its own line.
 For a new view, replace the Before image with: Before: none, new view
 See docs/review-evidence.md for recordings and boards. -->
 

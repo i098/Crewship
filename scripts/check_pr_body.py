@@ -10,7 +10,16 @@ TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)", re.I)
+LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)[^>]*>?", re.I)
+BLOCK_HTML = re.compile(
+    r"^ {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|"
+    r"col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|"
+    r"form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|"
+    r"menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|"
+    r"tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t]|/?>|$)",
+    re.I,
+)
+STANDALONE_HTML = re.compile(r"^ {0,3}</?[A-Za-z][\w-]*(?:[ \t]+[^<>]*)?\s*/?>[ \t]*$")
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
 MARKUP = re.compile(CODE_SPAN + r"|</?[A-Za-z][\w-]*(?:\s+[^<>]*)?\s*/?>")
@@ -21,13 +30,8 @@ LINK_DEFINITION = re.compile(
     re.M,
 )
 UI_GLOBS = (
-    "**/*.tsx",
-    "**/*.jsx",
-    "**/*.vue",
-    "**/*.svelte",
-    "**/*.css",
-    "**/*.scss",
-    "**/*.html",
+    "site/public/**/*.html",
+    "site/public/**/*.css",
     "site/public/**/*.js",
     "site/build.py",
     "tools/*-tui/**/*.ts",
@@ -64,29 +68,54 @@ def strip_comments(line, comment):
     return "".join(output), comment
 
 
+def literal_html_lines(opening, line, lines):
+    tag = opening[1].lower()
+    end = re.compile(rf"</{tag}>", re.I)
+    line = line[opening.end():]
+    while True:
+        closing = end.search(line)
+        if tag in {"pre", "textarea"}:
+            yield (line[:closing.start()] if closing else line), True
+        if closing or (line := next(lines, None)) is None:
+            return
+
+
+def raw_html_lines(line, lines, comment):
+    yield unescape(MARKUP.sub("", line)), True
+    for inner in lines:
+        if not inner.strip():
+            break
+        inner, comment = strip_comments(inner, comment)
+        yield unescape(MARKUP.sub("", inner)), True
+    return comment
+
+
+def fenced_lines(fence, lines):
+    end = re.compile(rf"^ {{0,3}}{fence[0]}{{{len(fence)},}}\s*$")
+    for line in lines:
+        if end.fullmatch(line):
+            break
+        yield line, True
+
+
 def body_lines(markdown):
-    block_end = None
+    lines = iter(markdown.splitlines())
     comment = False
-    for line in markdown.splitlines():
-        if block_end:
-            if block_end.search(line):
-                block_end = None
-            else:
-                yield line, True
-            continue
+    at_boundary = True
+    for line in lines:
         if not comment and (opening := LITERAL_HTML.match(line)):
-            end = re.compile(f"</{opening[1]}>", re.I)
-            if end.search(line):
-                yield line, False
-            else:
-                block_end = end
-            continue
-        line, comment = strip_comments(line, comment)
-        if marker := FENCE.match(line):
-            fence = marker[1]
-            block_end = re.compile(rf"^ {{0,3}}{fence[0]}{{{len(fence)},}}\s*$")
+            yield from literal_html_lines(opening, line, lines)
         else:
-            yield line, False
+            line, comment = strip_comments(line, comment)
+            if BLOCK_HTML.match(line) or (at_boundary and STANDALONE_HTML.fullmatch(line)):
+                comment = yield from raw_html_lines(line, lines, comment)
+            elif marker := FENCE.match(line):
+                yield from fenced_lines(marker[1], lines)
+            else:
+                yield line, False
+                at_boundary = not line.strip() or bool(HEADING.fullmatch(line))
+                continue
+        at_boundary = True
 
 
 def sections(markdown):
@@ -149,8 +178,8 @@ def changes_ui(base):
         "-z",
         f"{base}...HEAD",
         "--",
-        *(f":(icase,glob){pattern}" for pattern in UI_GLOBS),
-        *(f":(exclude,icase,glob){pattern}" for pattern in UI_EXCLUDES),
+        *(f":(top,icase,glob){pattern}" for pattern in UI_GLOBS),
+        *(f":(top,exclude,icase,glob){pattern}" for pattern in UI_EXCLUDES),
     )
     return bool(paths)
 

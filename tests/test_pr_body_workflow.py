@@ -96,14 +96,25 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     git("commit", "-m", "Test change only")
     check(VALID_BODY)
 
-    (repo / "ui.css").write_text("body { color: red; }\n")
-    git("add", "ui.css")
+    sample = repo / "blueprint/skills/public/openmontage/scenes/beat.tsx"
+    sample.parent.mkdir(parents=True)
+    sample.write_text("video sample\n")
+    git("add", str(sample))
+    git("commit", "-m", "Change a video sample")
+    check(VALID_BODY)
+
+    (repo / "site/public/harbor.css").write_text("body { color: red; }\n")
+    git("add", "site/public/harbor.css")
     git("commit", "-m", "UI change")
     check(VALID_BODY, "Include exactly one ## Review evidence section.")
     misplaced = VALID_BODY.replace("```text", before + "\n" + after + "\n\n```text", 1)
     check(misplaced + heading + "Screenshots pending.", "screenshot")
     check(
         VALID_BODY + f'\n<PRE class="example">\n{heading}\n{before}\n{after}\n</PRE>\n',
+        "Include exactly one ## Review evidence section.",
+    )
+    check(
+        VALID_BODY + f'\n<div align="center">\n## Review evidence\n{before}\n{after}\n</div>\n',
         "Include exactly one ## Review evidence section.",
     )
     same_upload = after.replace("After", "Before").replace("672de857", "672DE857")
@@ -116,6 +127,9 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         f"Before: none, new view\n{same_upload}\n{after}",
         f"<pre>\n{before}\n{after}\n</pre>",
         f"<pre>\nBefore: none, new view\n</pre>\n{after}",
+        f'<div align="center">\n{before}\n{after}\n</div>',
+        f"<span>\n{before}\n{after}\n</span>",
+        f"<section>\nBefore: none, new view\n</section>\n\n{after}",
         f"<!--\n{before}\n-->\n{after}",
         f"```md\n{before}\n{after}\n```",
         f"    {before}\n    {after}",
@@ -124,6 +138,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     ):
         check(VALID_BODY + heading + evidence, "screenshot")
     check(VALID_BODY + heading + before + "\n" + after)
+    check(VALID_BODY + heading + f'<div align="center">\n\n{before}\n{after}\n\n</div>')
     check(VALID_BODY + heading + f"<pre>\n## Sample\n</pre>\n\n{before}\n{after}")
     check(VALID_BODY + heading + "Before: none, new view\n" + after)
     check(
@@ -131,6 +146,6 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         "Include exactly one ## Review evidence section.",
     )
 
-    git("mv", "ui.css", "styles.txt")
+    git("mv", "site/public/harbor.css", "styles.txt")
     git("commit", "-m", "Remove the stylesheet")
     check(VALID_BODY, "Include exactly one ## Review evidence section.")
