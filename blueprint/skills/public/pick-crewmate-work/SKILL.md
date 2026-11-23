@@ -17,6 +17,7 @@ Skip held work, including work with a hold on a linked record.
 Skip work that needs an unresolved decision, permission, or prerequisite.
 Use only read-only sources when picking work.
 For stalled tasks and linked outcomes, read existing Firstmate task records, status lines, handoff records, and current PR state.
+Ignore records with `kind=secondmate` when checking linked outcomes.
 Exclude a task or linked outcome as complete or in review only if the evidence shows it landed or only awaits review.
 A raw `done:` line or a passed run alone does not prove either.
 Run the forge lists for each GitHub repository in scope.
@@ -38,7 +39,7 @@ If an in-scope prerequisite is actionable, consider it as its own item in the or
    Pick a failed check, merge conflict, current change request, or confirmed required branch update the crewmate can fix.
    Skip pull requests that only await checks, review, or an external decision.
 2. **Stalled tasks (unfinished).** Find candidates in `state/<task-id>.meta` records from the Firstmate home.
-   Skip records with `mode=secondmate` because they describe persistent agents, not work items.
+   Skip records with `kind=secondmate` because they describe persistent agents, not work items.
    Use linked backlog rows as evidence, not as a requirement for a candidate.
    Confirm that unfinished work stopped and no worker or pipeline still owns the next action.
    If validation passed but a required PR was never opened, consider opening it as the next action.
