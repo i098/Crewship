@@ -35,6 +35,7 @@ These features turn one server into a self-hosted AI coding agent server where y
 - [Tailscale](security.md#remote-access): the Tailscale daemon for a private network, an option beside the gateway (opt-in)
 - [Agent host move](agent-host-move.md): move the agents to a new host with parity checks
 - [Security](security.md): the password gateway, Tailscale, and credentials
+- [Live view and replay](#live-view-and-replay): Witch setup
 
 ## Live view and replay
 
