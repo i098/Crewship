@@ -211,7 +211,8 @@ Set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/
 Before managed apply, drain the Sysbox containers and use `sudo systemctl edit sysbox-mgr.service`.
 In `[Service]`, reset `ExecStart=` and repeat the existing command with all its flags and the new `--data-root`.
 Reload systemd and restart `sysbox.service`.
-Apply checks the storage placement. It does not move data or restart Sysbox.
+Apply checks the running Sysbox manager's storage before it writes or reloads the slice limits.
+Apply does not move data or restart Sysbox.
 
 Set `docker: dind` on an entry in `runner_up.repos`.
 Use a separate pool label for that entry if the same repository also has plain places.

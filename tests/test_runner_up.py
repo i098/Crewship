@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,7 @@ def validator():
     return f"{program} check-config --config %s" if os.access(program, os.X_OK) else "true %s"
 
 
-def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
+def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None, sysbox_root=None):
     playbook = home.parent / "runner_up.yml"
     if not (home.parent / "templates").exists():
         (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
@@ -138,17 +139,19 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         )
         lsblk.chmod(0o755)
         environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
-    if docker_stub:
-        bin_dir, log = docker_stub
-        shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         systemctl = home / ".local/bin/systemctl"
+        record = f'printf "systemctl %s\\n" "$*" >> "{docker_stub[1]}"' if docker_stub else ":"
         systemctl.write_text(
             '#!/bin/sh\n'
-            f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
+            'case " $* " in *" sysbox-mgr.service "*) printf "%s\\n" "$SYSBOX_PID"; exit;; esac\n'
+            f'case " $* " in *" daemon-reload "*) {record};; esac\n'
             'case " $* " in *" show "*) printf "%s\\n" '
             'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\nexit 0\n'
         )
         systemctl.chmod(0o755)
+    if docker_stub:
+        bin_dir, _ = docker_stub
+        shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         socket = home.parent / "docker.sock"
         socket.touch()
         variables["crewship_user_runtime_dir"] = str(home.parent)
@@ -159,21 +162,33 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
             DOCKER_CGROUP_DRIVER="systemd",
         )
     (home.parent / "etc").mkdir(exist_ok=True)
-    result = subprocess.run(
-        [
-            Path(sys.executable).parent / "ansible-playbook",
-            "-i",
-            "localhost,",
-            str(playbook),
-            "--extra-vars",
-            json.dumps(variables),
-            *flags,
-        ],
-        cwd=home.parent,
-        env=environment,
-        capture_output=True,
-        text=True,
+    manager = (
+        subprocess.Popen(
+            [sys.executable, "-c", "input()", "--data-root", str(sysbox_root or home)],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if facts and facts.get("distribution_version") == "24.04"
+        else nullcontext()
     )
+    with manager as process:
+        if process is not None:
+            environment["SYSBOX_PID"] = str(process.pid)
+        result = subprocess.run(
+            [
+                Path(sys.executable).parent / "ansible-playbook",
+                "-i",
+                "localhost,",
+                str(playbook),
+                "--extra-vars",
+                json.dumps(variables),
+                *flags,
+            ],
+            cwd=home.parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
     assert result.returncode == 0, result.stdout + result.stderr
     return int(result.stdout.rsplit("changed=", 1)[1].split()[0])
 
@@ -556,6 +571,13 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     calls = stubs[1].read_text().splitlines()
     reload = calls.index("systemctl daemon-reload")
     assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker "))
+    for docker_stub in (None, stubs):
+        settings = runner(home, repos=[existing, new], io_write_mb=200)
+        with pytest.raises(AssertionError, match="running Sysbox manager must use a data root"):
+            apply(home, settings, facts=facts, docker_stub=docker_stub, sysbox_root=Path("/proc"))
+        assert slice_file.stat().st_mtime_ns == before
+        assert stubs[1].read_text().splitlines() == calls
+        assert config(home)["pools"][0]["label"] == "web-dind"
 
 
 def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
@@ -932,7 +954,7 @@ def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
 
 
 def io_guard(
-    stubs, tmp_path, avg60, *, now, used=10, io="a\nb\n", disk_paused="", calm=None, active_units=""
+    stubs, tmp_path, avg60, *, now, used=10, io=None, disk_paused="", calm=None, active_units=""
 ):
     """Run `guard` at time `now` with a stub pressure file; state lives in tmp_path between runs."""
     pressure = tmp_path / "io"
@@ -940,6 +962,8 @@ def io_guard(
         f"some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nfull avg10=1.00 avg60={avg60} avg300=0.00 total=1\n"
     )
     io_state = tmp_path / "io.paused"
+    if io is None:
+        io = "runner-up@a-b.service\nrunner-up@c-d.service\n"
     if io:
         io_state.write_text(io)
     if calm is not None:
@@ -948,7 +972,6 @@ def io_guard(
         "RUNNER_UP_PRESSURE_FILE": str(pressure),
         "RUNNER_UP_IO_STATE": str(io_state),
         "RUNNER_UP_NOW": str(now),
-        "RUNNER_UP_INSTANCES": "",
         "ACTIVE_UNITS": active_units,
     }
     stubs[1].write_text("")
@@ -958,14 +981,16 @@ def io_guard(
 
 
 def test_io_resume_waits_for_the_two_minute_window_then_starts_one_unit_per_run(stubs, tmp_path):
-    assert io_guard(stubs, tmp_path, "12.50", now=1000) == ([], ["a", "b"])
+    a, b = "runner-up@a-b.service", "runner-up@c-d.service"
+    assert io_guard(stubs, tmp_path, "12.50", now=1000) == ([], [a, b])
     assert io_guard(stubs, tmp_path, "39.99", now=1119, io="")[0] == []
     calls, left = io_guard(stubs, tmp_path, "5.00", now=1120, io="")
-    assert calls == ["systemctl --user --no-block start a"] and left == ["b", "a"]
+    assert calls == [f"systemctl --user --no-block start {a}"] and left == [b, a]
     calls, left = io_guard(stubs, tmp_path, "5.00", now=1240, io="")
-    assert calls == ["systemctl --user --no-block start b"] and left == ["a", "b"]
-    assert io_guard(stubs, tmp_path, "5.00", now=1360, io="", active_units="a b") == ([], ["b"])
-    assert io_guard(stubs, tmp_path, "5.00", now=1480, io="", active_units="a b") == ([], [])
+    assert calls == [f"systemctl --user --no-block start {b}"] and left == [a, b]
+    active = f"{a} {b}"
+    assert io_guard(stubs, tmp_path, "5.00", now=1360, io="", active_units=active) == ([], [b])
+    assert io_guard(stubs, tmp_path, "5.00", now=1480, io="", active_units=active) == ([], [])
     assert not (tmp_path / "io.paused.calm").exists()
 
 
@@ -975,13 +1000,13 @@ def test_an_io_spike_resets_the_calm_window(stubs, tmp_path):
     assert io_guard(stubs, tmp_path, "5.00", now=1700, io="")[0] == []
     assert io_guard(stubs, tmp_path, "5.00", now=1819, io="")[0] == []
     assert io_guard(stubs, tmp_path, "5.00", now=1820, io="")[0] == [
-        "systemctl --user --no-block start a"
+        "systemctl --user --no-block start runner-up@a-b.service"
     ]
 
 
 def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
-    calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=86, disk_paused="a\n")
-    assert calls == [] and left == ["a", "b"]
+    calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=86, disk_paused="a-b\n")
+    assert calls == [] and left == ["runner-up@a-b.service", "runner-up@c-d.service"]
 
 
 def test_disk_resume_leaves_io_paused_units_until_io_recovers(stubs, tmp_path):
@@ -999,6 +1024,22 @@ def test_disk_resume_leaves_io_paused_units_until_io_recovers(stubs, tmp_path):
     assert io_guard(stubs, tmp_path, "5.00", now=1220, io="") == (
         [f"systemctl --user --no-block start {unit}"], [unit]
     )
+
+
+def test_guard_discards_removed_coordinators_from_both_pause_records(stubs, tmp_path):
+    unit = "runner-up@a-b.service"
+    calls, left = io_guard(
+        stubs,
+        tmp_path,
+        "5.00",
+        now=1200,
+        calm=1000,
+        io=f"runner-up@removed.service\n{unit}\n",
+        disk_paused="removed\n",
+    )
+    assert calls == [f"systemctl --user --no-block start {unit}"]
+    assert left == [unit]
+    assert not (tmp_path / "paused").exists()
 
 
 def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, env=None):
@@ -1055,7 +1096,7 @@ def io_hot_guard(stubs, tmp_path, avg60, now, heavy="h1 h2 h3"):
         "RUNNER_UP_IO_STATE": str(tmp_path / "io.paused"),
         "RUNNER_UP_NOW": str(now),
         "RUNNER_UP_IO_HEAVY": heavy,
-        "RUNNER_UP_INSTANCES": "",
+        "RUNNER_UP_INSTANCES": heavy,
     }
     stubs[1].write_text("")
     calls, _ = guard(stubs, tmp_path, 10, env=env)

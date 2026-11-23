@@ -45,6 +45,17 @@
   changed_when: false
   when: crewship_runner_up_dind | bool
 
+- name: Require the Sysbox data root on the capped filesystem
+  become: true
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
+      - check-sysbox-storage
+      - "{{ crewship_runner_up_data_dir }}"
+  check_mode: false
+  changed_when: false
+  when: crewship_runner_up_dind | bool
+
 - name: Cap CI jobs in a systemd slice
   become: true
   block:
