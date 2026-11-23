@@ -1,18 +1,28 @@
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/check_pr.py"
-SPEC = importlib.util.spec_from_file_location("check_pr", SCRIPT)
-check_pr = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(check_pr)
+
+
+@pytest.fixture
+def check_pr(monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    import check_pr
+
+    return check_pr
+
 
 BODY = "Closes #12\n\nReview plan: run the new test.\n"
-SHOT = "![after](https://example.com/a.png)\n"
+SHOT = (
+    "\n## Review evidence\n\nBefore: none, new view\n"
+    "![After](https://github.com/user-attachments/assets/672de857-f49e-4def-95f8-b576d8290bb6)\n"
+)
 
 
-def test_commit_subjects():
+def test_commit_subjects(check_pr):
     assert check_pr.check_commits(["feat(ci): add x", "fix!: drop y"]) == []
     assert len(check_pr.check_commits(["Merge branch cleanup into utils"])) == 1
     for bad in [
@@ -26,24 +36,18 @@ def test_commit_subjects():
         assert len(check_pr.check_commits([bad])) == 1, bad
 
 
-def test_body_needs_issue_first_and_plan():
+def test_body_needs_issue_first_and_plan(check_pr):
     assert check_pr.check_body(BODY, False) == []
     assert len(check_pr.check_body("Summary\nCloses #12\nReview plan: x", False)) == 1
     assert len(check_pr.check_body("Closes #12\n", False)) == 1
     assert len(check_pr.check_body("```\nCloses #1\nReview plan: x\n```\n", False)) == 2
 
 
-def test_ui_needs_hosted_image():
-    assert len(check_pr.check_body(BODY, True)) == 1
-    assert len(check_pr.check_body(BODY + "![x](shots/a.png)\n", True)) == 1
+def test_ui_needs_hosted_image_in_review_evidence(check_pr):
+    assert check_pr.check_body(BODY, True)
+    assert check_pr.check_body(BODY + SHOT.replace("github.com", "example.com"), True)
+    assert check_pr.check_body(BODY + SHOT.replace("Review evidence", "Test evidence"), True)
     assert check_pr.check_body(BODY + SHOT, True) == []
-    assert check_pr.check_body(BODY + '<img src="https://e.com/a.png">', True) == []
-
-
-def test_ui_paths():
-    hit = check_pr.UI_PATH.search
-    assert hit("apps/genui-web/app.tsx") and hit("site/index.md") and hit("a/b.css")
-    assert not hit("scripts/ship.py") and not hit("docs/ci-pool.md")
 
 
 def _git(repo, *args):
@@ -54,13 +58,13 @@ def _git(repo, *args):
     )
 
 
-def _run(repo, monkeypatch, *argv):
+def _run(check_pr, repo, monkeypatch, *argv):
     monkeypatch.chdir(repo)
     monkeypatch.setattr(sys, "argv", ["check_pr.py", *argv])
     return check_pr.main()
 
 
-def test_main_checks_base_range_and_detects_ui(tmp_path, monkeypatch, capsys):
+def test_main_checks_base_range_and_detects_ui(check_pr, tmp_path, monkeypatch, capsys):
     _git(tmp_path, "init", "-b", "main")
     (tmp_path / "a.txt").write_text("a")
     _git(tmp_path, "add", ".")
@@ -70,13 +74,13 @@ def test_main_checks_base_range_and_detects_ui(tmp_path, monkeypatch, capsys):
     _git(tmp_path, "commit", "-m", "feat(ui): style")
     body = tmp_path / "body.md"
     body.write_text(BODY)
-    assert _run(tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 1
-    assert "screenshot" in capsys.readouterr().err
+    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 1
+    assert "## Review evidence" in capsys.readouterr().err
     body.write_text(BODY + SHOT)
-    assert _run(tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 0
+    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1") == 0
     (tmp_path / "b.txt").write_text("b")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "Merge branch cleanup into utils")
     body.write_text(BODY)
-    assert _run(tmp_path, monkeypatch, str(body), "--base", "HEAD~1", "--no-ui") == 1
-    assert _run(tmp_path, monkeypatch, str(body), "--base", "nope") == 2
+    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1", "--no-ui") == 1
+    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "nope") == 2

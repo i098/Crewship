@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import re
+import subprocess
 import sys
 from html import unescape
 from pathlib import Path
@@ -18,6 +19,14 @@ LINK_DEFINITION = re.compile(
     r"""(?:[ \t]*(?:\n[ \t]*)?(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*(?=\n|$)""",
     re.M,
 )
+UI_PATH = re.compile(
+    r"\.(tsx|jsx|vue|svelte|css|scss|html)$|^(apps/[^/]+/(web|src/components|public)|site)/", re.I
+)
+SCREENSHOT = re.compile(
+    r" {0,3}!\[(Before|After)\]\(https://github\.com/user-attachments/assets/"
+    r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\)[ \t]*"
+)
+NEW_VIEW = re.compile(r" {0,3}Before: none, new view[ \t]*")
 
 
 def strip_comments(line, comment):
@@ -78,6 +87,38 @@ def has_content(lines):
     return bool(re.search(r"\w", unescape(MARKUP.sub("", text))))
 
 
+def check_screenshots(actual):
+    matches = [lines for name, lines in actual if name == "Review evidence"]
+    if len(matches) != 1:
+        return ["Include exactly one ## Review evidence section."]
+    images = set()
+    new_view = False
+    for line, code in matches[0]:
+        if code:
+            continue
+        if image := SCREENSHOT.fullmatch(line):
+            images.add(image[1])
+        elif NEW_VIEW.fullmatch(line):
+            new_view = True
+    if "After" in images and ("Before" in images or new_view):
+        return []
+    return [
+        "Embed GitHub Before and After screenshots in ## Review evidence. "
+        "For a new view, replace the Before screenshot with: Before: none, new view"
+    ]
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def changes_ui(base):
+    paths = git("diff", "--name-only", "--no-renames", "-z", f"{base}...HEAD", "--")
+    return any(UI_PATH.search(path) for path in paths.split("\0"))
+
+
 def check_body(body, template, *, ui=False):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
@@ -86,7 +127,7 @@ def check_body(body, template, *, ui=False):
 
     actual = sections(body)
     for heading, template_lines in sections(template):
-        if not heading or (heading == "Review evidence" and not ui):
+        if not heading or heading == "Review evidence":
             continue
         matches = [lines for name, lines in actual if name == heading]
         if len(matches) != 1:
@@ -111,16 +152,23 @@ def check_body(body, template, *, ui=False):
                 )
                 if not reason or not has_content([(reason[1].strip(), False)]):
                     errors.append(f"Check the completed item or add Not applicable: <reason>: {label}")
+    if ui:
+        errors.extend(check_screenshots(actual))
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description="Check a PR body against the repository template.")
     parser.add_argument("body_file", nargs="?", default="-", help="body file, or - for stdin")
-    parser.add_argument("--ui", action="store_true", help="require the Review evidence section")
+    parser.add_argument("--base", help="detect UI changes against this Git revision")
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
-    errors = check_body(body, TEMPLATE.read_text(), ui=args.ui)
+    try:
+        ui = bool(args.base) and changes_ui(args.base)
+    except subprocess.CalledProcessError as error:
+        print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)
+        return 2
+    errors = check_body(body, TEMPLATE.read_text(), ui=ui)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
