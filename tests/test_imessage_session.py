@@ -445,6 +445,26 @@ def test_thread_reply_to_a_desk_bubble_with_the_same_text_as_a_completed_mate_se
         assert not message.exists()
 
 
+def test_thread_reply_in_a_password_burst_goes_to_firstmate(tmp_path):
+    message = mate_data(tmp_path)
+    with session_rig(tmp_path, FM_IMESSAGE_TEST_QUIET_MS="2500") as rig:
+        mate_script(tmp_path, message)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
+        [guid] = sent_guids(rig, "On it.")
+        reply_in_thread(rig, "m2", guid, "On it.", "Use k9rx7mq831")
+        wait_for(lambda: any(e.get("received", {}).get("requestId") == "bluebubbles-m2" for e in events(rig)),
+                 "durable ownership of the thread reply", timeout=120)
+        deliver(rig, "m3", "That is a password.")
+        wait_for(lambda: "note --request-id bluebubbles-m3 -- " in read_text(rig.notes),
+                 "the password warning in Firstmate's inbox", timeout=120)
+        notes = read_text(rig.notes)
+        assert "note --request-id bluebubbles-m2 -- " in notes and "Use k9rx7mq831" in notes
+        assert "That is a password." in notes
+        assert not message.exists()
+
+
 def test_thread_reply_without_a_relay_match_reaches_firstmate(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:

@@ -1293,6 +1293,7 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
   if (!current()) return;
   if (DESK_SESSION) {
     if (pending.some(isThreadReply)) {
+      if (!sessionMayAct(pending, { vetted: DESK_VETTED, muted, safe: deskSafe })) return handoffV2(pending);
       pending = await relayThreadReplies(pending, current);
       if (!pending.length || !current()) return;
     }
@@ -1596,7 +1597,7 @@ async function relayThreadReplies(pending: Routing[], current: () => boolean) {
       continue;
     }
     const mate = sender && mates.find((m) => m.home === sender || m.id === sender);
-    if (mate && sessionMayAct([item], { vetted: DESK_VETTED, muted, safe: deskSafe })) await handoffToMate([item], mate, current);
+    if (mate && !muted()) await handoffToMate([item], mate, current);
     else handoffV2([item]);
   }
   return remaining;
