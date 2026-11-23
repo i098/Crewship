@@ -11,7 +11,7 @@ HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)", re.I)
-RAW_HTML = re.compile(r"^ {0,3}<(?:[!?/]|[A-Za-z])")
+RAW_HTML = re.compile(r"^ {0,3}<(?:[!?/]|[A-Za-z][A-Za-z0-9-]*(?=[ \t]|/?>|$))")
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
 HTML_COMMENT = re.compile(r"<!--")

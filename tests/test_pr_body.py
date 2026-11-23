@@ -144,11 +144,13 @@ class PRBodyTests(unittest.TestCase):
         self.assertEqual(self.check(body), [])
 
     def test_comment_markers_inside_inline_code_are_literal(self):
-        body = VALID_BODY.replace(
-            "Check every pull request body against the repository template.",
-            "Handle `<!--` in PR descriptions.",
-        )
-        self.assertEqual(self.check(body), [])
+        for prefix in ("", "<https://example.com> ", "<reviewer@example.com> "):
+            with self.subTest(prefix=prefix):
+                body = VALID_BODY.replace(
+                    "Check every pull request body against the repository template.",
+                    prefix + "Handle `<!--` in PR descriptions.",
+                )
+                self.assertEqual(self.check(body), [])
 
     def test_markup_inside_inline_code_is_visible_content(self):
         body = VALID_BODY.replace(
