@@ -9,9 +9,9 @@ Description=Report a failed iMessage slot (Crewship managed)
 Type=oneshot
 WorkingDirectory={{ crewship_imessage_dir }}
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FM_IMESSAGE_SLOT=%i
 Environment="FM_HOME={{ crewship_firstmate_dir }}"
 StateDirectory=fm-imessage
 StateDirectoryMode=0700
 UMask=0077
-# selfheal.ts is run from the active slot's directory (the deploy installs each slot with its own copy).
-ExecStart=/bin/sh -c 'slot=$$(cat "$$STATE_DIRECTORY/active") && cd "{{ crewship_imessage_dir }}/$$slot" && exec "{{ crewship_local_bin }}/bun" selfheal.ts failed'
+ExecStart="{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-selfheal.ts" failed

@@ -351,12 +351,16 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - Each assistant message adds one `desk-session` line to the token log.
 - A thread reply to a bubble that a second mate sent goes back to that mate without a model turn.
   `fm-imessage` sends `X-Fm-Sender` from `FM_MATE_ID` or, if unset, `FM_HOME`.
-  The bridge stores the sender with the message ID that Photon or BlueBubbles returns in `thread-senders.sqlite` in the state directory.
-  On its first start, the bridge imports only the records with message IDs from `senders.json`.
+  The bridge stores the sender with the exact message ID from Photon or BlueBubbles in `thread-senders.sqlite` in the state directory.
+  If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
+  A history match by text can prevent a duplicate send, but cannot identify the sender.
+  The store retains up to 5,000 entries for 30 days and prunes them on write.
+  On its first start, the bridge imports entries with message IDs from `senders.json` and uses the file's modification time for their age.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
   The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
   Replies to known desk, Firstmate, or owner messages keep the normal desk turn.
   If the bridge cannot verify the sender or cannot relay the reply, it sends the reply to Firstmate.
+  This includes replies to older Photon messages that have no stored message ID.
   It never uses quoted text to select a mate.
 
 If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
@@ -511,8 +515,11 @@ The code is `apps/imessage/selfheal.ts`.
 
 - **Watchdog.** The unit sets `WatchdogSec=300`. The bridge sends `WATCHDOG=1` through `systemd-notify` every 60 s, and only when `GET /health` on the bridge port answers, no desk turn has run longer than 15 minutes (`FM_IMESSAGE_TURN_DEADLINE_MS`), and the pi-natives `.node` loads. When a check fails, or the process is stopped or blocked, systemd stops the unit with SIGTERM (SIGKILL after `TimeoutStopSec`) and restarts it. The desk turn deadline is a backstop beyond the 10-minute delegate wait.
 - **Natives.** `ExecStartPre` runs `bun selfheal.ts start`, and each beat runs the same check. It loads every `.node` under `~/.omp/natives/<omp version>/` in a child process. omp 19.1 and later unpack into an `embedded-<hash>/` subfolder there; the check uses the newest one when the version folder holds no `.node`. If the file for this CPU is missing or does not load, it runs `omp --help` with a scratch `HOME`, which makes the omp binary unpack its own natives, and copies the result in with an atomic rename. It then imports `@oh-my-pi/pi-natives` the way the bridge resolves it (often the bun install cache) in a child process. If that fails, it copies the `.node` files from the sibling `pi-natives-<platform>-<arch>` package into the package's `native/` directory with an atomic rename, and probes again. When the repair cannot make it load, `ExecStartPre` exits non-zero, so systemd restarts the unit and the failure counts toward the alert.
-- **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
-- **Give-up.** After 5 starts in 10 minutes, systemd stops retrying and starts `fm-imessage-heal.service` to count the failure and alert if due.
+- **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals.
+  A healthy beat clears the count.
+  The second consecutive failure or the active slot exhausting its retry limit triggers one alert per outage.
+  If the line cannot send a text, the handler appends a `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`).
+- **Give-up.** After 5 starts in 10 minutes, systemd stops retrying and runs `fm-imessage-heal@<slot>.service` with the installed report handler.
   The front reports `no slot serves the line` once and stays failed.
   After correcting the fault, run `systemctl --user start fm-imessage.service` to start the active slot again.
 

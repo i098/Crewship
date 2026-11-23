@@ -10,7 +10,7 @@
 Description=iMessage bridge slot %i between the owner and Firstmate (Crewship managed)
 After=network-online.target
 # The heal unit reports the failure after the slot exhausts this retry budget.
-OnFailure=fm-imessage-heal.service
+OnFailure=fm-imessage-heal@%i.service
 StartLimitIntervalSec=600
 StartLimitBurst=5
 

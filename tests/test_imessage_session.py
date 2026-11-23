@@ -388,6 +388,19 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
         assert [t.split(" ", 1)[1] for t in texts(rig)][2:] == ["Sent to engram mate: nice, thanks"]  # the notice, no model reply
 
 
+def test_thread_reply_to_the_owner_stays_with_the_desk_after_restart(tmp_path):
+    with session_rig(tmp_path) as rig:
+        deliver(rig, "m1", "How are you?")
+        wait_for(lambda: len(texts(rig)) == 1, "the first desk reply", timeout=120)
+        rig.stop()
+        rig.start()
+        rig.relay_message("m2", "How about now?", int(time.time() * 1000), threadOriginatorGuid="m1")
+        subprocess.run(["curl", "-sS", "-d", json.dumps({"type": "new-message", "data": {"guid": "m2"}}),
+                        f"http://127.0.0.1:{rig.hook_port}/bluebubbles"], check=True, capture_output=True)
+        wait_for(lambda: len(texts(rig)) == 2, "the desk reply in the owner's thread", timeout=120)
+        assert any("an earlier message from the owner" in prompt for prompt in desk_lines(rig, "prompt"))
+
+
 def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_stays_with_the_desk(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:

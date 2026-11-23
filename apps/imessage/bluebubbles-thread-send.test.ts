@@ -51,3 +51,53 @@ test("a send without a reply target is not threaded", async () => {
   await bb.send("iMessage;-;+15550000000", "hello");
   expect(sent[0]!.selectedMessageGuid).toBeUndefined();
 });
+
+for (const retry of ["relay", "outbox"]) {
+  test(`the ${retry} retry records only the relay's exact send match`, async () => {
+    const chat = "iMessage;-;+15550000000";
+    const tempGuid = crypto.randomUUID();
+    const history = [
+      { guid: "same-text", text: "Done.", isFromMe: true, chats: [{ guid: chat }] },
+      { guid: "sent-by-relay", text: "Done.", isFromMe: true, chats: [{ guid: chat }] },
+    ];
+    let posts = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path.endsWith("/server/info")) return Response.json({ data: {} });
+        if (path.endsWith("/message/text")) {
+          posts++;
+          return new Response("lost answer", { status: 500 });
+        }
+        if (path.endsWith(`/chat/${encodeURIComponent(chat)}/message`)) return Response.json({ data: history });
+        return Response.json({ data: history.find((m) => path.endsWith(`/message/${m.guid}`)) });
+      },
+    });
+    servers.push(server);
+    const dir = mkdtempSync(join(tmpdir(), "bb-thread-"));
+    dirs.push(dir);
+    const relay = { url: `http://127.0.0.1:${server.port}`, password: "p" };
+    const bb = new BlueBubbles(retry === "relay" ? [relay, { ...relay }] : [relay], dir, {}, () => {});
+    const recorded: string[] = [];
+    const record = (id: string) => recorded.push(id);
+    let receiving = bb;
+    if (retry === "relay") {
+      expect(await bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).toBe("reconciled");
+    } else {
+      await expect(bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).rejects.toThrow();
+      receiving = new BlueBubbles([relay], dir, {}, () => {});
+      expect(await receiving.sent(chat, "Done.", Date.now(), tempGuid, record)).toBe(true);
+    }
+    expect(posts).toBe(1);
+    expect(recorded).toEqual([]);
+    for (const [match, guid] of [[crypto.randomUUID(), "same-text"], [tempGuid, "sent-by-relay"]]) {
+      await receiving.webhook(new Request("http://localhost/bluebubbles", {
+        method: "POST",
+        body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: match, guid } }),
+      }));
+    }
+    expect(recorded).toEqual(["sent-by-relay"]);
+  });
+}

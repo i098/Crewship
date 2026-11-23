@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readActive } from "./ownership.ts";
 
 type Env = Record<string, string | undefined>;
 type State = { pending: boolean; fails: number; alerted: boolean };
@@ -139,15 +140,16 @@ export async function alert(env: Env, message: string) {
   return "status";
 }
 
-async function alertIfNeeded(env: Env, state: State) {
-  if (state.fails < 2 || state.alerted) return;
+async function alertIfNeeded(env: Env, state: State, exhaustedSlot?: string) {
+  if (state.alerted || (!exhaustedSlot && state.fails < 2)) return;
   // A bridge that answers is healed: send nothing and forget the failures.
   const port = Number(env.FM_IMESSAGE_PORT || 8765);
   const up = await fetch(`http://127.0.0.1:${port}/health`, { headers: { "X-Firstmate": "1" }, signal: AbortSignal.timeout(5000) }).then((r) => r.ok, () => false);
   if (up) return saveState(env, { pending: false, fails: 0, alerted: false });
   state.alerted = true;
   saveState(env, state);
-  await alert(env, `iMessage self-heal failed ${state.fails} times in a row; the bridge needs a human`);
+  await alert(env, exhaustedSlot ? `iMessage slot ${exhaustedSlot} exhausted its retries; the bridge needs a human`
+    : `iMessage self-heal failed ${state.fails} times in a row; the bridge needs a human`);
 }
 
 // ExecStartPre: count a previous start that never became healthy, then check and repair the natives.
@@ -172,11 +174,13 @@ export async function onStart(env: Env = process.env) {
 
 // OnFailure: count the exhausted retry budget and alert without resetting the slot's start limit.
 async function onFailed(env: Env = process.env) {
+  const slot = env.FM_IMESSAGE_SLOT;
+  if (!slot || readActive(stateDir(env)) !== slot) return;
   const state = loadState(env);
   state.fails++;
   state.pending = false;
   saveState(env, state);
-  await alertIfNeeded(env, state);
+  await alertIfNeeded(env, state, slot);
 }
 
 // The watchdog heartbeat. Does nothing without WatchdogSec= (systemd sets WATCHDOG_USEC), so a hand run is unaffected.

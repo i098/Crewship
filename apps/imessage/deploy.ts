@@ -102,6 +102,7 @@ async function rollback(cur: string, target: string, why: string): Promise<never
   await sc("stop", unit(target));
   setActive(STATE, cur);
   dropProbes();
+  await sc("reset-failed", unit(cur));
   await sc("start", unit(cur));
   const back = await until(BACK_MS, () => get(PORT, "/health"), cur);
   await sc("start", FRONT);

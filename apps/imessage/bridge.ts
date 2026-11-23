@@ -233,8 +233,10 @@ function quotedTarget(c: LineMessage["content"]): { id: string } | undefined {
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
+const isOwnerBubble = (id: string) => said.has(id)
+  || routing.get(`photon-${id}`)?.ref.id === id || routing.get(`bluebubbles-${id}`)?.ref.id === id;
 const whoSent = (id: string) => {
-  if (said.has(id)) return "the owner";
+  if (isOwnerBubble(id)) return "the owner";
   const sender = threadSenders.find(id);
   return sender === undefined ? undefined : sender ? `us (sender ${sender})` : "us";
 };
@@ -253,7 +255,7 @@ type Line = {
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<{ id: string } | undefined>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
-  sent?(space: string, text: string, since: number): Promise<boolean>;
+  sent?(space: string, text: string, since: number, guid: string, sentId: (id: string) => void): Promise<boolean>;
   react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
@@ -284,7 +286,7 @@ async function startLine(name: string): Promise<Line> {
       messages: bb,
       find: (ref) => bb.message(ref.id),
       send: (space, text, reply, guid, beforeSend, sentId) => bb.send(space, text, reply, guid, beforeSend, sentId),
-      sent: (space, text, since) => bb.sent(space, text, since),
+      sent: (space, text, since, guid, sentId) => bb.sent(space, text, since, guid, sentId),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
       react: (ref, emoji, beforeSend) => bb.react(ref.space, ref.id, emoji, beforeSend),
@@ -891,34 +893,42 @@ function webSend(text: string): boolean {
   return true;
 }
 
-async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
+async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble, guid: string, sentId: (id: string) => void) {
   const maybe: Record<string, string> = {};
-  for (const [name, space] of Object.entries(o.maybe ?? {})) {
+  for (const [name, space] of Object.entries(attempts)) {
     if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
     const line = lines.find((l) => l.name === name);
-    if (!line) {
-      if (TRANSPORTS.includes(name)) maybe[name] = space;
+    // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
+    if (!line?.sent || typeof bubble !== "string") {
+      if (line || TRANSPORTS.includes(name)) maybe[name] = space;
       continue;
     }
-    // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
-    if (!line.sent || typeof bubble !== "string") maybe[name] = space;
-    else {
-      try {
-        if (await line.sent(space, bubble, o.since ?? 0)) {
-          trace(o.id, "history-reconciled");
-          return;
-        }
-      } catch (e) {
-        checkDeskDelivery(o);
-        throw e;
-      }
+    try {
+      if (!await line.sent(space, bubble, o.since ?? 0, guid, sentId)) continue;
+      trace(o.id, "history-reconciled");
+      return;
+    } catch (e) {
+      checkDeskDelivery(o);
+      throw e;
     }
   }
+  return maybe;
+}
+
+async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
+  const guid = `${o.guid}-${i}`;
+  const sender = o.sender ?? "";
+  const sentId = (id: string) => {
+    try { threadSenders.remember(id, sender); }
+    catch (error) { log("save thread sender")(error); }
+  };
+  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble, guid, sentId) : {};
+  if (!maybe) return;
   if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   checkDeskDelivery(o);
   const since = o.since ?? Date.now();
   try {
-    const via = await failover(routes(o, i, maybe), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
+    const via = await failover(routes(o, i, maybe, guid, sentId), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
     if (via !== (o.line ?? "photon")) console.error(`fm-imessage: sent bubble ${i + 1} on the ${via} fallback`);
   } catch (e) {
     if (Object.keys(maybe).length) save({ ...o, maybe, since });
@@ -947,8 +957,7 @@ function candidates(o: Out, i: number, retry: boolean): Line[] {
   return preferred ? [preferred, ...pool.filter((line) => line !== preferred)] : pool;
 }
 
-function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>[] {
-  const guid = o.guid && `${o.guid}-${i}`;
+function routes(o: Out, i: number, maybe: Record<string, string>, guid: string, sentId: (id: string) => void): Route<Bubble>[] {
   const only = Object.keys(maybe);
   return candidates(o, i, only.length > 0).flatMap((line) => {
     const own = line === lineOf(o);
@@ -958,19 +967,14 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
     return [{ name: line.name, send: async (bubble: Bubble) => {
       if (stopping) throw new Error("bridge stopping");
       try {
-        if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
-        let sentId: string | undefined;
         if (typeof bubble === "string") {
-          const outcome = await line.send(space, bubble, reply, guid, () => checkDeskDelivery(o), (id) => { sentId = id; });
+          const outcome = await line.send(space, bubble, reply, guid, () => checkDeskDelivery(o), sentId);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
-          sentId = (await line.sendImage!(space, bubble, reply))?.id;
+          const sent = await line.sendImage!(space, bubble, reply);
+          if (sent?.id) sentId(sent.id);
           trace(o.id, "transport-accepted");
-        }
-        if (sentId) {
-          try { threadSenders.remember(sentId, o.sender ?? ""); }
-          catch (error) { log("save thread sender")(error); } // the message already went out; never send it again
         }
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
@@ -1294,6 +1298,10 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     if (!pending.length || !current()) return;
   }
   if (DESK_SESSION) return runSessionTurn(pending, controller, current);
+  return runV2FrontTurn(pending, controller, current);
+}
+
+async function runV2FrontTurn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (muted()) return handoffV2(pending);
   if (pending.some((r) => r.mutationPath)) return handoffV2(pending);
   const target = pending.at(-1)!;
@@ -1580,6 +1588,11 @@ function isThreadReply(item: Received) {
   return item.threadTarget !== undefined || item.threadMate !== undefined;
 }
 
+function mayRelayThread(item: Routing) {
+  return DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
+    && (!DESK_V2 || deskSafe?.(item.text) === item.text);
+}
+
 async function relayThreadReplies(pending: Routing[], current: () => boolean) {
   const mates = secondmates(FM_HOME);
   const remaining: Routing[] = [];
@@ -1587,13 +1600,12 @@ async function relayThreadReplies(pending: Routing[], current: () => boolean) {
     if (!current() || stopping) break;
     if (!isThreadReply(item)) { remaining.push(item); continue; }
     const sender = item.threadTarget ? threadSenders.find(item.threadTarget) : undefined;
-    if (sender === "" || sender === FM_HOME || (item.threadTarget && said.has(item.threadTarget))) {
+    if (sender === "" || sender === FM_HOME || (item.threadTarget && isOwnerBubble(item.threadTarget))) {
       remaining.push(item);
       continue;
     }
     const mate = sender && mates.find((m) => m.home === sender || m.id === sender);
-    if (mate && DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
-      && (!DESK_V2 || deskSafe?.(item.text) === item.text)) await handoffToMate([item], mate, current);
+    if (mate && mayRelayThread(item)) await handoffToMate([item], mate, current);
     else handoffV2([item]);
   }
   return remaining;

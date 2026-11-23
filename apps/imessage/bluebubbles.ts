@@ -64,6 +64,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   private seen = new Set<string>(); // message GUIDs handled by the bridge, oldest first, kept on disk
   private pending = new Set<string>(); // message GUIDs queued for the bridge and not handled yet
   private suspects = new Set<Relay>(); // relays whose last send may have gone out without an answer, to ask first
+  private sendMatches = new Map<string, { chat: string; record: (id: string) => void }>();
   private seenFile: string;
   private appended = 0;
   private queue: Bubble[] = [];
@@ -104,10 +105,22 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   // A webhook from any relay. Only "new-message" events matter; the reply is immediate.
   async webhook(req: Request): Promise<Response> {
     if (req.method !== "POST" || new URL(req.url).pathname !== "/bluebubbles") return new Response("not found\n", { status: 404 });
-    // Only the GUID is used, and only after a type check: the message itself is read back from a relay.
-    const event: { type?: unknown; data?: { guid?: unknown; isFromMe?: unknown } } = await req.json().catch(() => ({}));
-    const guid = event.type === "new-message" && !event.data?.isFromMe ? event.data?.guid : undefined;
-    if (typeof guid === "string") void this.accept(guid);
+    const event: { type?: unknown; data?: { guid?: unknown; isFromMe?: unknown; tempGuid?: unknown } } = await req.json().catch(() => ({}));
+    const data = event?.data;
+    if (event?.type === "new-message" && typeof data?.guid === "string") {
+      if (!data.isFromMe) void this.accept(data.guid);
+      else if (data.isFromMe === true && typeof data.tempGuid === "string") {
+        const match = this.sendMatches.get(data.tempGuid);
+        if (match) {
+          const message = await this.read(data.guid).catch(() => undefined);
+          if (message?.guid === data.guid && message.isFromMe === true && message.chats?.some((c) => c.guid === match.chat)
+            && this.sendMatches.get(data.tempGuid) === match) {
+            this.sendMatches.delete(data.tempGuid);
+            match.record(message.guid);
+          }
+        }
+      }
+    }
     return new Response("ok\n");
   }
 
@@ -175,8 +188,8 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
   // `guid` is the client GUID (BlueBubbles tempGuid). Reply behavior is described in docs/imessage.md.
   // A later relay in one call sends only after no relay shows the text as sent; a retry of
   // a failed call is the bridge's to check first (`sent`), because the outbox item keeps what may have gone out.
-  // `sentId` gets the guid the relay gave the sent message, when it answers with one.
   async send(chat: string, text: string, replyTo?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled"> {
+    const tempGuid = guid ?? crypto.randomUUID();
     const started = Date.now();
     let maybeSent = false;
     let last: unknown = new RelayError("no relay is reachable", false, 503);
@@ -185,10 +198,14 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
         const reconciled = maybeSent && await this.sent(chat, text, started);
         if (!reconciled) {
           beforeSend?.();
+          if (sentId) this.trackSend(tempGuid, chat, sentId);
           const sent = await this.call(r, "POST", "message/text", undefined,
-            { chatGuid: chat, tempGuid: guid ?? crypto.randomUUID(), message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
+            { chatGuid: chat, tempGuid, message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
             .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; }) as { guid?: unknown } | undefined;
-          if (typeof sent?.guid === "string") sentId?.(sent.guid);
+          if (typeof sent?.guid === "string" && sent.guid) {
+            this.sendMatches.delete(tempGuid);
+            sentId?.(sent.guid);
+          }
         }
         this.suspects.clear();
         return reconciled ? "reconciled" : "accepted";
@@ -229,7 +246,14 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     return (await this.first((r) => this.call(r, "GET", `message/${encodeURIComponent(guid)}`, { with: "chats,attachments" }))) as BBMessage;
   }
 
-  async sent(chat: string, text: string, since: number): Promise<boolean> {
+  private trackSend(tempGuid: string, chat: string, record: (id: string) => void) {
+    this.sendMatches.delete(tempGuid);
+    this.sendMatches.set(tempGuid, { chat, record });
+    if (this.sendMatches.size > this.opts.seenMax) this.sendMatches.delete(this.sendMatches.keys().next().value!);
+  }
+
+  async sent(chat: string, text: string, since: number, tempGuid?: string, sentId?: (id: string) => void): Promise<boolean> {
+    if (tempGuid && sentId && !this.sendMatches.has(tempGuid)) this.trackSend(tempGuid, chat, sentId);
     let asked = false;
     for (const r of new Set([...this.suspects, ...(await this.healthy())])) {
       try {

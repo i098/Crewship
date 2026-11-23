@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sendOnce } from "./outbox.ts";
 import { alreadySent, logSend, openThreadSenders } from "./sender-log.ts";
@@ -65,4 +65,30 @@ test("thread senders import old message IDs once and ignore text-only records", 
   const next = openThreadSenders(dir);
   expect(next.find("sent")).toBe("render");
   expect(next.find("old-slot")).toBeUndefined();
+});
+
+test("thread senders expire after 30 days and a write removes them from disk", () => {
+  const state = mkdtempSync(`${dir}/age-`);
+  const senders = openThreadSenders(state);
+  senders.remember("old", "render", noon);
+  senders.remember("recent", "render", noon + day);
+  expect(senders.find("old", noon + 30 * day)).toBe("render");
+  const later = noon + 30 * day + 1;
+  expect(senders.find("old", later)).toBeUndefined();
+  senders.remember("new", "render", later);
+  const reopened = openThreadSenders(state);
+  expect(reopened.find("old", noon)).toBeUndefined();
+  expect(reopened.find("recent", later)).toBe("render");
+});
+
+test("thread senders retain the latest 5000 records, even in one millisecond", () => {
+  const state = mkdtempSync(`${dir}/cap-`);
+  const legacy = `${state}/senders.json`;
+  writeFileSync(legacy, JSON.stringify(Array.from({ length: 5000 }, (_, i) => ({ id: `sent-${i}`, sender: "render" }))));
+  utimesSync(legacy, new Date(noon), new Date(noon));
+  openThreadSenders(state, noon).remember("new", "atlas", noon);
+  const reopened = openThreadSenders(state, noon);
+  expect(reopened.find("sent-0", noon)).toBeUndefined();
+  expect(reopened.find("sent-1", noon)).toBe("render");
+  expect(reopened.find("new", noon)).toBe("atlas");
 });

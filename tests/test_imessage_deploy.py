@@ -322,6 +322,7 @@ def test_texts_sent_through_a_rollback_wait_for_the_old_slot_and_go_out_exactly_
     rig.inbound("m1")
     rig.stage()
     assert rig.deploy().returncode == 0  # first rolling install: legacy to blue
+    (rig.run / "blue.failed").touch()  # the running slot will refuse another start until reset
     rig.stage(plant_after_handover)  # green passes the gate, takes the line and dies: blue is stopped, then restarted
     deploy, results = deploy_while_sending(rig)
     assert deploy.returncode == 1 and "rolling back to blue" in deploy.stdout, deploy.stdout + deploy.stderr
@@ -329,8 +330,9 @@ def test_texts_sent_through_a_rollback_wait_for_the_old_slot_and_go_out_exactly_
     assert_each_text_went_out_once(rig, results)
 
 
-def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
-    """The heal unit's ExecStart, rendered as the role renders it and run the way systemd runs it ($$ is one $)."""
+@pytest.mark.parametrize("failed_slot, alerts", [("green", True), ("blue", False)])
+def test_heal_unit_reports_only_the_active_slot_with_installed_code(tmp_path, failed_slot, alerts):
+    """Run the rendered ExecStart while the active slot still has an old self-heal script."""
     import shlex
 
     from jinja2 import Environment
@@ -339,16 +341,26 @@ def test_the_heal_unit_runs_the_selfheal_of_the_active_slot(tmp_path):
     dir_, state, bin_dir = tmp_path / "imessage", tmp_path / "state", tmp_path / "bin"
     for d in (dir_ / "green", state, bin_dir):
         d.mkdir(parents=True)
-    (dir_ / "green/selfheal.ts").write_text("")
+    (dir_ / "green/selfheal.ts").write_text('throw new Error("used the rollback slot");')
     (state / "active").write_text("green\n")
-    (bin_dir / "bun").write_text('#!/bin/bash\n[ -f "$1" ] && echo "$PWD $*" > "$OUT"\n')
-    (bin_dir / "bun").chmod(0o755)
-    unit = jinja.from_string((ROOT / "blueprint/ansible/templates/fm-imessage-heal.service.j2").read_text()).render(
+    (bin_dir / "bun").symlink_to(shutil.which("bun"))
+    shutil.copyfile(ROOT / "apps/imessage/selfheal.ts", bin_dir / "imessage-selfheal.ts")
+    shutil.copyfile(ROOT / "apps/imessage/ownership.ts", bin_dir / "ownership.ts")
+    unit = jinja.from_string((ROOT / "blueprint/ansible/templates/fm-imessage-heal@.service.j2").read_text()).render(
         ansible_managed="test", crewship_imessage_dir=str(dir_), crewship_local_bin=str(bin_dir), crewship_firstmate_dir=str(tmp_path))
     start = next(line.removeprefix("ExecStart=") for line in unit.splitlines() if line.startswith("ExecStart="))
+    slot_env = next(line.removeprefix("Environment=") for line in unit.splitlines()
+                    if line.startswith("Environment=FM_IMESSAGE_SLOT="))
+    slot_key, slot_value = slot_env.split("=", 1)
     out = tmp_path / "out"
-    subprocess.run(shlex.split(start.replace("$$", "$")), env={**os.environ, "STATE_DIRECTORY": str(state), "OUT": str(out)}, check=True)
-    assert out.read_text().strip() == f"{dir_ / 'green'} selfheal.ts failed"
+    env = {**os.environ, "STATE_DIRECTORY": str(state), "FM_IMESSAGE_SEND": "false",
+           "FM_IMESSAGE_PORT": "1", "FM_IMESSAGE_ALERT_STATUS": str(out), slot_key: slot_value.replace("%i", failed_slot)}
+    for _ in range(2):
+        subprocess.run(shlex.split(start), cwd=dir_, env=env, check=True)
+    assert out.exists() == alerts
+    if alerts:
+        [line] = out.read_text().splitlines()
+        assert "iMessage slot green exhausted its retries" in line
 
 
 @pytest.mark.parametrize("mainpid, stops", [("", False), ("4242", True)])
