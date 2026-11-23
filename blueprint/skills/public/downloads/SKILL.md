@@ -6,28 +6,45 @@ description: Use for fast, resumable file downloads with aria2c or for video, au
 # Download files and media
 
 Download only content you have permission to save. Check for the tool you need before you use it.
+If a prerequisite is missing, stop the affected action and tell the user which install command they can run.
+Do not run install commands.
 
 ## Direct file URL: aria2c
 
-Run `command -v aria2c`. If it is missing, use `sudo apt install aria2` (Debian/Ubuntu) or `brew install aria2` (macOS).
+Use only direct HTTP, HTTPS, or FTP URLs.
+Run `command -v aria2c`. Install commands for the user: `sudo apt install aria2` (Debian/Ubuntu) or `brew install aria2` (macOS).
+Set `DOWNLOAD_DIR` and `FILE_NAME` to an unused destination for each new resource.
 
 ```bash
-aria2c -c -x 4 -s 4 -- "$FILE_URL"
+aria2c --no-conf --follow-torrent=false --follow-metalink=false \
+  --auto-file-renaming=false -x 4 -s 4 -d "$DOWNLOAD_DIR" -o "$FILE_NAME" -- "$FILE_URL"
 ```
 
-`-x` limits connections per server. `-s` sets the number of connections for the file. The server must support range requests for parallel HTTP downloads. Run the same command in the same directory to resume with `-c`. Keep the partial file and its `.aria2` control file.
+`-x` limits connections per server. `-s` sets the number of connections for the file.
+The server must support range requests for parallel HTTP downloads.
+Add `-c` only to resume a known partial download from the same URL at the same destination.
+Keep the partial file and its `.aria2` control file together.
 
 If the publisher supplies a SHA-256 digest, add `--checksum="sha-256=$SHA256"` before `--`. Treat a mismatch as a failed download.
 
 ## Video or audio page: yt-dlp
 
-Run `command -v yt-dlp`. If it is missing, use `pipx install yt-dlp` (with pipx installed) or `brew install yt-dlp` (macOS).
+Use a URL for one video, not a playlist-only URL.
+Run `command -v yt-dlp`. Install commands for the user: `pipx install yt-dlp` (requires pipx) or `brew install yt-dlp` (macOS).
 
 ```bash
-yt-dlp -F -- "$VIDEO_URL"                              # List formats
-yt-dlp -f 'bv[height<=1080]+ba/b[height<=1080]' -- "$VIDEO_URL"
-yt-dlp -x -- "$VIDEO_URL"                              # Save audio only
-yt-dlp --download-sections '*00:01:10-00:01:30' -- "$VIDEO_URL"
+yt-dlp --ignore-config --no-playlist -F -- "$VIDEO_URL"  # List formats
+yt-dlp --ignore-config --no-playlist -- "$VIDEO_URL"
+yt-dlp --ignore-config --no-playlist -x \
+  -o '%(title)s [%(id)s] audio.%(ext)s' -- "$VIDEO_URL"
+yt-dlp --ignore-config --no-playlist --download-sections '*00:01:10-00:01:30' \
+  -o '%(title)s [%(id)s] %(section_start)s-%(section_end)s.%(ext)s' -- "$VIDEO_URL"
 ```
 
-The second command selects video at 1080p or less and its audio. Use `-f FORMAT_ID` to select a specific format from the list. Check `command -v ffmpeg` before merging streams, extracting audio, or cutting a clip. If it is missing, use `sudo apt install ffmpeg` or `brew install ffmpeg`.
+Use the default format selection unless the user requests a specific quality or format.
+Add `-f FORMAT_ID` before `--` to select a format from the list.
+Check `command -v ffmpeg && command -v ffprobe` before merging streams, extracting audio, or cutting a clip.
+Install commands for the user: `sudo apt install ffmpeg` (Debian/Ubuntu) or `brew install ffmpeg` (macOS).
+
+The default cut is approximate because it can start before the requested time.
+For accurate cuts, add `--force-keyframes-at-cuts` before `--` and add `-accurate` before `.%(ext)s` in the output template.
