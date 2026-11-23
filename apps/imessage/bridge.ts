@@ -50,7 +50,8 @@ import { type Action, collectSessions, rateLimit, StuckWatch } from "./stuck-wat
 import { paneIO } from "./desk-pane.ts";
 import { listScripts, runScript } from "./desk-scripts.ts";
 import { claim, claimHolder, claimsDir, deskActions } from "./desk-claim.ts";
-import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, quoteKey, Queue, senderOfQuoted, type SentBubble, sendReply, standbyChecks, transient, Turns, whoSent as whoSentBy } from "./outbox.ts";
+import { brief, deskLog, heartbeat, keyOf, ownership, permanent, probeKit, Queue, sendReply, standbyChecks, transient, Turns } from "./outbox.ts";
+import { openThreadSenders } from "./sender-log.ts";
 import { listenFrom, transcribe } from "./transcribe.ts";
 
 
@@ -212,7 +213,7 @@ type Ref = { line?: string; space: string; id: string };
 // `card` is the token of a card to send, or to edit in place once it is out.
 // `front` marks the front desk's reply to a work turn: it never answers the request it accompanies.
 type Out = Ref & { react?: string; reacted?: boolean; bubbles?: string[]; image?: Picture; done?: number; reply?: string; kind?: Kind; silent?: boolean; guid?: string; at?: number; maybe?: Record<string, string>; since?: number; card?: string; requestId?: string; requests?: string[]; deskGeneration?: number; deskSession?: string; loop?: "v2"; front?: boolean; delegated?: true; sender?: string; ste?: true; probe?: true; lane?: string };
-type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadMate?: string; at?: number; loop?: "v2" };
+type Received = { requestId: string; text: string; authored?: string; ref: Ref; memoryId: number; firstmate: boolean; mateEligible?: boolean; threadTarget?: string; threadMate?: string; at?: number; loop?: "v2" };
 type V2Plan = { front: Pick<Out, "requestId" | "requests">; intents: FrontIntent[]; mate?: Secondmate };
 type Routing = Received & { route: "pending" | "handoff" | "desk" | "done"; out?: Out; handoffNote?: string; mutationPath?: string; v2?: V2Plan; responded?: true | string; social?: true; noted?: true; stale?: true };
 type DeskResult = { answer: { bubbles: string[] } | { react: string; text?: string } | { handled: true }; target: Routing };
@@ -226,33 +227,17 @@ const probe = probeKit<Ref, Out>(
 const ROUTING_LOG = `${STATE}/routing.jsonl`;
 const routing = new Map<string, Routing>();
 const mateDeliveries = new Set<string>();
-// Who sent each recent bubble: a thread reply to it goes back to that mate. A reply names its target by message id when the
-// transport gave the sent bubble one. Otherwise the start of the text counts, and only when every recent bubble with that start has one sender.
-// A bubble sent with no sender is the desk's own. A capped file keeps the record across restarts.
-const SENDERS_FILE = `${STATE}/senders.json`;
-const sentBubbles: SentBubble[] = (() => {
-  try {
-    const rows = JSON.parse(readFileSync(SENDERS_FILE, "utf8"));
-    return Array.isArray(rows) ? rows : [];
-  } catch { return []; }
-})();
-function rememberSender(text: string, sender = "", id?: string) {
-  sentBubbles.push({ key: quoteKey(text), sender, ...(id && { id }) });
-  if (sentBubbles.length > 200) sentBubbles.shift();
-  persistLatest(SENDERS_FILE, JSON.stringify(sentBubbles));
+function quotedTarget(c: LineMessage["content"]): { id: string } | undefined {
+  if (c.type === "reply") return c.target;
+  if (c.type === "effect") return quotedTarget(c.content);
 }
 // The mate whose home or id the sender header names; the main home and unknown senders give none.
 const mateOfSender = (sender: string | undefined) => sender ? secondmates(FM_HOME).find((m) => m.home === sender || m.id === sender)?.id : undefined;
-function quotedTarget(c: LineMessage["content"]): { id: string; text: string } | undefined {
-  if (c.type === "reply") return c.target.content.type === "text" ? { id: c.target.id, text: c.target.content.text } : undefined;
-  if (c.type === "effect") return quotedTarget(c.content);
-}
-function quotedMate(c: LineMessage["content"]) {
-  const quoted = quotedTarget(c);
-  return quoted && mateOfSender(senderOfQuoted(sentBubbles, quoted.text, quoted.id));
-}
-// Who sent a thread-reply target: the owner (a text this bridge heard) or us (a bubble this bridge sent).
-const whoSent = (id: string, text: string) => whoSentBy(said, sentBubbles, id, text);
+const whoSent = (id: string) => {
+  if (said.has(id)) return "the owner";
+  const sender = threadSenders.find(id);
+  return sender === undefined ? undefined : sender ? `us (sender ${sender})` : "us";
+};
 let routingRetry: NodeJS.Timeout | undefined;
 const ackBurst = createBurst(); // one honest line per burst of texts
 const deadlineTimers = new Map<string, NodeJS.Timeout>(); // one deadline per request; a fired entry stays so it never fires twice
@@ -266,7 +251,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
-  sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
+  sendImage?(space: string, picture: Picture, reply?: string): Promise<{ id: string } | undefined>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number): Promise<boolean>;
   react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
@@ -342,16 +327,18 @@ async function startLine(name: string): Promise<Line> {
       for await (const [, message] of app.messages) yield message;
     })(),
     find,
-    async send(space, text, reply, _guid, beforeSend) {
+    async send(space, text, reply, _guid, beforeSend, sentId) {
       const thread = await threadOf(space, reply);
       if (thread) {
         beforeSend?.();
-        await thread.reply(text);
-        return "accepted" as const;
+        const sent = await thread.reply(text);
+        if (sent?.id) sentId?.(sent.id);
+      } else {
+        const chat = await imessage(app).space.get(space);
+        beforeSend?.();
+        const sent = await chat.send(text);
+        if (sent?.id) sentId?.(sent.id);
       }
-      const chat = await imessage(app).space.get(space);
-      beforeSend?.();
-      await chat.send(text);
       return "accepted" as const;
     },
     async sendImage(space, picture, reply) {
@@ -410,6 +397,7 @@ if (env.FM_IMESSAGE_SLOT) {
     checks: standbyChecks(env, () => readDesk(track(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env })))),
   });
 } else await startups[0];
+const threadSenders = openThreadSenders(STATE);
 for (const ready of startups) void ready.then((line) => line?.activate?.()).catch((e) => console.error(`fm-imessage: could not start a transport's inbound side: ${brief(e)}`));
 memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
@@ -972,14 +960,17 @@ function routes(o: Out, i: number, maybe: Record<string, string>): Route<Bubble>
       try {
         if (stopping) throw Object.assign(new Error("bridge stopping"), { maybeSent: false });
         checkDeskDelivery(o);
+        let sentId: string | undefined;
         if (typeof bubble === "string") {
-          let sentId: string | undefined;
           const outcome = await line.send(space, bubble, reply, guid, () => checkDeskDelivery(o), (id) => { sentId = id; });
-          rememberSender(bubble, o.sender, sentId);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
-          await line.sendImage!(space, bubble, reply);
+          sentId = (await line.sendImage!(space, bubble, reply))?.id;
           trace(o.id, "transport-accepted");
+        }
+        if (sentId) {
+          try { threadSenders.remember(sentId, o.sender ?? ""); }
+          catch (error) { log("save thread sender")(error); } // the message already went out; never send it again
         }
       } catch (e) {
         if (!notSent(e)) maybe[line.name] = space;
@@ -1179,6 +1170,8 @@ function noticeRelay(origin: Routing | undefined, to: Secondmate, texts: readonl
 }
 function timeOutV2(pending: Routing[], controller: AbortController, current: () => boolean) {
   log("v2 desk")(new Error(`turn timed out after ${TURN_MAX_MS} ms`));
+  pending = pending.filter((r) => r.route === "pending");
+  if (!pending.length) { controller.abort(); return; }
   timeOutTurn(pending, controller, current, () => handoffV2(pending), (bubble) => queueAck(pending, bubble));
 }
 
@@ -1204,7 +1197,7 @@ async function runDeskV2() {
     } catch (error) {
       if (current()) {
         log("v2 desk")(error);
-        handoffV2(pending);
+        handoffV2(pending.filter((r) => r.route === "pending"));
       }
     } finally {
       turnDone();
@@ -1296,6 +1289,10 @@ const runSessionTurn = createSessionTurn<Routing>({
 
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (!current()) return;
+  if (pending.some(isThreadReply)) {
+    pending = await relayThreadReplies(pending, current);
+    if (!pending.length || !current()) return;
+  }
   if (DESK_SESSION) return runSessionTurn(pending, controller, current);
   if (muted()) return handoffV2(pending);
   if (pending.some((r) => r.mutationPath)) return handoffV2(pending);
@@ -1432,7 +1429,11 @@ function deskTypingCurrent(pending: Routing[], current: () => boolean) {
 // One classification and answer for the whole pending burst; cancellation leaves every request owned on disk.
 async function runDesk(current: () => boolean) {
   if (stopping) return;
-  const pending = pendingRoutes();
+  let pending = pendingRoutes();
+  if (pending.some(isThreadReply)) {
+    pending = await relayThreadReplies(pending, current);
+    if (stopping || !current()) return;
+  }
   if (!pending.length) return;
   if (pending.some((item) => item.mutationPath)) return handoffPending();
   const registered = secondmates(FM_HOME);
@@ -1572,6 +1573,26 @@ async function deliverToMate(item: Routing, mate: Secondmate): Promise<boolean> 
   if (handoffNote === routed) recordRoute({ ids: [item.requestId], route: "done", handoffNote });
   else if (handoffNote === undefined) recordRoute({ ids: [item.requestId], route: "handoff" });
   return handoffNote === routed;
+}
+
+// The old journal's threadMate was inferred from text. It cannot authorize a relay.
+function isThreadReply(item: Received) {
+  return item.threadTarget !== undefined || item.threadMate !== undefined;
+}
+
+async function relayThreadReplies(pending: Routing[], current: () => boolean) {
+  const mates = secondmates(FM_HOME);
+  const remaining: Routing[] = [];
+  for (const item of pending) {
+    if (!current() || stopping) break;
+    if (!isThreadReply(item)) { remaining.push(item); continue; }
+    const sender = item.threadTarget ? threadSenders.find(item.threadTarget) : undefined;
+    const mate = sender && mates.find((m) => m.home === sender || m.id === sender);
+    if (mate && DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
+      && (!DESK_V2 || deskSafe?.(item.text) === item.text)) await handoffToMate([item], mate, current);
+    else handoffV2([item]);
+  }
+  return remaining;
 }
 
 async function handoffToMate(pending: Routing[], mate: Secondmate, current: () => boolean) {
@@ -1776,7 +1797,8 @@ async function handle(line: Line, message: LineMessage) {
   if (text === undefined) return;
   const ref = refOn(line.name, message.space.id, message.id);
   const authored = authoredText(message.content);
-  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, quotedMate(message.content));
+  const target = quotedTarget(message.content);
+  receive(`${line.name}-${message.id}`, text, ref, authored === undefined || !directChat.test(ref.space), authored, target ? target.id ?? "" : undefined);
   heard(message.id, text);
   if (failed !== undefined) {
     log("download an attachment")(failed);
@@ -1800,16 +1822,16 @@ async function handle(line: Line, message: LineMessage) {
   reads.add(ref); // the text is durable in routing: it is taken in, whichever way it is answered
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();
-  if (!DESK_V2 && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
+  if (!DESK_V2 && !pending.some(isThreadReply) && pending.some((r) => r.firstmate) && (!pending.every((r) => r.mateEligible) || !secondmates(FM_HOME).length)) handoffPending();
 }
 
 // Persist the full input before marking it read or seen. A duplicate never opens another routing decision.
-function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text, threadMate?: string) {
+function receive(requestId: string, text: string, ref: Ref, firstmate: boolean, authored = text, threadTarget?: string) {
   if (routing.has(requestId)) return;
   const mateEligible = !firstmate && !supervisorOnly(authored);
   // Destructive requests, unclear approvals, and sensitive content keep the existing supervisor boundary.
   firstmate ||= /^\s*(?:please\s+)?(?:approve\b|(?:deploy|restart|stop|delete)\s+(?:the|a|an|this|that|these|those|it|them|my|our|your)\b)|^\s*(?:(?:approved|yes|ok|go ahead|proceed|ship it|do it)\b[ \t,;.!]*)+(?:$|(?:please|and|deploy|implement|fix|build|change|send|run|restart|stop|delete|approve|merge)\b)|\b(?:can|could|will|would)\s+you\s+(?:deploy|restart|stop|delete|approve)\b|\b(?:password|secret|credential|private key|api key|access token|ssn|prescription|diagnosis)\b/im.test(authored);
-  const received: Received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, ...(threadMate ? { threadMate } : {}), at: Date.now(), ...(DESK_V2 ? { loop: "v2" } : {}) };
+  const received: Received = { requestId, text, ...(authored === text ? {} : { authored }), ref, memoryId: memory.msgs.length, firstmate, mateEligible, ...(threadTarget === undefined ? {} : { threadTarget }), at: Date.now(), ...(DESK_V2 ? { loop: "v2" } : {}) };
   if (!DESK_V2) prefetchInboxStatus();
   recordRoute({ received });
   ensureRemembered(received);

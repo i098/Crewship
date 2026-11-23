@@ -24,13 +24,7 @@ function handoffWithAck<R extends TurnRequest>(host: SessionHost<R>, pending: R[
   host.handoff(pending);
 }
 
-// A thread reply to a mate's bubble goes back to that mate, with the same relay checks.
-function threadReplyMate(pending: TurnRequest[], mates: Secondmate[]) {
-  const replied = mates.find((m) => m.id === pending[0]!.threadMate);
-  return replied && pending.every((r) => r.threadMate === replied.id) ? replied : undefined;
-}
-
-export type TurnRequest = RelayRequest & { memoryId: number; route: string; threadMate?: string };
+export type TurnRequest = RelayRequest & { memoryId: number; route: string };
 
 type TurnParts<R extends TurnRequest> = { pending: R[]; current: () => boolean; actions: { run: ToolRunner; acted(): boolean } };
 
@@ -173,8 +167,6 @@ export function createSessionTurn<R extends TurnRequest>(host: SessionHost<R>) {
     if (refused(pending, original)) return host.handoff(pending);
     const safe = host.safe!;
     const mates = secondmates(host.fmHome);
-    const replied = threadReplyMate(pending, mates);
-    if (replied) return host.relay(pending.filter((r) => r.route === "pending"), replied, current); // a failed delivery stays in routing for retry
     const actions = createActions({
       requests: pending, current, muted: host.muted, mates: () => mates, safe, sent: host.sent, log: host.record,
       pane: host.pane, press: host.press, scripts: host.scripts, script: host.script, remember: host.remember,

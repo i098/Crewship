@@ -349,7 +349,14 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - `pane_prompt`, `pane_choose` and `run_script` read and answer a selection prompt on a supervisor pane and run an allowlisted script. `write_file` and `send_file` write one file to the allowed folders and send one image. See [Pane prompts and scripts](#pane-prompts-and-scripts).
 - A turn that ends with no action tool gets one reminder to use `reply`. If the model still completes in words, the bridge sends those words through the `reply` checks. Words that the checks refuse go to Firstmate. A turn that errors or aborts goes to Firstmate with no reminder. omp RPC cannot force a tool call, so the desk does not rely on one.
 - Each assistant message adds one `desk-session` line to the token log.
-- A thread reply to a bubble that a second mate sent goes back to that mate, with no model turn. `fm-imessage` sends the header `X-Fm-Sender` from `FM_MATE_ID`, else from `FM_HOME`. The bridge keeps the sender of each of the last 200 bubbles in `senders.json` in the state directory. When the transport gives the sent message an id, a reply that names that id gets that sender. Otherwise the start of the text decides, and only when every recent bubble with that start has the same sender. A desk bubble counts as a sender, so a text that a mate and the desk both sent goes to the desk. A home path or id in `data/secondmates.md` maps the sender to the mate. The same protected-topic, mute and `relayTargetCurrent` checks apply. An unknown or main sender, or two senders with the same text and no id, gives the normal desk turn.
+- A thread reply to a bubble that a second mate sent goes back to that mate without a model turn.
+  `fm-imessage` sends `X-Fm-Sender` from `FM_MATE_ID` or, if unset, `FM_HOME`.
+  The bridge stores the sender with the message ID that Photon or BlueBubbles returns in `thread-senders.sqlite` in the state directory.
+  On its first start, the bridge imports only the records with message IDs from `senders.json`.
+  The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
+  The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
+  If the bridge cannot verify the sender or cannot relay the reply, it sends the reply to Firstmate.
+  It never uses quoted text to select a mate.
 
 If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.
 
@@ -498,20 +505,32 @@ The [front](../tests/test_imessage_front.py), [dispatch](../tests/test_imessage_
 
 ## Self-healing
 
-The line repairs itself without polling or periodic texts. The code is `apps/imessage/selfheal.ts`.
+The line repairs itself without polling or periodic texts, up to the slot's retry limit.
+The code is `apps/imessage/selfheal.ts`.
 
 - **Watchdog.** The unit sets `WatchdogSec=300`. The bridge sends `WATCHDOG=1` through `systemd-notify` every 60 s, and only when `GET /health` on the bridge port answers, no desk turn has run longer than 15 minutes (`FM_IMESSAGE_TURN_DEADLINE_MS`), and the pi-natives `.node` loads. When a check fails, or the process is stopped or blocked, systemd stops the unit with SIGTERM (SIGKILL after `TimeoutStopSec`) and restarts it. The desk turn deadline is a backstop beyond the 10-minute delegate wait.
 - **Natives.** `ExecStartPre` runs `bun selfheal.ts start`, and each beat runs the same check. It loads every `.node` under `~/.omp/natives/<omp version>/` in a child process. omp 19.1 and later unpack into an `embedded-<hash>/` subfolder there; the check uses the newest one when the version folder holds no `.node`. If the file for this CPU is missing or does not load, it runs `omp --help` with a scratch `HOME`, which makes the omp binary unpack its own natives, and copies the result in with an atomic rename. It then imports `@oh-my-pi/pi-natives` the way the bridge resolves it (often the bun install cache) in a child process. If that fails, it copies the `.node` files from the sibling `pi-natives-<platform>-<arch>` package into the package's `native/` directory with an atomic rename, and probes again. When the repair cannot make it load, `ExecStartPre` exits non-zero, so systemd restarts the unit and the failure counts toward the alert.
 - **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
-- **Give-up.** After 5 starts in 10 minutes systemd stops retrying and starts `fm-imessage-heal.service`, which counts the failure, alerts if due, and starts the active slot again (`imessage-deploy.ts boot`).
+- **Give-up.** After 5 starts in 10 minutes, systemd stops retrying and starts `fm-imessage-heal.service` to count the failure and alert if due.
+  The front reports `no slot serves the line` once and stays failed.
+  Run the standard deploy after correcting the fault.
 
 To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
 
 ## Rolling deploys
 
-An install never restarts the bridge in place: a new process needs about 100 s before it listens, and a build with broken natives can start while systemd says `active`. `bun ~/.local/bin/imessage-deploy.ts` rolls the build in `<imessage dir>/stage/` out beside the running one. The Ansible role runs it as its only upgrade step; it is the only call workers and the heal unit make. The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
+An install never restarts the bridge in place: a new process needs about 100 s before it listens.
+A build with broken natives can start while systemd says `active`.
+`bun ~/.local/bin/imessage-deploy.ts` rolls out the build in `<imessage dir>/stage/` beside the running one.
+The Ansible role runs it as its only upgrade step.
+The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
 
-- **Slots.** The bridge runs as `fm-imessage@blue`, `fm-imessage@green` or `fm-imessage@legacy` (the files from before slots, kept as the rollback target of the first rolling install). The slot named in `~/.local/state/fm-imessage/active` owns the line. `fm-imessage.service` is only the front: its process starts the active slot and exits while that slot is gone, so `systemctl --user is-active fm-imessage.service` is `active` only while a slot serves the line (it reads `activating` while the front waits to restart), and stopping it stops the slots. When the front process exits on its own because the slot is gone, the slots are not stopped, so the slot unit's own restart and start limit run.
+- **Slots.** The bridge runs as `fm-imessage@blue`, `fm-imessage@green`, or `fm-imessage@legacy`.
+  The legacy slot keeps the files from before slots as the first install's rollback target.
+  The slot named in `~/.local/state/fm-imessage/active` owns the line.
+  `fm-imessage.service` starts an inactive slot and tracks it while systemd retries it.
+  Check the slot or `/health` to see if the line serves during a retry.
+  Only an explicit front stop stops the slots.
 - **Standby.** A slot that is not active starts, connects the transports and serves only `GET /ready` and `/health` on `127.0.0.1:8766` (`FM_IMESSAGE_NEXT_PORT`). It builds no memory, outbox, routing replay or inbound loop, so it can send nothing.
 - **Gate.** The deploy passes only when `/ready` answers: the pi-natives load, one real desk model call with a stub prompt gives a reply (no text is sent), and every configured transport (Photon) is connected. The checks run in order: after the first failure the later ones are skipped, so a build with broken natives makes no paid desk call. A standby slot binds no webhook port and starts no BlueBubbles polling. A failure or a dead unit stops the new slot. A slot that already owns the line (a reboot) needs only the first transport and degrades to the others. The deploy stops a target slot left running before it installs the new build. The serving slot is never touched.
 - **Handover.** The deploy writes `active`, then stops the old slot. The new slot takes the exclusive lock `owner.lock`, waits for the main port, replays routing and the durable outbox, and listens. Two outbox senders cannot run: the lock and the port each allow one owner. Outbox items keep their ids, and keyed dedupe stops a repeat. While the old slot stops, the main port answers `503 stopping` for 0.5 s, then drops or refuses connections (curl exit 52, 56 or 7). All of these mean nothing was queued, so `fm-imessage` sends the request again every second for up to 150 s (`FM_IMESSAGE_WAIT_S`). A handover or a rollback costs no text, and a retry cannot repeat one. Any other failure ends the command at once.
@@ -621,7 +640,8 @@ The memory, routing journal, desk session, background tasks, and sender record h
 Deleting only `memory/` does not erase this history; routing recovery restores missing inbound records.
 For complete erasure, first finish every pending routing request, download, and outbox delivery.
 Then stop the bridge through the normal service procedure.
-Remove `memory/`, `routing.jsonl`, `senders.json`, `desk-session/`, `desk-session.seen`, `desk-tasks/`, and completed outbox receipts in `outbox-done/` and `outbox-dead/` together.
+Remove `memory/`, `routing.jsonl`, `thread-senders.sqlite`, `senders.json`, `desk-session/`, `desk-session.seen`, and `desk-tasks/` together.
+Also remove completed outbox receipts in `outbox-done/` and `outbox-dead/`.
 This also clears local routing deduplication, so retain transport seen records and do not replay old message history.
 Never erase these files while requests or uncertain sends still need recovery.
 

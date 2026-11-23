@@ -28,6 +28,7 @@ case $cmd in
   start)
     [ "$slot" = front ] && ! [ -f "$RUN/front.legacy" ] && exit 0
     alive && exit 0
+    [ -f "$RUN/$slot.failed" ] && exit 1
     if [ "$slot" = front ]; then cd "$DIR"; else cd "$DIR/$slot"; export FM_IMESSAGE_SLOT=$slot; fi
     setsid bun bridge.ts >> "$RUN/$slot.log" 2>&1 < /dev/null &
     echo $! > "$pidf" ;;
@@ -37,11 +38,19 @@ case $cmd in
     for _ in $(seq 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
     kill -KILL "$pid" 2>/dev/null; rm -f "$pidf"; [ "$slot" = front ] && rm -f "$RUN/front.legacy"; exit 0 ;;
   is-active) alive && ! [ -f "$RUN/$slot.activating" ] ;;
-  reset-failed) ;;
+  reset-failed) rm -f "$RUN/$slot.failed" ;;
   show)
     case "$*" in
       *MainPID*) if [ "$slot" = front ] && alive; then cat "$pidf"; else echo 0; fi ;;
-      *) if [ -f "$RUN/$slot.activating" ]; then printf 'activating\nstart\n'; elif alive; then printf 'active\nrunning\n'; else printf 'inactive\ndead\n'; fi ;;
+      *)
+        if [ -f "$RUN/$slot.failed" ]; then printf 'failed\nfailed\n'
+        elif [ -f "$RUN/$slot.retry" ]; then
+          printf 'activating\nauto-restart\n'
+          if [ -f "$RUN/$slot.polled" ]; then touch "$RUN/$slot.following"; else touch "$RUN/$slot.polled"; fi
+        elif [ -f "$RUN/$slot.activating" ]; then printf 'activating\nstart\n'
+        elif alive; then printf 'active\nrunning\n'
+        else printf 'inactive\ndead\n'
+        fi ;;
     esac ;;
 esac
 """
@@ -396,6 +405,26 @@ def test_stop_all_waits_out_a_short_lock_hold_and_still_stops_the_slots(rig):
         holder.wait()
     assert result.returncode == 0, result.stderr
     assert not rig.alive("blue")
+
+
+def test_front_leaves_an_exhausted_active_slot_failed(rig):
+    (rig.state / "active").write_text("green\n")
+    retry, failed = rig.run / "green.retry", rig.run / "green.failed"
+    retry.touch()
+    with subprocess.Popen(
+        ["bun", str(ROOT / "apps/imessage/deploy.ts"), "follow"],
+        env={**rig.env, "FM_DEPLOY_FOLLOW_MS": "10"}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    ) as front:
+        try:
+            wait_for((rig.run / "green.following").exists, "the front to follow a retry after boot", timeout=4)
+            failed.touch()
+            out, _ = front.communicate(timeout=5)
+        finally:
+            if front.poll() is None:
+                front.kill()
+    assert front.returncode == 78, out
+    assert out.splitlines() == ["imessage-deploy: no slot serves the line (active: green)"]
+    assert failed.exists(), "the front must not clear the slot's systemd start limit"
 
 
 def test_a_slot_that_is_still_starting_is_waited_for_and_the_deploy_stays_gated(rig):

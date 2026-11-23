@@ -4,8 +4,7 @@
 // outbox pass, and rolls back to the old slot on any failure.
 //   imessage-deploy            roll the build in <dir>/stage out
 //   imessage-deploy needed     exit 3 when the staged build and units differ from the last deployed ones, or no slot is recorded
-//   imessage-deploy boot       start the active slot if it is down
-//   imessage-deploy follow     the front unit's process: boot, then exit while the active slot is gone, so is-active tells the truth
+//   imessage-deploy follow     the front unit's process: boot, then follow the slot until it stops or exhausts its retries
 //   imessage-deploy stop-all   stop every slot unless a deploy is running (the front unit's ExecStop)
 // Env: FM_IMESSAGE_DIR (required), STATE_DIRECTORY, FM_IMESSAGE_PORT (8765), FM_IMESSAGE_NEXT_PORT (8766),
 // FM_DEPLOY_SYSTEMCTL (systemctl).
@@ -137,6 +136,7 @@ async function deploy() {
   const target = cur === "blue" ? "green" : "blue";
   if (cur === "legacy") snapshotLegacy();
   await sc("stop", unit(target));
+  await sc("reset-failed", unit(target));
   install(target);
   say(`staged ${target}; serving slot: ${live ? cur : "none"}`);
 
@@ -203,19 +203,27 @@ async function follow() {
     await Bun.sleep(Number(env.FM_DEPLOY_FOLLOW_MS || 5000));
     const lock = await holdLock(`${STATE}/deploy.lock`, 0);
     if (!lock) continue; // a deploy is moving the line
-    lock.release();
-    const slot = readActive(STATE);
-    if (!slot || (await gone(unit(slot)))) throw new Error(`no slot serves the line (active: ${slot ?? "none"})`);
+    try {
+      const slot = readActive(STATE);
+      const state = slot ? await slotState(slot) : "";
+      if (!state || state === "failed" || state === "inactive") {
+        say(`no slot serves the line (active: ${slot ?? "none"})`);
+        return 78; // the front unit does not restart after a terminal slot failure
+      }
+    } finally { lock.release(); }
   }
+}
+
+async function slotState(slot: string) {
+  const { code, out } = await sc("show", unit(slot), "-p", "ActiveState", "--value");
+  if (code !== 0) throw new Error(`cannot read ${unit(slot)} state (systemctl exit ${code})`);
+  return out.split("\n", 1)[0];
 }
 
 async function boot() {
   const slot = readActive(STATE);
   if (!slot) return;
-  const state = (await sc("show", unit(slot), "-p", "ActiveState", "--value")).out.split("\n")[0];
-  if (state !== "failed" && state !== "inactive") return;
-  if (state === "failed") await sc("reset-failed", unit(slot));
-  await sc("start", unit(slot));
+  if (await slotState(slot) === "inactive") await sc("start", unit(slot));
 }
 
 async function stopAll() {
@@ -226,9 +234,8 @@ async function stopAll() {
 }
 
 const mode = process.argv[2];
-if (mode === "boot") await boot();
-else if (mode === "follow") await follow().catch((e) => { say(e.message); process.exit(1); });
+if (mode === "follow") process.exit(await follow().catch((e) => { say(e.message); return 1; }));
 else if (mode === "needed") await needed();
 else if (mode === "stop-all") await stopAll();
 else if (mode === undefined) await deploy().then(() => process.exit(0), (e) => { say(`FAILED: ${e instanceof Error ? e.message : e}`); process.exit(1); });
-else throw new Error("usage: imessage-deploy [needed|boot|follow|stop-all]");
+else throw new Error("usage: imessage-deploy [needed|follow|stop-all]");

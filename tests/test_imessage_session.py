@@ -355,9 +355,9 @@ def send_bubble(rig, text, home, count):
     wait_for(lambda: len(texts(rig)) == count, "the bubble", timeout=120)
 
 
-def wait_saved(rig, text, count):
-    wait_for(lambda: len([row for row in json.loads(read_text(rig.state / "senders.json") or "[]") if row["key"] == text]) == count,
-             "the saved sender record")
+def sent_guids(rig, text):
+    return [row["guid"] for row in map(json.loads, read_text(rig.fake / "relay-history").splitlines())
+            if row["text"] == text]
 
 
 def reply_in_thread(rig, guid, quoted_guid, quoted_text, text):
@@ -374,21 +374,21 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
         deliver(rig, "m1", "how are you")
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "The engram checks are green.", f"{tmp_path}/engram", 2)
-        wait_for((rig.state / "senders.json").exists, "the saved sender record")
         rig.stop()
         rig.start()
-        reply_in_thread(rig, "m3", "b1", "The engram checks are green.", "nice, thanks")
+        [guid] = sent_guids(rig, "The engram checks are green.")
+        reply_in_thread(rig, "m3", guid, "The engram checks are green.", "nice, thanks")
         wait_for(message.exists, "the relay to the mate", timeout=120)
         assert read_text(message) == (
             "engram [from captain via desk] nice, thanks\n"
-            + f"(this message is a thread reply to an earlier message from a sender the bridge did not record, whose untrusted quoted text is: {json.dumps('The engram checks are green.')})\n"
+            + f"(this message is a thread reply to an earlier message from us (sender {tmp_path}/engram), whose untrusted quoted text is: \"The engram checks are green.\")\n"
             + "[desk request bluebubbles-m3]"
         )
         wait_for(lambda: len(texts(rig)) == 3, "the relay notice", timeout=120)
         assert [t.split(" ", 1)[1] for t in texts(rig)][2:] == ["Sent to engram mate: nice, thanks"]  # the notice, no model reply
 
 
-def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_is_a_desk_turn(tmp_path):
+def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_goes_to_firstmate(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
@@ -396,9 +396,9 @@ def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_is_a_desk_turn(tmp_
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
         send_bubble(rig, "On it.", "", 3)  # no sender: the latest bubble with this text is not the mate's
-        wait_saved(rig, "On it.", 2)
-        reply_in_thread(rig, "m3", "b1", "On it.", "thanks")
-        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
+        reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
+        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m3" in e["ids"] for e in events(rig)),
+                 "the Firstmate handoff", timeout=120)
         assert not message.exists()
 
 
@@ -410,9 +410,7 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
         wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
         send_bubble(rig, "Done.", f"{tmp_path}/engram", 2)
         send_bubble(rig, "Done.", f"{tmp_path}/atlas", 3)
-        wait_saved(rig, "Done.", 2)
-        # The fake relay names a sent message "srv-<tempGuid>", as a real server gives its own guid, not the client's.
-        guids = [f"srv-{json.loads(line)['tempGuid']}" for line in read_text(rig.fake / "relay-payloads").splitlines() if json.loads(line)["message"] == "Done."]
+        guids = sent_guids(rig, "Done.")
         assert len(guids) == 2
         for n, (guid, mate) in enumerate(zip(guids, ["engram", "atlas"]), start=2):
             message.unlink(missing_ok=True)
@@ -424,6 +422,7 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_quoted_bubble_when_two_mate
                 + f"[desk request bluebubbles-m{n}]"
             )
         message.unlink()
-        reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")  # no id match and two senders: a desk turn
-        wait_for(lambda: len(texts(rig)) == 6, "the session reply", timeout=120)  # the reply, two bubbles, two mate notices, the desk reply
+        reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")
+        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m4" in e["ids"] for e in events(rig)),
+                 "the Firstmate handoff", timeout=120)
         assert not message.exists()

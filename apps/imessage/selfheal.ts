@@ -170,16 +170,13 @@ export async function onStart(env: Env = process.env) {
   }
 }
 
-// OnFailure: systemd gave up on the unit (start limit). Count it, alert if due, and start the unit again.
-export async function onFailed(env: Env = process.env) {
+// OnFailure: count the exhausted retry budget and alert without resetting the slot's start limit.
+async function onFailed(env: Env = process.env) {
   const state = loadState(env);
   state.fails++;
   state.pending = false;
   saveState(env, state);
   await alertIfNeeded(env, state);
-  const unit = env.FM_IMESSAGE_UNIT || "fm-imessage.service";
-  await run(["systemctl", "--user", "reset-failed", unit], env);
-  await run(["systemctl", "--user", "start", "--no-block", unit], env);
 }
 
 // The watchdog heartbeat. Does nothing without WatchdogSec= (systemd sets WATCHDOG_USEC), so a hand run is unaffected.

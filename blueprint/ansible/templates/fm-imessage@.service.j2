@@ -9,8 +9,7 @@
 [Unit]
 Description=iMessage bridge slot %i between the owner and Firstmate (Crewship managed)
 After=network-online.target
-# Self-healing (docs/imessage.md#self-healing): when systemd gives up on the bridge, the heal unit counts it, alerts on the second
-# failure in a row, and starts the bridge again.
+# The heal unit reports the failure after the slot exhausts this retry budget.
 OnFailure=fm-imessage-heal.service
 StartLimitIntervalSec=600
 StartLimitBurst=5
