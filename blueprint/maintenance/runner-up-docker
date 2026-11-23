@@ -22,20 +22,22 @@ case "${1-}" in
 check-dind-host)
   check_dind_host
   exit 0 ;;
-check-dind-runtime)
-  read -r dind_image < "$dind_image_file"
-  [ -n "$dind_image" ] || exit 125
-  RUNNER_UP_BUILD_GATE= exec timeout --kill-after=10s 90s "$0" run --rm \
-    --entrypoint /home/runner/run.sh "$dind_image" --check-dind-runtime ;;
-run)
-  shift
+run|check-dind-runtime)
+  probe=
   network=
-  if [ -f "$dind_image_file" ]; then
-    read -r dind_image < "$dind_image_file"
+  if [ "$1" = check-dind-runtime ]; then
+    probe=${2:?Specify the image to probe}
+    dind_image=$probe
+    set -- --rm --entrypoint /home/runner/run.sh "$probe" --check-dind-runtime
+  else
+    shift
+    if [ -f "$dind_image_file" ]; then
+      read -r dind_image < "$dind_image_file"
+    fi
   fi
   for arg do
     [ -n "$dind_image" ] && [ "$arg" = "$dind_image" ] || continue
-    if [ -n "${RUNNER_UP_BUILD_GATE-}" ]; then
+    if [ -z "$probe" ] && [ -n "${RUNNER_UP_BUILD_GATE-}" ]; then
       gate=$RUNNER_UP_BUILD_GATE
       RUNNER_UP_BUILD_GATE= exec "$gate" "$0" run "$@"
     fi

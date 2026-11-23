@@ -125,8 +125,9 @@ The coordinator's start builds it when it is missing.
 `runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
 Managed apply checks the same runtime before it publishes the config.
-With `start_services: false`, apply leaves a live coordinator's config unchanged if the new config includes Docker-in-Docker places.
-The runner-up image timer refreshes the derived image even if the CI pool owns the base image.
+With `start_services: false`, apply does not replace an existing config with one that includes Docker-in-Docker places.
+Run a managed apply to publish those changes.
+The runner-up image timer tests the new derived image before it replaces the image that jobs use.
 
 ## Cut over one repository
 

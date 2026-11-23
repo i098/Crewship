@@ -66,14 +66,14 @@ crewship_runner_up_dind_dockerfile: "{{ crewship_runner_up_dir }}/runner-up-dind
 crewship_runner_up_config_dir: "{{ crewship_cfg.home }}/.config/runner-up"
 # One coordinator for each repository: a runner-up pool is global to its coordinator, so one
 # coordinator for every repository would open a scale set in each repository for every label.
-crewship_runner_up_repo_names: "{{ crewship_runner_up_repos | map(attribute='repo') | unique | list }}"
+crewship_runner_up_repo_names: "{{ crewship_runner_up_repos | map(attribute='repo') | map('lower') | unique | list }}"
 # The instance name of a repository: its name with every run of other characters turned to a dash.
 crewship_runner_up_instances: >-
-  {{ crewship_runner_up_repo_names | map('lower') | map('regex_replace', '[^a-z0-9]+', '-')
+  {{ crewship_runner_up_repo_names | map('regex_replace', '[^a-z0-9]+', '-')
      | map('regex_replace', '^-|-$', '') | list }}
 # Extra machines join one coordinator, because a machine's budget is not shared between coordinators.
 crewship_runner_up_machines_repo: >-
-  {{ crewship_runner_up.machines_repo | default(crewship_runner_up_repo_names | first | default(''), true) }}
+  {{ crewship_runner_up.machines_repo | default(crewship_runner_up_repo_names | first | default(''), true) | lower }}
 crewship_runner_up_maintain: "{{ crewship_local_bin }}/runner-up-maintain"
 crewship_runner_up_build_gate_bin: "{{ crewship_local_bin }}/build-gate"
 # Opt in: jobs start only when the host-wide build gate has a free slot (docs/runner-up.md#build-gate).
@@ -92,7 +92,7 @@ crewship_runner_up_build_image: >-
   {{ crewship_cfg.ci_pool is not defined
      or (crewship_cfg.ci_pool.image | default('crewship-ci-runner:latest')) != 'crewship-ci-runner:latest'
      or crewship_runner_up_image != 'crewship-ci-runner:latest' }}
-crewship_runner_up_dind_repos: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | map(attribute='repo') | unique | list }}"
+crewship_runner_up_dind_repos: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | map(attribute='repo') | map('lower') | unique | list }}"
 crewship_runner_up_dind: "{{ crewship_runner_up_dind_repos | length > 0 }}"
 crewship_runner_up_image_timer: "{{ (crewship_runner_up_build_image | bool) or (crewship_runner_up_dind | bool) }}"
 crewship_runner_up_units: [runner-up@.service, runner-up-clean.service, runner-up-clean.timer,

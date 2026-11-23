@@ -88,8 +88,8 @@ jobs:
         id: smoke
         run: |
           test "$RUNNER_ENVIRONMENT" = self-hosted
-          case "$RUNNER_NAME" in runner-up-?*) ;; *) exit 1 ;; esac
-          printf 'place=%s\n' "$RUNNER_NAME" >> "$GITHUB_OUTPUT"
+          [[ "$RUNNER_NAME" =~ ^runner-up-(.+)-[0-9]+$ ]]
+          printf 'place=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           sh tests/runner-up-dind-smoke.sh
 
   docker-in-docker-isolation:
@@ -104,7 +104,8 @@ jobs:
         run: |
           test "$RUNNER_ENVIRONMENT" = self-hosted
           test -n "$FIRST_PLACE"
-          test "$RUNNER_NAME" = "$FIRST_PLACE"
+          [[ "$RUNNER_NAME" =~ ^runner-up-(.+)-[0-9]+$ ]]
+          test "${BASH_REMATCH[1]}" = "$FIRST_PLACE"
           daemon=$(docker info --format '{{.ID}}')
           containers=$(docker ps -aq)
           test -n "$FIRST_DAEMON_ID"

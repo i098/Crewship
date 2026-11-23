@@ -4,19 +4,21 @@
     is not a reserved one becomes a pool that only that entry's places serve. The coordinator applies an edit
     of this file by itself, so a change here needs no restart. -#}
 {% set all_slots = crewship_runner_up_repos | map(attribute='slots') | sum %}
-{% set repo_slots = crewship_runner_up_repos | selectattr('repo', 'equalto', crewship_runner_up_repo) | map(attribute='slots') | sum %}
+{% set repo_entries = [] %}
+{% for entry in crewship_runner_up_repos if entry.repo | lower == crewship_runner_up_repo %}
+{%   set _ = repo_entries.append(entry) %}
+{% endfor %}
+{% set repo_slots = repo_entries | map(attribute='slots') | sum %}
 {% set total = [1, crewship_runner_up_total_slots | int * repo_slots // all_slots] | max %}
 {% set cpus = crewship_runner_up_job_cpus | int %}
 {% set memory = crewship_runner_up_job_memory_gb | int * 1024 %}
-{% set repos = [] %}
 {% set pools = [] %}
 {% set pool_labels = [] %}
 {% set remote_pools = [] %}
 {% set places = [] %}
-{% for entry in crewship_runner_up_repos | selectattr('repo', 'equalto', crewship_runner_up_repo) | list %}
+{% for entry in repo_entries %}
 {%   set slug = entry.name | default(entry.repo | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-|-$', ''), true) %}
 {%   set entry_pools = [] %}
-{%   if entry.repo not in repos %}{% set _ = repos.append(entry.repo) %}{% endif %}
 {%   for label in entry.labels if label | lower not in crewship_runner_up_reserved_labels %}
 {%     set _ = entry_pools.append(label) %}
 {%     if label not in pool_labels %}{% set _ = pool_labels.append(label) %}{% set _ = pools.append({'label': label}) %}{% endif %}
@@ -42,7 +44,7 @@
                              | combine({'agent': machine.agent} if machine.agent is defined else {})) %}
 {% endfor %}
 {{ {'stateDir': crewship_runner_up_state_dir ~ '/' ~ crewship_runner_up_instance,
-    'github': {'repos': repos},
+    'github': {'repos': [crewship_runner_up_repo]},
     'pools': pools,
     'machines': machines,
     'logKeepDays': crewship_runner_up_log_keep_days | int} | to_nice_json }}

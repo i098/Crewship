@@ -17,6 +17,7 @@ dind_recipe=${RUNNER_UP_DIND_DOCKERFILE-}
 dind_image=${RUNNER_UP_DIND_IMAGE-}
 have_image() { docker image inspect "$1" >/dev/null 2>&1; }
 have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
+probe_dind() { timeout --kill-after=10s 90s docker check-dind-runtime "$1"; }
 
 case "${1-}" in
 start)
@@ -32,28 +33,37 @@ print(any(place.get("provider") == "docker" and place.get("image") == sys.argv[2
           for place in machine["places"]))
 ' "$2" "$dind_image")
     if [ "$needs_dind" = True ]; then
-      "$0" image --ensure
-      exec docker check-dind-runtime
+      exec "$0" image --ensure
     fi
   fi
   unset RUNNER_UP_DIND_DOCKERFILE
   exec "$0" image --ensure ;;
 image)
   [ -z "$dind_recipe" ] || : "${dind_image:?Set RUNNER_UP_DIND_IMAGE}"
-  [ "${2-}" = --ensure ] && have_images && exit 0
+  if [ "${2-}" = --ensure ] && have_images; then
+    [ -z "$dind_recipe" ] || probe_dind "$dind_image"
+    exit 0
+  fi
   : "${RUNNER_UP_DOCKERFILE:?}"
   exec 9>"$lock"
   flock 9
   # Another start may have built it while this one waited for the lock.
-  [ "${2-}" = --ensure ] && have_images && exit 0
+  if [ "${2-}" = --ensure ] && have_images; then
+    [ -z "$dind_recipe" ] || probe_dind "$dind_image"
+    exit 0
+  fi
   # The CI pool refreshes the base image when both systems run on this host.
   if { [ "${2-}" != --ensure ] && [ "${RUNNER_UP_REFRESH_BASE:-1}" = 1 ]; } || ! have_image "$image"; then
     docker build --pull --quiet --rm --force-rm --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
       <"$RUNNER_UP_DOCKERFILE" >/dev/null
   fi
   if [ -n "$dind_recipe" ]; then
-    docker build --quiet --rm --force-rm --build-arg "BASE_IMAGE=$image" --tag "$dind_image" - \
+    candidate="$dind_image-candidate"
+    trap 'docker image rm "$candidate" >/dev/null 2>&1 || :' EXIT
+    docker build --quiet --rm --force-rm --build-arg "BASE_IMAGE=$image" --tag "$candidate" - \
       <"$dind_recipe" >/dev/null
+    probe_dind "$candidate"
+    docker tag "$candidate" "$dind_image"
     printf '%s\n' 'Built the runner-up Docker-in-Docker image.'
   fi
   # The untagged layers of the previous build; images that a container uses stay.

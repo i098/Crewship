@@ -131,59 +131,26 @@
             RUNNER_UP_DIND_IMAGE: "{{ crewship_runner_up_dind_image }}"
             RUNNER_UP_DIND_DOCKERFILE: "{{ crewship_runner_up_dind_dockerfile }}"
             RUNNER_UP_SLICE: "{{ crewship_runner_up_slice }}"
+            XDG_RUNTIME_DIR: "{{ crewship_user_runtime_dir }}"
           register: crewship_runner_up_dind_build
           changed_when: "'Built the runner-up Docker-in-Docker image.' in crewship_runner_up_dind_build.stdout"
-        - name: Run the Docker-in-Docker image in the capped Sysbox runtime
-          ansible.builtin.command:
-            argv: ["{{ crewship_runner_up_shim_dir }}/docker", check-dind-runtime]
-          environment:
-            RUNNER_UP_SLICE: "{{ crewship_runner_up_slice }}"
-          changed_when: false
 
     - name: Check that each repository has its own instance name
       ansible.builtin.assert:
         that: crewship_runner_up_instances | unique | length == crewship_runner_up_instances | length
         fail_msg: Two repositories map to one runner-up instance name
 
-    - name: Check for a user manager during deferred apply
-      ansible.builtin.stat:
-        path: "{{ crewship_user_runtime_dir }}/systemd/private"
-      register: crewship_runner_up_manager
-      when:
-        - crewship_runner_up_dind | bool
-        - not crewship_manage_services | bool
-
-    - name: Find live coordinators that must keep their config during deferred apply
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - --user
-          - list-units
-          - --all
-          - --plain
-          - --no-legend
-          - --state=active,activating,reloading,deactivating,refreshing
-          - "runner-up@*.service"
-      environment: "{{ crewship_user_systemd_env }}"
-      register: crewship_runner_up_live
-      check_mode: false
-      changed_when: false
-      when: crewship_runner_up_manager.stat.issock | default(false)
-
     - name: Write the runner-up config of each repository
       ansible.builtin.template:
         src: runner-up.config.json.j2
         dest: "{{ crewship_runner_up_config_dir }}/{{ item.1 }}.json"
         mode: "0644"
+        force: "{{ (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos }}"
         validate: "{{ crewship_runner_up_check }}"
       vars:
         crewship_runner_up_repo: "{{ item.0 }}"
         crewship_runner_up_instance: "{{ item.1 }}"
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
-      when: >-
-        item.0 not in crewship_runner_up_dind_repos or
-        ('runner-up@' ~ item.1 ~ '.service') not in
-        (crewship_runner_up_live.stdout_lines | default([]) | map('split') | map('first') | list)
 
     - name: Stop and disable the single coordinator of the earlier layout
       ansible.builtin.systemd_service:
