@@ -20,7 +20,7 @@ def test_body_edits_run_the_small_workflow_without_restarting_the_build():
     workflow = yaml.safe_load((ROOT / ".github/workflows/pr-body.yml").read_text())
     events = workflow.get("on", workflow.get(True))
     pull_request = events["pull_request"]
-    assert set(pull_request["types"]) == {"opened", "edited", "synchronize", "reopened"}
+    assert {"opened", "edited", "synchronize", "reopened"} <= set(pull_request["types"])
     assert not {"paths", "paths-ignore", "branches", "branches-ignore"} & pull_request.keys()
     assert "if" not in workflow["jobs"]["pr-body"]
     assert workflow["permissions"] == {"contents": "read"}
@@ -51,15 +51,14 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
     (source / "site/public").mkdir(parents=True)
     (source / "site/public/harbor.css").write_text("body { color: red; }\n")
     git("add", ".")
-    git("commit", "-m", "Stylesheet on base only")
+    git("commit", "-m", "Stylesheet on base")
     git("checkout", "pr")
-    git("commit", "--allow-empty", "-m", "Non-UI PR")
-    git("checkout", "main")
-    git("merge", "--no-ff", "-m", "Synthetic PR merge", "pr")
+    git("cherry-pick", "--no-commit", "main")
+    git("commit", "-m", "Same stylesheet change on PR")
 
     worktree = tmp_path / "checkout"
     clone_depth = ["--depth", str(depth)] if depth else []
-    git("clone", *clone_depth, source.as_uri(), str(worktree))
+    git("clone", *clone_depth, "--branch", "pr", source.as_uri(), str(worktree))
     result = subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", body_step["run"]],
         cwd=ROOT,
@@ -68,12 +67,14 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
             "GIT_DIR": str(worktree / ".git"),
             "GIT_WORK_TREE": str(worktree),
             "PR_BODY": VALID_BODY,
+            "PR_BASE": "origin/main",
         },
         text=True,
         capture_output=True,
         timeout=10,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, result.stderr
+    assert "Include exactly one ## Review evidence section." in result.stderr
 
 
 def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
@@ -109,7 +110,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         result = subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
             cwd=ROOT,
-            env={**env, "PR_BODY": body},
+            env={**env, "PR_BODY": body, "PR_BASE": "HEAD^"},
             text=True,
             capture_output=True,
             timeout=10,

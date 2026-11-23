@@ -21,7 +21,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 2
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
       - name: Test the body checker
         run: python3 -m unittest discover -s tests -p test_pr_body.py
@@ -29,4 +30,5 @@ jobs:
       - name: Check the pull request body
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py --base HEAD^1
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py --base "$PR_BASE"

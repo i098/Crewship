@@ -12,6 +12,7 @@ Use each row that applies to your change.
 
 1. For the screenshot row, capture the same view with the same input on the base and head revisions.
    For a new view, capture only the head revision.
+   For a removed view, capture what users now see at the old URL for the After image.
    Remove secrets and private data before you upload anything.
    Use synthetic input or redact live costs, quota balances, and plan names before uploading public screenshots or recordings.
 2. [Attach screenshots and recordings to the PR on GitHub](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files).
