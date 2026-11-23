@@ -12,7 +12,8 @@ Do not use stored credentials.
 
 ## Direct file URL: aria2c
 
-Use only direct HTTP, HTTPS, or FTP URLs.
+Pass one direct HTTP, HTTPS, or FTP URL per call and use only trusted origins.
+aria2 can follow mirrors from HTTP `Link` headers on new downloads and resumes.
 Run `command -v aria2c`. Install commands for the user: `sudo apt install aria2` (Debian/Ubuntu) or `brew install aria2` (macOS).
 Set `DOWNLOAD_DIR` and `FILE_NAME` to an unused destination for each new resource.
 
@@ -43,19 +44,25 @@ Check `deno --version` for Deno 2.3.0 or later, which yt-dlp enables by default.
 For Node 22 or later, check `node --version` and add `--js-runtimes node` before `--`.
 Refer the user to the [yt-dlp EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) if any YouTube prerequisite is missing.
 
+Check unfamiliar pages before any media action: `yt-dlp --ignore-config --no-playlist --flat-playlist --simulate --dump-single-json -- "$VIDEO_URL"`.
+If the result has multiple entries, use the requested video's individual URL and check it again.
+Set `DOWNLOAD_DIR` to an unused output directory for each distinct media resource.
+
 ```bash
 yt-dlp --ignore-config --no-playlist -F -- "$VIDEO_URL"  # List formats
-yt-dlp --ignore-config --no-playlist \
+yt-dlp --ignore-config --no-playlist -P "$DOWNLOAD_DIR" \
   -o '%(title)s [%(id)s] [%(format_id)s].%(ext)s' -- "$VIDEO_URL"
-yt-dlp --ignore-config --no-playlist -x \
+yt-dlp --ignore-config --no-playlist -P "$DOWNLOAD_DIR" -x \
   -o '%(title)s [%(id)s] [%(format_id)s] audio.%(ext)s' -- "$VIDEO_URL"
-yt-dlp --ignore-config --no-playlist --download-sections '*00:01:10-00:01:30' \
+yt-dlp --ignore-config --no-playlist -P "$DOWNLOAD_DIR" --download-sections '*00:01:10-00:01:30' \
   -o '%(title)s [%(id)s] [%(format_id)s] %(section_start)s-%(section_end)s.%(ext)s' -- "$VIDEO_URL"
 ```
 
 Use the default format selection unless the user requests a specific quality or format.
 Add `-f FORMAT_ID` before `--` to select a format from the list.
-Check `command -v ffmpeg && command -v ffprobe` before merging streams, extracting audio, or cutting a clip.
+For a video or clip with sound, select a combined format or pair separate streams with `-f VIDEO_ID+AUDIO_ID`.
+For audio extraction, select a format that contains audio.
+Check `command -v ffmpeg` before merging streams, extracting audio, or cutting a clip.
 Install commands for the user: `sudo apt install ffmpeg` (Debian/Ubuntu) or `brew install ffmpeg` (macOS).
 
 The default cut is approximate because it can start before the requested time.
