@@ -268,8 +268,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     if (id && match && !match.ambiguous) match.record?.(id);
   }
 
-  async sent(chat: string, text: string, since: number, tempGuid?: string, sentId?: (id: string) => void): Promise<boolean> {
-    if (tempGuid && sentId && !this.sendMatches.has(tempGuid)) this.trackSend(tempGuid, chat, text, since, sentId);
+  async sent(chat: string, text: string, since: number): Promise<boolean> {
     let asked = false;
     for (const r of new Set([...this.suspects, ...(await this.healthy())])) {
       try {

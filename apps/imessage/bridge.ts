@@ -255,7 +255,7 @@ type Line = {
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
-  sent?(space: string, text: string, since: number, guid: string, sentId: (id: string) => void): Promise<boolean>;
+  sent?(space: string, text: string, since: number): Promise<boolean>;
   react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
@@ -286,7 +286,7 @@ async function startLine(name: string): Promise<Line> {
       messages: bb,
       find: (ref) => bb.message(ref.id),
       send: (space, text, reply, guid, beforeSend, sentId) => bb.send(space, text, reply, guid, beforeSend, sentId),
-      sent: (space, text, since, guid, sentId) => bb.sent(space, text, since, guid, sentId),
+      sent: (space, text, since) => bb.sent(space, text, since),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
       react: (ref, emoji, beforeSend) => bb.react(ref.space, ref.id, emoji, beforeSend),
@@ -893,7 +893,7 @@ function webSend(text: string): boolean {
   return true;
 }
 
-async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble, guid: string, sentId: (id: string) => void) {
+async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble) {
   const maybe: Record<string, string> = {};
   for (const [name, space] of Object.entries(attempts)) {
     if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
@@ -904,7 +904,7 @@ async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble:
       continue;
     }
     try {
-      if (!await line.sent(space, bubble, o.since ?? 0, guid, sentId)) continue;
+      if (!await line.sent(space, bubble, o.since ?? 0)) continue;
       trace(o.id, "history-reconciled");
       return;
     } catch (e) {
@@ -922,7 +922,7 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     try { threadSenders.remember(id, sender); }
     catch (error) { log("save thread sender")(error); }
   };
-  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble, guid, sentId) : {};
+  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble) : {};
   if (!maybe) return;
   if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   checkDeskDelivery(o);

@@ -355,14 +355,14 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   This includes photo captions, but not the photos themselves.
   If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
   The bridge skips attribution if another unresolved send to the same chat has the same normalized text within ten seconds.
-  A history match by text can prevent a duplicate send, but cannot identify the sender.
+  A history match by text can prevent a duplicate send, but cannot register a sender match.
   The store retains up to 5,000 entries for 30 days and prunes them on write.
   The bridge removes `senders.json` without importing its entries because they have no individual timestamps.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
   The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
   Replies to known desk, Firstmate, or owner messages keep the normal desk turn.
   If the bridge cannot verify the sender or cannot relay the reply, it sends the reply to Firstmate.
-  This includes replies to older Photon messages that have no stored message ID.
+  This includes older Photon messages without a stored ID and BlueBubbles messages whose match the bridge missed during restart.
   It never uses quoted text to select a mate.
 
 If the missed chat since the last session turn is longer than 8,000 characters, the session gets the newest lines and drops the oldest.

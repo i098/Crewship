@@ -55,7 +55,7 @@ test("a send without a reply target is not threaded", async () => {
 });
 
 for (const retry of ["relay", "outbox"]) {
-  test(`the ${retry} retry records only the relay's exact send match`, async () => {
+  test(`the ${retry} retry deduplicates delivery without creating a sender match`, async () => {
     const chat = "iMessage;-;+15550000000";
     const tempGuid = crypto.randomUUID();
     const history = [
@@ -90,7 +90,7 @@ for (const retry of ["relay", "outbox"]) {
     } else {
       await expect(bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).rejects.toThrow();
       receiving = new BlueBubbles([relay], dir, {}, () => {});
-      expect(await receiving.sent(chat, "Done.", Date.now(), tempGuid, record)).toBe(true);
+      expect(await receiving.sent(chat, "Done.", Date.now())).toBe(true);
     }
     expect(posts).toBe(1);
     expect(recorded).toEqual([]);
@@ -100,7 +100,7 @@ for (const retry of ["relay", "outbox"]) {
         body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: match, guid } }),
       }));
     }
-    expect(recorded).toEqual(["sent-by-relay"]);
+    expect(recorded).toEqual(retry === "relay" ? ["sent-by-relay"] : []);
   });
 }
 
@@ -148,7 +148,7 @@ test("ambiguous relay matches record no sender through either response path", as
   const secondGuid = crypto.randomUUID();
   try {
     expect(await bb.send(chat, "Done?", undefined, secondGuid, undefined, record)).toBe("accepted");
-    expect(await bb.sent(chat, "Done!", Date.now(), firstGuid, record)).toBe(true);
+    expect(await bb.sent(chat, "Done!", Date.now())).toBe(true);
     await bb.webhook(new Request("http://localhost/bluebubbles", {
       method: "POST",
       body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: firstGuid, guid: bubble.guid } }),
