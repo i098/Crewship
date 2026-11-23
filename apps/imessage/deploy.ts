@@ -223,7 +223,9 @@ async function slotState(slot: string) {
 async function boot() {
   const slot = readActive(STATE);
   if (!slot) return;
-  if (await slotState(slot) === "inactive") await sc("start", unit(slot));
+  const state = await slotState(slot);
+  if (state === "failed") await sc("reset-failed", unit(slot));
+  if (state === "failed" || state === "inactive") await sc("start", unit(slot));
 }
 
 async function stopAll() {

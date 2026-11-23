@@ -1,8 +1,8 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sendOnce } from "./outbox.ts";
-import { alreadySent, logSend } from "./sender-log.ts";
+import { alreadySent, logSend, openThreadSenders } from "./sender-log.ts";
 
 const dir = mkdtempSync(`${tmpdir()}/sender-log-`);
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -53,4 +53,16 @@ test("a photo caption is deduped under its key; a bare photo always sends", () =
   expect(dups).toEqual([true]);
   expect(sendOnce(dir, { key: "pic", text: "" }, () => (sends++, new Response("queued"))).status).toBe(200);
   expect(sends).toBe(1);
+});
+
+test("thread senders import old message IDs once and ignore text-only records", () => {
+  const legacy = `${dir}/senders.json`;
+  writeFileSync(legacy, JSON.stringify([{ id: "sent", sender: "render" }, { key: "same quote", sender: "stars" }]));
+  const first = openThreadSenders(dir);
+  expect(first.find("sent")).toBe("render");
+  expect(first.find("same quote")).toBeUndefined();
+  writeFileSync(legacy, JSON.stringify([{ id: "old-slot", sender: "stars" }]));
+  const next = openThreadSenders(dir);
+  expect(next.find("sent")).toBe("render");
+  expect(next.find("old-slot")).toBeUndefined();
 });

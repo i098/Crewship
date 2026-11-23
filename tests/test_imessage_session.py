@@ -388,7 +388,7 @@ def test_thread_reply_to_a_mates_bubble_goes_to_that_mate_even_after_a_restart(t
         assert [t.split(" ", 1)[1] for t in texts(rig)][2:] == ["Sent to engram mate: nice, thanks"]  # the notice, no model reply
 
 
-def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_goes_to_firstmate(tmp_path):
+def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_stays_with_the_desk(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
@@ -397,8 +397,7 @@ def test_thread_reply_to_a_desk_bubble_with_a_mates_old_text_goes_to_firstmate(t
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
         send_bubble(rig, "On it.", "", 3)  # no sender: the latest bubble with this text is not the mate's
         reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
-        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m3" in e["ids"] for e in events(rig)),
-                 "the Firstmate handoff", timeout=120)
+        wait_for(lambda: len(texts(rig)) == 4, "the session reply", timeout=120)
         assert not message.exists()
 
 

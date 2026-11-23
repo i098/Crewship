@@ -355,6 +355,7 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   On its first start, the bridge imports only the records with message IDs from `senders.json`.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
   The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
+  Replies to known desk, Firstmate, or owner messages keep the normal desk turn.
   If the bridge cannot verify the sender or cannot relay the reply, it sends the reply to Firstmate.
   It never uses quoted text to select a mate.
 
@@ -513,7 +514,7 @@ The code is `apps/imessage/selfheal.ts`.
 - **Alert.** `~/.local/state/fm-imessage/selfheal.json` counts failed heals. A start that never reached a healthy beat counts, and so does a failed natives repair or an `OnFailure=` give-up. A healthy beat clears the count. The second failure in a row sends one text with `fm-imessage` if the line answers, else appends one `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`). It alerts once per failure run.
 - **Give-up.** After 5 starts in 10 minutes, systemd stops retrying and starts `fm-imessage-heal.service` to count the failure and alert if due.
   The front reports `no slot serves the line` once and stays failed.
-  Run the standard deploy after correcting the fault.
+  After correcting the fault, run `systemctl --user start fm-imessage.service` to start the active slot again.
 
 To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
 
@@ -528,7 +529,7 @@ The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
 - **Slots.** The bridge runs as `fm-imessage@blue`, `fm-imessage@green`, or `fm-imessage@legacy`.
   The legacy slot keeps the files from before slots as the first install's rollback target.
   The slot named in `~/.local/state/fm-imessage/active` owns the line.
-  `fm-imessage.service` starts an inactive slot and tracks it while systemd retries it.
+  `fm-imessage.service` starts the active slot when necessary and tracks it while systemd retries it.
   Check the slot or `/health` to see if the line serves during a retry.
   Only an explicit front stop stops the slots.
 - **Standby.** A slot that is not active starts, connects the transports and serves only `GET /ready` and `/health` on `127.0.0.1:8766` (`FM_IMESSAGE_NEXT_PORT`). It builds no memory, outbox, routing replay or inbound loop, so it can send nothing.

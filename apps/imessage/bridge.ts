@@ -1587,6 +1587,10 @@ async function relayThreadReplies(pending: Routing[], current: () => boolean) {
     if (!current() || stopping) break;
     if (!isThreadReply(item)) { remaining.push(item); continue; }
     const sender = item.threadTarget ? threadSenders.find(item.threadTarget) : undefined;
+    if (sender === "" || sender === FM_HOME || (item.threadTarget && said.has(item.threadTarget))) {
+      remaining.push(item);
+      continue;
+    }
     const mate = sender && mates.find((m) => m.home === sender || m.id === sender);
     if (mate && DESK_VETTED && !muted() && !item.mutationPath && deskMayAct([item])
       && (!DESK_V2 || deskSafe?.(item.text) === item.text)) await handoffToMate([item], mate, current);

@@ -411,10 +411,9 @@ def test_front_leaves_an_exhausted_active_slot_failed(rig):
     (rig.state / "active").write_text("green\n")
     retry, failed = rig.run / "green.retry", rig.run / "green.failed"
     retry.touch()
-    with subprocess.Popen(
-        ["bun", str(ROOT / "apps/imessage/deploy.ts"), "follow"],
-        env={**rig.env, "FM_DEPLOY_FOLLOW_MS": "10"}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-    ) as front:
+    command = ["bun", str(ROOT / "apps/imessage/deploy.ts"), "follow"]
+    env = {**rig.env, "FM_DEPLOY_FOLLOW_MS": "10"}
+    with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as front:
         try:
             wait_for((rig.run / "green.following").exists, "the front to follow a retry after boot", timeout=4)
             failed.touch()
@@ -425,6 +424,17 @@ def test_front_leaves_an_exhausted_active_slot_failed(rig):
     assert front.returncode == 78, out
     assert out.splitlines() == ["imessage-deploy: no slot serves the line (active: green)"]
     assert failed.exists(), "the front must not clear the slot's systemd start limit"
+
+    retry.unlink()
+    rig.stage()
+    (rig.dir / "stage").rename(rig.dir / "green")
+    with subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL) as front:
+        try:
+            wait_for(rig.health, "the deliberate start to recover the line", timeout=15)
+            assert front.poll() is None
+        finally:
+            front.terminate()
+            front.wait(timeout=5)
 
 
 def test_a_slot_that_is_still_starting_is_waited_for_and_the_deploy_stays_gated(rig):

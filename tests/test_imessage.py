@@ -2533,6 +2533,10 @@ def test_photon_thread_uses_the_sent_id_instead_of_another_mates_text(tmp_path):
             "type": "reply", "content": {"type": "text", "text": "Can you check again?"},
             "target": {"id": "unknown", "content": {"type": "text", "text": "The checks passed."}},
         })
+        inbound("m4", content={
+            "type": "reply", "content": {"type": "text", "text": "Approve the deploy."},
+            "target": {"id": target, "content": {"type": "text", "text": "Render is ready."}},
+        })
         assert text(deliveries).splitlines() == ["render"]
         assert "photon-m2 " not in text(notes)
     finally:
