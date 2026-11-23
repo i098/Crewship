@@ -5,6 +5,8 @@ description: Use when Firstmate needs to pick the next crewmate task from the wo
 
 # Pick crewmate work
 
+Covers GitHub repositories; for a Forgejo-hosted project, list its issues and PRs with that forge's tool.
+
 Use the current goal, the repositories in scope, and the latest task status.
 Pick at most one actionable item for each available crewmate.
 Check for active owners and duplicate records across issues, pull requests, tasks, and backlog entries.
@@ -13,8 +15,9 @@ Do not select the same outcome twice in one run.
 Do not select work that has an active owner unless that owner hands it off.
 Skip held work, including work with a hold on a linked record.
 Skip work that needs an unresolved decision, permission, or prerequisite.
-Skip outcomes that only await review, including on a linked record.
-Run the forge lists for each repository in scope.
+Skip completed outcomes and outcomes that only await review, including on linked records.
+Verify a linked task's completion or review handoff from Firstmate's current state and handoff evidence, not raw status events.
+Run the forge lists for each GitHub repository in scope.
 For each open pull request or issue list, compare the number of records returned with the requested limit.
 If the list reaches the limit, increase `--limit` until a successful list returns fewer records than requested.
 Treat the source as incomplete if you cannot confirm that the list contains all open records.
@@ -24,15 +27,18 @@ If an in-scope prerequisite is actionable, consider it as its own item in the or
 
 1. **Open pull requests with failed checks or blockers (unfinished).** List open pull requests with `gh-axi pr list --state open --repo OWNER/REPO --limit 30`.
    Read the current checks with `gh-axi pr view <number> --checks --repo OWNER/REPO`.
-   Read requested changes with `gh-axi pr view <number> --reviews --repo OWNER/REPO`.
-   Pick a specific failed check, merge conflict, or requested change the crewmate can fix.
+   Read the review history with `gh-axi pr view <number> --reviews --repo OWNER/REPO`.
+   Confirm that a specific change request still applies to the current PR before selecting it.
+   Do not use a request that a later approval from the same reviewer, a dismissal, or a PR update invalidates.
+   Pick a specific failed check, merge conflict, or current change request the crewmate can fix.
    Skip pull requests that only await checks, review, or an external decision.
-2. **Stalled tasks (unfinished).** Read the current Firstmate task status and handoff records.
+2. **Stalled tasks (unfinished).** Use Firstmate's verified task state and handoff evidence.
    Run `bin/fm-tasks-axi.sh list --state in_flight` from the Firstmate home to find task records, not to prove a stall.
-   Check the latest task status in `state/<task-id>.status` and the handoff record before classifying each candidate.
-   Exclude completed work and work awaiting review, including tasks with a latest `done:` status that remain `in_flight`.
+   From the Firstmate home, run `bin/fm-crew-state.sh <task-id>` and check the handoff record for each candidate.
+   Exclude work Firstmate verifies as complete or handed off for review.
+   Treat an unverified `done:` event as a claim, not proof.
    Confirm that unfinished work stopped and no worker or pipeline still owns the next action.
-   Resume from the last verified result and name the next action.
+   Pick up from the last verified result and name the next action.
 3. **Unblocked open issues (next).** List open issues with `gh-axi issue list --state open --repo OWNER/REPO --limit 30`.
    Check dependency records, linked work, and assignments before selecting an issue.
    Choose an actionable issue based on the current goal.
