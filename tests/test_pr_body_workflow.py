@@ -20,7 +20,9 @@ def test_body_edits_run_the_small_workflow_without_restarting_the_build():
     workflow = yaml.safe_load((ROOT / ".github/workflows/pr-body.yml").read_text())
     events = workflow.get("on", workflow.get(True))
     pull_request = events["pull_request"]
-    assert {"opened", "edited", "synchronize", "reopened"} <= set(pull_request["types"])
+    assert {"opened", "edited", "synchronize", "reopened", "labeled", "unlabeled"} <= set(
+        pull_request["types"]
+    )
     assert not {"paths", "paths-ignore", "branches", "branches-ignore"} & pull_request.keys()
     assert "if" not in workflow["jobs"]["pr-body"]
     assert workflow["permissions"] == {"contents": "read"}
@@ -35,14 +37,29 @@ def test_workflow_command_checks_the_body_without_evaluating_its_contents(tmp_pa
         step for step in workflow["jobs"]["pr-body"]["steps"] if "PR_BODY" in step.get("env", {})
     )
     marker = tmp_path / "must-not-exist"
-    for body, expected in ((VALID_BODY + f"\n$(touch {marker})\n", 0), ("Closes #695\n", 1)):
+    evidence = (
+        "\n## Review evidence\n\n"
+        "![Before](https://github.com/user-attachments/assets/before)\n"
+        "![After](https://github.com/user-attachments/assets/after)\n"
+    )
+    empty_evidence = "\n## Review evidence\n\n<!-- Add proof. -->\n"
+    for body, ui, error in (
+        (VALID_BODY + f"\n$(touch {marker})\n", "false", ""),
+        (VALID_BODY + empty_evidence, "false", ""),
+        ("Closes #695\n", "false", "Include exactly one ## Summary section."),
+        (VALID_BODY, "true", "Include exactly one ## Review evidence section."),
+        (VALID_BODY + empty_evidence, "true", "Fill the ## Review evidence section."),
+        (VALID_BODY + evidence, "true", ""),
+    ):
         result = subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
             cwd=ROOT,
-            env={**os.environ, "PR_BODY": body},
+            env={**os.environ, "PR_BODY": body, "PR_UI": ui},
             text=True,
             capture_output=True,
             timeout=10,
         )
-        assert result.returncode == expected, result.stderr
+        assert result.returncode == int(bool(error)), result.stderr
+        if error:
+            assert error in result.stderr
         assert not marker.exists()

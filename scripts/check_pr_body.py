@@ -78,7 +78,7 @@ def has_content(lines):
     return bool(re.search(r"\w", unescape(MARKUP.sub("", text))))
 
 
-def check_body(body, template):
+def check_body(body, template, *, ui=False):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
     if not re.fullmatch(r" {0,3}Closes #[1-9][0-9]*[ \t]*", first):
@@ -86,7 +86,7 @@ def check_body(body, template):
 
     actual = sections(body)
     for heading, template_lines in sections(template):
-        if not heading:
+        if not heading or (heading == "Review evidence" and not ui):
             continue
         matches = [lines for name, lines in actual if name == heading]
         if len(matches) != 1:
@@ -117,9 +117,10 @@ def check_body(body, template):
 def main():
     parser = argparse.ArgumentParser(description="Check a PR body against the repository template.")
     parser.add_argument("body_file", nargs="?", default="-", help="body file, or - for stdin")
+    parser.add_argument("--ui", action="store_true", help="require the Review evidence section")
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
-    errors = check_body(body, TEMPLATE.read_text())
+    errors = check_body(body, TEMPLATE.read_text(), ui=args.ui)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -14,6 +14,10 @@ Closes #
 
 <!-- The commands you ran and what they showed. -->
 
+## Review evidence
+
+<!-- Required with the ui label. Embed hosted before and after images here. See docs/review-evidence.md. -->
+
 ## Checklist
 
 <!-- Keep every item. Check completed items. See CONTRIBUTING.md#pull-requests for unchecked items and required explanations. -->

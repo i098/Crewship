@@ -219,7 +219,8 @@ The script applies the form's label and rejects missing required fields or commi
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
   Put the opening reference on its own line, outside a code block.
-  Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Fill `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Add the `ui` label for visible UI changes and fill `Review evidence`. See [Review evidence](docs/review-evidence.md).
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
   Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
@@ -241,12 +242,14 @@ The pipeline reads these settings from the default branch.
 
 The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
 It runs for every PR, including Dependabot and release PRs.
-Body edits rerun this small check without restarting the full build.
+Body edits and label changes rerun this small check without restarting the full build.
 Check a body file before publication:
 
 ```bash
 python3 scripts/check_pr_body.py /tmp/pr-body.md
 ```
+
+Pass `--ui` if the PR has the `ui` label.
 
 Match the template headings and checklist text exactly, and run the body checker before each PR publication or body edit.
 

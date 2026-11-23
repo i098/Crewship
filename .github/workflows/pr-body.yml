@@ -2,7 +2,7 @@ name: pr-body
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -28,4 +28,9 @@ jobs:
       - name: Check the pull request body
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py
+          PR_UI: ${{ contains(github.event.pull_request.labels.*.name, 'ui') }}
+        run: |
+          if [[ "$PR_UI" == true ]]; then
+            set -- --ui
+          fi
+          printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py "$@"
