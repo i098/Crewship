@@ -43,9 +43,14 @@ You need access to the private Witch repository.
 Crewship does not install or configure Witch.
 Set up a Witch server with voxl for real screen capture. Without voxl, Witch records synthetic frames.
 
-On each Linux or macOS device you want to record, run this command from a Witch checkout with `cargo` installed.
-Replace the server URL and device ID, set `TOKEN` to your server token, and omit the optional arguments if you do not need them.
+On each Linux or macOS device you want to record, use a Witch checkout with `cargo` installed.
+Use this bootstrap synopsis to build the command:
 
-```sh
+```text
 WITCH_TOKEN="$TOKEN" scripts/bootstrap.sh --server https://witch.example.com --device laptop [--agent NAME] [-- COMMAND...]
 ```
+
+Replace the server URL and device ID, and set `TOKEN` to your server token.
+For the base command, omit both bracketed groups.
+For each optional group you use, remove the square brackets.
+Replace `NAME` with the agent name and `COMMAND...` with the command and its arguments.
