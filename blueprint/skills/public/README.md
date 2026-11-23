@@ -30,6 +30,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`mate-archive`](mate-archive/SKILL.md): search and zoom the full text of past omp chat with `mate-archive`, for detail a compact removed from the live context.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
 - [`floorplan`](floorplan/SKILL.md): a third-party plugin that maps and explains a codebase, supports onboarding, and shows what a change touched.
+- [`pick-crewmate-work`](pick-crewmate-work/SKILL.md): recommend work for available crewmates without dispatching it.
 - [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`mobile-app-first-build`](mobile-app-first-build/SKILL.md): validate an idea with a mobile web prototype, choose a platform, map flows, write requirements, build, test, and release (credits u/olenami's Reddit guide).
 - [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.
