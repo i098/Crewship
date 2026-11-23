@@ -120,7 +120,7 @@ Each run also removes every stopped place container, with the job's target direc
 Below `resume_pct` (85), the guard queues starts only for the coordinators it stopped.
 The guard leaves a coordinator with an I/O pause to the I/O resume rule.
 For the other coordinators, the guard keeps each entry until the coordinator is active.
-`runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
+Use `runner-up-maintain io-pause <unit...>` to pause only runner-up coordinators for I/O pressure. The guard resumes them after pressure decreases.
 The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
 When `full avg60` stays below 40% for 2 minutes, each guard run checks one recorded unit.
 It removes the unit if active. Otherwise, it queues a start and moves the unit to the end of the list.
@@ -161,7 +161,7 @@ Keep `crewship.ci_pool` only for repositories that did not move yet.
 Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
-Pause the runner-up guard before changing Docker-in-Docker pools, `data_dir`, `io_write_device`, or slice limits. Stop and disable all Docker-in-Docker places and coordinators before making those changes.
+Pause the runner-up guard, then stop and disable all Docker-in-Docker places and coordinators. Do this before changing Docker-in-Docker pools, `data_dir`, `io_write_device`, or slice limits.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
 
 ## Other machines

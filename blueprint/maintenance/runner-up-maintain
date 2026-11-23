@@ -30,10 +30,7 @@ probe_dind() {
 }
 
 io_paused() {
-  case "$1" in
-    runner-up@*.service) grep -qxF -e "$1" -e "${1%.service}" "$io_state" 2>/dev/null ;;
-    *) grep -qxF "$1" "$io_state" 2>/dev/null ;;
-  esac
+  grep -qxF -e "$1" -e "${1%.service}" "$io_state" 2>/dev/null
 }
 
 case "${1-}" in
@@ -207,11 +204,20 @@ guard)
 io-pause)
   shift
   [ "$#" -gt 0 ] || { echo "usage: runner-up-maintain io-pause <unit...>" >&2; exit 2; }
+  for u in "$@"; do
+    case "${u%.service}" in
+      runner-up@?*)
+        i=${u#runner-up@}
+        case "${i%.service}" in *[!a-z0-9-]*) ;; *) continue ;; esac ;;
+    esac
+    echo 'io-pause accepts only runner-up coordinator units.' >&2
+    exit 2
+  done
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   exec 8>"$io_state.lock"
   flock 8
   for u in "$@"; do
-    case "$u" in runner-up@*.*|runner-up@) ;; runner-up@*) u=$u.service ;; esac
+    u=${u%.service}.service
     systemctl --user stop "$u" || continue
     io_paused "$u" || echo "$u" >> "$io_state"
   done

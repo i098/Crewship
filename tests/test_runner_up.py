@@ -147,6 +147,10 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         systemctl.write_text(
             '#!/bin/sh\n'
             f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
+            'case " $* " in *" runner-up.service "*) case " $* " in\n'
+            '  *" show "*) printf "%s\\n" LoadState=not-found ActiveState=inactive; exit 0;;\n'
+            '  *" is-enabled "*) exit 1;;\n'
+            'esac;; esac\n'
             'case " $* " in *" show "*) printf "%s\\n" '
             'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\n'
             'exit 0\n'
@@ -1134,16 +1138,31 @@ def test_io_pause_does_not_flap_on_a_short_spike_or_pause_unlisted_units(stubs, 
 def test_io_pause_stops_and_records_units_once(stubs, tmp_path):
     bin_dir, log = stubs
     (bin_dir / "systemctl").write_text(
-        f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$3" = bad ] && exit 1\nexit 0\n'
+        f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$3" != runner-up@bad.service ]\n'
     )
     (bin_dir / "systemctl").chmod(0o755)
     state = tmp_path / "io.paused"
     env = {"RUNNER_UP_IO_STATE": str(state)}
     run_script(
-        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", "bad", "runner-up@a-b.service", "b",
+        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", "runner-up@bad", "runner-up@a-b.service",
         env=env,
     )
-    assert state.read_text() == "runner-up@a-b.service\nb\n"
+    assert state.read_text() == "runner-up@a-b.service\n"
+
+
+@pytest.mark.parametrize("invalid", ["worker.service", "runner-up@.service", "runner-up@a-b.timer"])
+def test_io_pause_rejects_the_whole_request_before_stopping_a_coordinator(stubs, tmp_path, invalid):
+    bin_dir, log = stubs
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text(f'#!/bin/sh\necho "systemctl $*" >> {log}\n')
+    systemctl.chmod(0o755)
+    state = tmp_path / "io.paused"
+    calls = run_script(
+        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", invalid,
+        env={"RUNNER_UP_IO_STATE": str(state)}, code=2,
+    )
+    assert calls == []
+    assert not state.exists()
 
 
 def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
