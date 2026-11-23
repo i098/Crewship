@@ -483,7 +483,7 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     plain = {**dind, "repo": dind["repo"].upper(), "name": "plain", "labels": ["plain"]}
     del plain["docker"]
-    machine = {"name": "laptop", "ssh": ["ci@laptop"], "cores": 2, "memory_gb": 8}
+    machine = {"name": "laptop", "ssh": ["ci@laptop"], "cores": 8, "memory_gb": 16}
     settings = runner(
         home,
         repos=[plain, dind, REPOS[1]],

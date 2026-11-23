@@ -21,7 +21,7 @@ if [ "${1-}" = --host-network ]; then
   trap '"$shim" rm -f "$first" "$second" >/dev/null 2>&1 || :; wait || :' EXIT
   RUNNER_UP_BUILD_GATE='' "$shim" run --rm --name "$first" --entrypoint /bin/sh "$image" -ec '
     /home/runner/run.sh --check-dind-runtime
-    docker run --rm -d -p 8080:8080 alpine:3.23 sh -ec "
+    docker run --rm -d -p 8080:8080 busybox:1.37.0 sh -ec "
       mkdir /site; echo runner-up-network-ok >/site/index.html
       exec httpd -f -p 8080 -h /site"
     exec sleep 180
