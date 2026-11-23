@@ -11,15 +11,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from check_pr_body import changes_ui, check_screenshots, git, sections
+
 TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 SUBJECT = re.compile(rf"(?:{TYPES})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: \S.*")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 CLOSES = re.compile(r" {0,3}Closes #[1-9][0-9]*[ \t]*")
 PLAN = re.compile(r"\s{0,3}(?:[-*] )?\**Review plan\**:\**\s*\S", re.I)
-IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?https://[^)\s>]+|<img\b[^>]*\bsrc=[\"']https://", re.I)
-UI_PATH = re.compile(
-    r"\.(tsx|jsx|vue|svelte|css|scss|html)$|^(apps/[^/]+/(web|src/components|public)|site)/", re.I
-)
 
 
 def check_commits(subjects):
@@ -57,17 +55,9 @@ def check_body(body, ui):
         errors.append("Start the body with Closes #N for the issue that the PR resolves.")
     if not any(PLAN.match(line) for line in lines):
         errors.append("Add a 'Review plan: <how a reviewer checks this>' line to the body.")
-    if ui and not any(IMAGE.search(line) for line in lines):
-        errors.append(
-            "The diff changes UI files: embed a hosted screenshot (https image) in the body."
-        )
+    if ui:
+        errors.extend(check_screenshots(sections(body)))
     return errors
-
-
-def git(*args):
-    return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True
-    ).stdout.splitlines()
 
 
 def main():
@@ -80,12 +70,11 @@ def main():
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     try:
-        subjects = git("log", "--no-merges", "--format=%s", f"{args.base}..HEAD")
-        changed = git("diff", "--name-only", f"{args.base}...HEAD")
+        subjects = git("log", "--no-merges", "--format=%s", f"{args.base}..HEAD").splitlines()
+        ui = args.ui or (not args.no_ui and changes_ui(args.base))
     except subprocess.CalledProcessError as error:
         print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)
         return 2
-    ui = args.ui or (not args.no_ui and any(UI_PATH.search(path) for path in changed))
     errors = check_commits(subjects) + check_body(body, ui)
     if errors:
         print("\n".join(errors), file=sys.stderr)

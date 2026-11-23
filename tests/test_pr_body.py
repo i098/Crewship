@@ -61,7 +61,7 @@ class PRBodyTests(unittest.TestCase):
     def body_with_section(self, heading, content):
         before, marker, after = VALID_BODY.partition(f"## {heading}\n")
         _, next_heading, rest = after.partition("\n## ")
-        return before + marker + "\n" + content + "\n" + next_heading + rest
+        return before + marker + "\n" + content + "\n\n" + next_heading + rest
 
     def test_pipeline_style_body_with_collapsed_evidence_passes(self):
         self.assertEqual(self.check(VALID_BODY), [])
@@ -98,6 +98,9 @@ class PRBodyTests(unittest.TestCase):
             for content in (
                 "", "-", "<!-- Fill this in. -->", "```text\n```", "<br>", "<div></div>",
                 "<div>&nbsp;</div>", "&#160;", "&#xA0;", "&Tab;&NewLine;", "&ensp;",
+                "<pre>&nbsp;</pre>", "<pre>\n&nbsp;\n</pre>",
+                "<pre>\n<!-- tests not run -->\n</pre>",
+                "<pre>\n`<!-- tests not run -->`\n</pre>",
                 "[ref]: https://example.com",
                 "   [ref]: <https://example.com> 'A title'",
                 '[ref]: https://example.com\n  "A title"',
@@ -116,6 +119,10 @@ class PRBodyTests(unittest.TestCase):
                 "~~~markdown\n[ref]: https://example.com\n~~~",
                 "    <div>&nbsp;</div>", "\t[ref]: https://example.com",
                 "&lt;br&gt;", "<div>A change.</div>",
+                "<pre>All tests passed.\n</pre>",
+                "<pre>\nAll tests passed.</pre>",
+                "<pre>\n</pre>All tests passed.",
+                "<div>`pytest`</div>",
                 "[ref]: https://example.com\n\nRead [ref].",
                 '[ref]: https://example.com\n  "A title"\n\nVisible text.',
             ):
@@ -136,11 +143,13 @@ class PRBodyTests(unittest.TestCase):
         self.assertEqual(self.check(body), [])
 
     def test_comment_markers_inside_inline_code_are_literal(self):
-        body = VALID_BODY.replace(
-            "Check every pull request body against the repository template.",
-            "Handle `<!--` in PR descriptions.",
-        )
-        self.assertEqual(self.check(body), [])
+        for prefix in ("", "<https://example.com> ", "<reviewer@example.com> ", "<kbd>Enter</kbd> "):
+            with self.subTest(prefix=prefix):
+                body = VALID_BODY.replace(
+                    "Check every pull request body against the repository template.",
+                    prefix + "Handle `<!--` in PR descriptions.",
+                )
+                self.assertEqual(self.check(body), [])
 
     def test_markup_inside_inline_code_is_visible_content(self):
         body = VALID_BODY.replace(

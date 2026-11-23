@@ -219,7 +219,8 @@ The script applies the form's label and rejects missing required fields or commi
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
 - The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
   Put the opening reference on its own line, outside a code block.
-  Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Fill `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Follow the [Review evidence guide](docs/review-evidence.md) for what to capture and where to put it.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
   Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
@@ -240,6 +241,7 @@ It omits generated intent and puts validation evidence in a collapsed section af
 The pipeline reads these settings from the default branch.
 
 The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It also runs the [automatic screenshot check](docs/review-evidence.md#automatic-screenshot-checks).
 It runs for every PR, including Dependabot and release PRs.
 Body edits rerun this small check without restarting the full build.
 Check a body file before publication:
@@ -247,6 +249,9 @@ Check a body file before publication:
 ```bash
 python3 scripts/check_pr_body.py /tmp/pr-body.md
 ```
+
+Pass `--base origin/main` to enable the screenshot check for the current branch.
+Pass `--head <revision>` with `--base` to check a revision other than `HEAD`.
 
 Match the template headings and checklist text exactly, and run the body checker before each PR publication or body edit.
 
@@ -258,9 +263,8 @@ python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
 
 It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
-It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or lacks a hosted `https` image while the diff changes UI files.
-UI files are `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, and `.html` files, `site/`, and `apps/<app>/web`, `apps/<app>/src/components`, and `apps/<app>/public`.
-Use `--ui` or `--no-ui` to override the UI detection.
+It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or fails the same screenshot check as CI.
+Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
 
 ## Branch rules
 

@@ -14,6 +14,10 @@ Closes #
 
 <!-- The commands you ran and what they showed. -->
 
+## Review evidence
+
+<!-- Follow docs/review-evidence.md for the required evidence and link format. -->
+
 ## Checklist
 
 <!-- Keep every item. Check completed items. See CONTRIBUTING.md#pull-requests for unchecked items and required explanations. -->
