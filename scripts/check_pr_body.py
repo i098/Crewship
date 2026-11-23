@@ -62,12 +62,14 @@ def strip_comments(line, comment):
 
 def literal_html_lines(tag, line, lines):
     end = re.compile(rf"</{tag}>", re.I)
-    yield line, "html"
-    if not end.search(line):
-        for line in lines:
-            yield line, "html"
-            if end.search(line):
-                break
+    comment = False
+    while line is not None:
+        line, comment = strip_comments(line, comment)
+        yield line, "html"
+        if end.search(line):
+            return comment
+        line = next(lines, None)
+    return comment
 
 
 def fenced_lines(fence, lines):
@@ -83,7 +85,7 @@ def body_lines(markdown):
     comment = False
     for raw in lines:
         if not comment and (opening := LITERAL_HTML.match(raw)):
-            yield from literal_html_lines(opening[1], raw, lines)
+            comment = yield from literal_html_lines(opening[1], raw, lines)
             continue
         raw_html = comment or RAW_HTML.match(raw)
         line, comment = strip_comments(raw, comment)
@@ -135,7 +137,7 @@ def check_screenshots(actual):
         elif NEW_VIEW.fullmatch(line):
             new_view = True
     before, after = images["Before"], images["After"]
-    if after and (new_view or before) and before.isdisjoint(after):
+    if after and (new_view != bool(before)) and before.isdisjoint(after):
         return []
     return [
         "Embed distinct GitHub Before and After screenshots in ## Review evidence. "

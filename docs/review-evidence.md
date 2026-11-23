@@ -13,6 +13,7 @@ Use each row that applies to your change.
 1. Capture the actual surface on the base and head revisions with the same input.
    Capture only the head revision for a new view.
    Remove secrets and private data before you upload anything.
+   Use synthetic input or redact live costs, quota balances, and plan names before uploading public screenshots or recordings.
 2. [Attach screenshots and recordings to the PR on GitHub](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files).
    Attach PNG or HTML board exports to a PR comment and copy the attachment URL.
    Never commit evidence binaries.

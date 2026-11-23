@@ -125,6 +125,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         f"{before}\n{same_upload}\n{after}",
         f"{before}\n{after}\n{before.replace('Before', 'After')}",
         f"Before: none, new view\n{same_upload}\n{after}",
+        f"Before: none, new view\n{before}\n{after}",
         f"<pre>\n{before}\n{after}\n</pre>",
         f"<pre>\nBefore: none, new view\n</pre>\n{after}",
         f"<!-- Base revision -->{before}\n{after}",

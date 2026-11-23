@@ -99,6 +99,7 @@ class PRBodyTests(unittest.TestCase):
                 "", "-", "<!-- Fill this in. -->", "```text\n```", "<br>", "<div></div>",
                 "<div>&nbsp;</div>", "&#160;", "&#xA0;", "&Tab;&NewLine;", "&ensp;",
                 "<pre>&nbsp;</pre>", "<pre>\n&nbsp;\n</pre>",
+                "<pre>\n<!-- tests not run -->\n</pre>",
                 "[ref]: https://example.com",
                 "   [ref]: <https://example.com> 'A title'",
                 '[ref]: https://example.com\n  "A title"',
