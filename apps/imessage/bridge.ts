@@ -893,33 +893,29 @@ function webSend(text: string): boolean {
   return true;
 }
 
-async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble) {
-  const maybe: Record<string, string> = {};
-  for (const [name, space] of Object.entries(attempts)) {
-    if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
-    const line = lines.find((l) => l.name === name);
-    // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
-    if (!line?.sent || typeof bubble !== "string") {
-      if (line || TRANSPORTS.includes(name)) maybe[name] = space;
-      continue;
-    }
-    try {
-      if (!await line.sent(space, bubble, o.since ?? 0)) continue;
-      trace(o.id, "history-reconciled");
-      return;
-    } catch (e) {
-      checkDeskDelivery(o);
-      throw e;
-    }
-  }
-  return maybe;
-}
-
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void, store: typeof threadSenders) {
   const guid = `${o.guid}-${i}`;
-  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble) : {};
-  if (!maybe) return;
-  if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
+  const maybe: Record<string, string> = {};
+  if (o.maybe) {
+    for (const [name, space] of Object.entries(o.maybe)) {
+      if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
+      const line = lines.find((l) => l.name === name);
+      // A photo has no text to look for, so a try that may have sent it stays on its transport and is sent again.
+      if (!line?.sent || typeof bubble !== "string") {
+        if (line || TRANSPORTS.includes(name)) maybe[name] = space;
+        continue;
+      }
+      try {
+        if (!await line.sent(space, bubble, o.since ?? 0)) continue;
+        trace(o.id, "history-reconciled");
+        return;
+      } catch (e) {
+        checkDeskDelivery(o);
+        throw e;
+      }
+    }
+    save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
+  }
   checkDeskDelivery(o);
   const sentId = store && typeof bubble === "string" ? (id: string) => {
     try { store.remember(id, o.sender ?? ""); }
@@ -1299,10 +1295,6 @@ async function runV2Turn(pending: Routing[], controller: AbortController, curren
     }
     return runSessionTurn(pending, controller, current);
   }
-  return runV2FrontTurn(pending, controller, current);
-}
-
-async function runV2FrontTurn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (muted()) return handoffV2(pending);
   if (pending.some((r) => r.mutationPath)) return handoffV2(pending);
   const target = pending.at(-1)!;
