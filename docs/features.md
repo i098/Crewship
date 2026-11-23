@@ -49,6 +49,9 @@ For remote access, follow [Witch’s TLS deployment guide](https://github.com/i0
 Use the proxy’s HTTPS URL for the web viewer and for `--server` on remote devices.
 
 The shared server token gives full access to recordings and capture controls for all devices.
+The viewer keeps the token in the browser profile for later visits.
+Open the viewer, local or remote, only in a browser profile that only trusted people use.
+
 Enroll only Linux or macOS devices you trust with that access.
 Install `cargo` and run the command from the root of the Witch checkout.
 Use this bootstrap synopsis to build the command:
