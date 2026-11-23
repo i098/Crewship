@@ -29,6 +29,53 @@ def test_body_edits_run_the_small_workflow_without_restarting_the_build():
     assert "edited" not in build_events["pull_request"]["types"]
 
 
+def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/pr-body.yml").read_text())
+    steps = workflow["jobs"]["pr-body"]["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    depth = checkout.get("with", {}).get("fetch-depth", 1)
+    body_step = next(step for step in steps if "PR_BODY" in step.get("env", {}))
+    source = tmp_path / "source"
+    source.mkdir()
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(source), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-b", "main")
+    git("commit", "--allow-empty", "-m", "Common ancestor")
+    git("branch", "pr")
+    (source / "site/public").mkdir(parents=True)
+    (source / "site/public/harbor.css").write_text("body { color: red; }\n")
+    git("add", ".")
+    git("commit", "-m", "Stylesheet on base only")
+    git("checkout", "pr")
+    git("commit", "--allow-empty", "-m", "Non-UI PR")
+    git("checkout", "main")
+    git("merge", "--no-ff", "-m", "Synthetic PR merge", "pr")
+
+    worktree = tmp_path / "checkout"
+    clone_depth = ["--depth", str(depth)] if depth else []
+    git("clone", *clone_depth, source.as_uri(), str(worktree))
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", body_step["run"]],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "GIT_DIR": str(worktree / ".git"),
+            "GIT_WORK_TREE": str(worktree),
+            "PR_BODY": VALID_BODY,
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/pr-body.yml").read_text())
     step = next(
