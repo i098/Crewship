@@ -15,7 +15,7 @@ sudo -n /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --group=runner
 daemon=$!
 for i in $(seq 60); do
   if docker info >/dev/null 2>&1; then
-    if [ "${1-}" = --check-dind-runtime ]; then exit 0; fi
+    if [ "${1-}" = --check-dind-runtime ]; then exec stat -c %d /var/lib/docker; fi
     exec /home/runner/run-original.sh "$@"
   fi
   kill -0 "$daemon" 2>/dev/null || break

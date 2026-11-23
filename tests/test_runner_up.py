@@ -71,7 +71,7 @@ def validator():
     return f"{program} check-config --config %s" if os.access(program, os.X_OK) else "true %s"
 
 
-def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=False):
+def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
     playbook = home.parent / "runner_up.yml"
     if not (home.parent / "templates").exists():
         (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
@@ -112,7 +112,7 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
     crewship = {
         "user": getpass.getuser(),
         "home": str(home),
-        "start_services": start_services,
+        "start_services": docker_stub is not None,
         "runner_up": runner_up,
     }
     if ci_pool:
@@ -127,12 +127,31 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
         "ansible_facts": facts or {},
         "crewship": crewship,
     }
+    environment = os.environ.copy()
+    if docker_stub:
+        bin_dir, _ = docker_stub
+        systemctl = home / ".local/bin/systemctl"
+        systemctl.write_text(
+            '#!/bin/sh\ncase " $* " in *" show "*) printf "%s\\n" '
+            'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\nexit 0\n'
+        )
+        systemctl.chmod(0o755)
+        socket = home.parent / "docker.sock"
+        socket.touch()
+        variables["crewship_user_runtime_dir"] = str(home.parent)
+        environment.update(
+            RUNNER_UP_DOCKER=str(bin_dir / "docker"),
+            RUNNER_UP_DOCKER_SOCK=str(socket),
+            IMAGES=str(home.parent / "images"),
+            DOCKER_CGROUP_DRIVER="systemd",
+        )
     if facts and "distribution_version" in facts:
         release = home.parent / "os-release"
         release.write_text(
             f"ID={facts['distribution'].lower()}\nVERSION_ID={facts['distribution_version']}\n"
         )
         variables["crewship_runner_up_os_release"] = str(release)
+        environment["RUNNER_UP_OS_RELEASE"] = str(release)
     (home.parent / "etc").mkdir(exist_ok=True)
     result = subprocess.run(
         [
@@ -145,6 +164,7 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
             *flags,
         ],
         cwd=home.parent,
+        env=environment,
         capture_output=True,
         text=True,
     )
@@ -445,7 +465,7 @@ def test_inspect_refuses_runner_up_without_repos_even_beside_a_ci_pool():
 
 
 @pytest.mark.parametrize("custom_image", [False, True])
-def test_dind_places_only_serve_their_pool_locally(home, custom_image):
+def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     plain = {**dind, "repo": dind["repo"].upper(), "name": "plain", "labels": ["plain"]}
     del plain["docker"]
@@ -458,7 +478,7 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image):
     ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
     if custom_image:
         ci_pool["image"] = "acme/ci:latest"
-    apply(home, settings, facts=facts, ci_pool=ci_pool)
+    apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs)
     cfg = config(home, "acme-e2e-tests")
     assert cfg["github"]["repos"] == ["acme/e2e.tests"]
     assert instances(home) == ["acme-e2e-tests", "acme-engine"]
@@ -470,13 +490,13 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image):
     directory = home / ".local/share/runner-up"
     service = unit_sections(units(home) / "runner-up@.service")["Service"]
     assert f"RUNNER_UP_DIND_DOCKERFILE={directory}/runner-up-dind.Dockerfile" in service["Environment"]
-    assert f"RUNNER_UP_DIND_IMAGE={by_pool['e2e']}" in service["Environment"]
+    assert f'"RUNNER_UP_GUARD_PATH={home.parent}/data"' in service["Environment"]
     assert (directory / "runner-up-dind.Dockerfile").is_file()
     assert (directory / "shim/dind-image").read_text().strip() == by_pool["e2e"]
     image_service = unit_sections(units(home) / "runner-up-image.service")["Service"]
     refresh = int(custom_image)
     assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
-    assert apply(home, settings, facts=facts, ci_pool=ci_pool) == 0
+    assert apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs) == 0
 
 
 def test_apply_refuses_dind_on_ubuntu_2604(home):
@@ -487,7 +507,7 @@ def test_apply_refuses_dind_on_ubuntu_2604(home):
     assert instances(home) == []
 
 
-def test_deferred_apply_keeps_existing_config_and_writes_new_config(home):
+def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     apply(home, runner(home))
     original = config(home)
     existing = {**REPOS[0], "repo": "ACME/Web", "docker": "dind", "labels": ["web-dind"]}
@@ -495,8 +515,17 @@ def test_deferred_apply_keeps_existing_config_and_writes_new_config(home):
     facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
     apply(home, runner(home, repos=[existing, new]), facts=facts)
     assert config(home) == original
-    (pool,) = config(home, "acme-e2e-tests")["pools"]
-    assert pool["label"] == "e2e"
+    assert "acme-e2e-tests" not in instances(home)
+    wants = units(home) / "default.target.wants"
+    assert not (wants / "runner-up@acme-e2e-tests.service").exists()
+    apply(home, runner(home, repos=[REPOS[1]]))
+    assert "acme-web" not in instances(home)
+    apply(home, runner(home, repos=[existing]), facts=facts)
+    assert "acme-web" not in instances(home)
+    assert not (wants / "runner-up@acme-web.service").exists()
+    apply(home, runner(home, repos=[existing, new]), facts=facts, docker_stub=stubs)
+    assert config(home)["pools"][0]["label"] == "web-dind"
+    assert config(home, "acme-e2e-tests")["pools"][0]["label"] == "e2e"
 
 
 def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
@@ -555,6 +584,8 @@ def stubs(tmp_path):
             'if [ "$1" = tag ]; then cp "$IMAGES/$2" "$IMAGES/$3"; fi\n'
             'if [ "$1 $2" = "image rm" ]; then rm "$IMAGES/$3"; fi\n'
             'if [ "$1 $2" = "network create" ]; then for last; do :; done; echo "$last"; fi\n'
+            'case "$*" in *" --check-dind-runtime") printf "%s\\n" '
+            '"${DOCKER_STORE_DEVICE:-$(stat -c %d "$IMAGES")}";; esac\n'
             "exit 0\n"
         )
         stub.chmod(0o755)
@@ -683,7 +714,7 @@ def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs,
         "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER_SOCK": str(sock),
         "RUNNER_UP_OS_RELEASE": str(release),
-        "RUNNER_UP_DIND_IMAGE": derived,
+        "RUNNER_UP_GUARD_PATH": str(tmp_path),
         "RUNNER_UP_DOCKERFILE": str(recipe),
         "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
         "DOCKER_CGROUP_DRIVER": "systemd",
@@ -752,9 +783,16 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
 
 
 def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
-    env = {"DOCKER_FAILS": "container prune"}
+    bin_dir, log = stubs
+    timeout = bin_dir / "timeout"
+    timeout.write_text(f'#!/bin/sh\necho "timeout $1 $2" >> {log}\nshift 2\nexec "$@"\n')
+    timeout.chmod(0o755)
+    env = {"DOCKER_FAILS": "container prune", "RUNNER_UP_PRUNE_TIMEOUT": "900"}
     calls = run_script("runner-up-maintain", stubs, "clean", env=env, code=1)
-    assert [c.split()[1] for c in calls] == ["container", "network", "image", "builder"]
+    assert [c for c in calls if c.startswith("timeout ")] == ["timeout --kill-after=5s 210"] * 4
+    assert [c.split()[1] for c in calls if c.startswith("docker ")] == [
+        "container", "network", "image", "builder"
+    ]
 
 
 def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):
@@ -1026,7 +1064,7 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
         "RUNNER_UP_DOCKER_SOCK": str(sock),
         "RUNNER_UP_OS_RELEASE": str(release),
         "DOCKER_CGROUP_DRIVER": "systemd",
-        "RUNNER_UP_DIND_IMAGE": derived,
+        "RUNNER_UP_GUARD_PATH": str(tmp_path),
         "RUNNER_UP_DOCKERFILE": str(recipe),
         "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
         "RUNNER_UP_REFRESH_BASE": "0",
@@ -1042,11 +1080,21 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
     run_script("runner-up-maintain", stubs, "image", env=failed, code=1)
     assert (images / derived).read_text() == "built\n"
     assert sorted(tag.name for tag in images.iterdir()) == [derived, base]
+    run_script(
+        "runner-up-maintain",
+        stubs,
+        "image",
+        env={**env, "BUILD_CONTENT": "wrong disk", "DOCKER_STORE_DEVICE": "-1"},
+        code=125,
+    )
+    assert (images / derived).read_text() == "built\n"
+    assert sorted(tag.name for tag in images.iterdir()) == [derived, base]
     calls = run_script(
         "runner-up-maintain", stubs, "image", env={**env, "BUILD_CONTENT": "fresh"}
     )
     assert (images / derived).read_text() == "fresh\n"
     assert [call.split(" --tag ")[1].split()[0] for call in calls if " --tag " in call] == [
+        f"{derived}-candidate",
         f"{derived}-candidate",
         f"{derived}-candidate",
         f"{derived}-candidate",

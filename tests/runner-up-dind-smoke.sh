@@ -13,6 +13,63 @@ if [ "${1-}" = --host ]; then
   exit 0
 fi
 
+if [ "${1-}" = --host-network ]; then
+  shim=${2:?Specify the installed runner-up Docker shim}
+  read -r image < "$(dirname "$shim")/dind-image"
+  first=runner-up-network-smoke-$$-first
+  second=runner-up-network-smoke-$$-second
+  trap '"$shim" rm -f "$first" "$second" >/dev/null 2>&1 || :; wait || :' EXIT
+  RUNNER_UP_BUILD_GATE='' "$shim" run --rm --name "$first" --entrypoint /bin/sh "$image" -ec '
+    /home/runner/run.sh --check-dind-runtime
+    docker run --rm -d -p 8080:8080 alpine:3.23 sh -ec "
+      mkdir /site; echo runner-up-network-ok >/site/index.html
+      exec httpd -f -p 8080 -h /site"
+    exec sleep 180
+  ' &
+  first_pid=$!
+  RUNNER_UP_BUILD_GATE='' "$shim" run --rm --name "$second" --entrypoint /bin/sh "$image" -ec '
+    /home/runner/run.sh --check-dind-runtime
+    exec sleep 180
+  ' &
+  second_pid=$!
+
+  for place in "$first" "$second"; do
+    ready=
+    for _ in $(seq 90); do
+      if "$shim" exec "$place" docker info >/dev/null 2>&1; then
+        ready=yes
+        break
+      fi
+      sleep 1
+    done
+    test "$ready" = yes
+  done
+  template="{{range \$name, \$net := .NetworkSettings.Networks}}{{\$name}} {{\$net.IPAddress}}{{end}}"
+  first_net=$("$shim" inspect -f "$template" "$first")
+  second_net=$("$shim" inspect -f "$template" "$second")
+  test "${first_net%% *}" != "${second_net%% *}"
+  url=http://${first_net#* }:8080/
+  response=$("$shim" exec "$first" curl --noproxy '*' -fsS --retry 30 --retry-connrefused \
+    --retry-max-time 60 --max-time 3 "$url")
+  test "$response" = runner-up-network-ok
+  if "$shim" exec "$second" curl --noproxy '*' -sS --max-time 3 "$url"; then
+    echo 'The second place reached the first place service.' >&2
+    exit 1
+  else
+    status=$?
+    test "$status" = 7 || test "$status" = 28
+  fi
+  "$shim" rm -f "$first" "$second" >/dev/null
+  wait "$first_pid" || :
+  wait "$second_pid" || :
+  trap - EXIT
+  networks=$("$shim" network ls --format '{{.Name}}')
+  for network in "${first_net%% *}" "${second_net%% *}"; do
+    if printf '%s\n' "$networks" | grep -Fx "$network"; then exit 1; fi
+  done
+  exit 0
+fi
+
 work=$(mktemp -d)
 cd "$work"
 trap 'docker compose down --volumes >/dev/null 2>&1 || :; rm -rf "$work"' EXIT

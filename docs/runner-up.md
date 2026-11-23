@@ -105,10 +105,13 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 `runner-up-clean.timer` runs `runner-up-maintain clean` every hour:
 
 - removes stopped containers that carry the label `runner-up.place` and are older than an hour (a place that crashed left them);
+- removes unused outer bridge networks that carry the label `runner-up.dind` and are older than an hour;
 - removes untagged image layers;
 - keeps the Docker build cache under `disk_max_gb`.
 
-Each step runs alone with a time limit (`RUNNER_UP_PRUNE_TIMEOUT`, 280 s): a step that fails or hangs on a busy disk does not skip the next ones, and the unit then ends failed.
+Each step has a 210-second limit, with up to 5 more seconds for forced termination.
+Set `RUNNER_UP_PRUNE_TIMEOUT` to a smaller number of seconds if necessary.
+A failed or timed-out step does not skip the remaining steps, but the unit ends failed.
 It never touches a running container.
 
 `runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
@@ -125,8 +128,8 @@ The coordinator's start builds it when it is missing.
 `runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
 Managed apply checks the same runtime before it publishes the config.
-With `start_services: false`, apply does not replace an existing config with one that includes Docker-in-Docker places.
-Run a managed apply to publish those changes.
+With `start_services: false`, apply does not publish new or updated configs that contain Docker-in-Docker places.
+Run a managed apply to publish those configs and enable new coordinators.
 The runner-up image timer tests the new derived image before it replaces the image that jobs use.
 
 ## Cut over one repository
@@ -197,6 +200,14 @@ Apply and launch reject all other releases, including Ubuntu 26.04.
 Keep the host's default Docker runtime unchanged.
 Use Docker with the systemd cgroup driver.
 Check the runtime and driver with `sudo docker info --format '{{json .Runtimes}} {{.CgroupDriver}}'`.
+Put the Sysbox data store on the filesystem that the runner-up disk guard monitors.
+That filesystem contains `runner_up.data_dir`, or the account home if `runner_up.data_dir` is unset.
+On a split-disk host, set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/blob/master/main.go) to a directory on that filesystem.
+Use the device that `runner_up.io_write_device` names if you set a write cap.
+Before managed apply, drain the Sysbox containers and use `sudo systemctl edit sysbox-mgr.service`.
+In `[Service]`, reset `ExecStart=` and add `ExecStart=/usr/bin/sysbox-mgr --data-root /path/to/data/sysbox`.
+Replace `/path/to/data` with the monitored path and restart `sysbox-mgr.service`.
+The readiness probe rejects an inner Docker store on a different filesystem.
 
 Set `docker: dind` on an entry in `runner_up.repos`.
 Use a separate pool label for that entry if the same repository also has plain places.
@@ -215,6 +226,9 @@ Run [`ci-pool-smoke`](../.github/workflows/ci-pool-smoke.yml) manually with `din
 The first job must print `runner-up-dind-ok`. The second job must use the same place and report a different daemon ID.
 While the Compose service is active, run `sh tests/runner-up-dind-smoke.sh --host <outer-container-name>` on the host with Docker access.
 The host check must print cgroup paths under `runnerup.slice` for `dockerd` and the nested process.
+Run `sh tests/runner-up-dind-smoke.sh --host-network ~/.local/share/runner-up/shim/docker` on the host to check network isolation.
+The check launches two overlapping places and confirms that only the first can reach its published service.
+It also confirms that the shim removes both outer networks when the places exit.
 
 ## Not covered
 
@@ -222,8 +236,9 @@ The host check must print cgroup paths under `runnerup.slice` for `dockerd` and 
 - **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
   Plain local places use the [shared build cache](#shared-build-cache).
-- **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.
-  Put that root on a data disk with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
+- **Data-disk scratch.** Outer container writes go to the host Docker data root.
+  Set that root with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
+  Inner Docker writes go to the separate Sysbox store described above.
 - **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart 'runner-up@*'`.
   A restart stops no job.
 

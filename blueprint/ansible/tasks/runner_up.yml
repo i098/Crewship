@@ -108,7 +108,7 @@
         remote_src: true
       loop: "{{ ['ci-runner.Dockerfile'] + (['runner-up-dind.Dockerfile'] if crewship_runner_up_dind | bool else []) }}"
 
-    - name: Install the Docker-in-Docker image tag for the launch shim
+    - name: Install the Docker-in-Docker image tag for the shim and builder
       ansible.builtin.copy:
         content: "{{ crewship_runner_up_dind_image }}\n"
         dest: "{{ crewship_runner_up_shim_dir }}/dind-image"
@@ -128,7 +128,7 @@
             PATH: "{{ crewship_runner_up_shim_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             RUNNER_UP_IMAGE: "{{ crewship_runner_up_image }}"
             RUNNER_UP_DOCKERFILE: "{{ crewship_runner_up_dockerfile }}"
-            RUNNER_UP_DIND_IMAGE: "{{ crewship_runner_up_dind_image }}"
+            RUNNER_UP_GUARD_PATH: "{{ crewship_runner_up_guard_path }}"
             RUNNER_UP_DIND_DOCKERFILE: "{{ crewship_runner_up_dind_dockerfile }}"
             RUNNER_UP_SLICE: "{{ crewship_runner_up_slice }}"
             XDG_RUNTIME_DIR: "{{ crewship_user_runtime_dir }}"
@@ -145,12 +145,12 @@
         src: runner-up.config.json.j2
         dest: "{{ crewship_runner_up_config_dir }}/{{ item.1 }}.json"
         mode: "0644"
-        force: "{{ (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos }}"
         validate: "{{ crewship_runner_up_check }}"
       vars:
         crewship_runner_up_repo: "{{ item.0 }}"
         crewship_runner_up_instance: "{{ item.1 }}"
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+      when: (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos
 
     - name: Stop and disable the single coordinator of the earlier layout
       ansible.builtin.systemd_service:
@@ -232,11 +232,12 @@
     - name: Statically enable the coordinator of each repository
       ansible.builtin.file:
         src: "{{ crewship_user_units }}/runner-up@.service"
-        dest: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item }}.service"
+        dest: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item.1 }}.service"
         state: link
         force: true
         follow: false
-      loop: "{{ crewship_runner_up_instances }}"
+      loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+      when: (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos
 
     - name: Statically enable the runner-up timers
       ansible.builtin.file:

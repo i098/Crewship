@@ -14,10 +14,20 @@ image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
 lock=${RUNNER_UP_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-image.lock}
 
 dind_recipe=${RUNNER_UP_DIND_DOCKERFILE-}
-dind_image=${RUNNER_UP_DIND_IMAGE-}
+if [ -n "$dind_recipe" ]; then
+  read -r dind_image < "$(dirname "$(command -v docker)")/dind-image"
+  : "${dind_image:?The installed dind-image tag is empty}"
+fi
 have_image() { docker image inspect "$1" >/dev/null 2>&1; }
 have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
-probe_dind() { timeout --kill-after=10s 90s docker check-dind-runtime "$1"; }
+probe_dind() {
+  expected=$(stat -c %d "${RUNNER_UP_GUARD_PATH:?}")
+  actual=$(timeout --kill-after=10s 90s docker check-dind-runtime "$1")
+  if [ "$actual" != "$expected" ]; then
+    echo "runner-up: Set the Sysbox data root on the filesystem of $RUNNER_UP_GUARD_PATH." >&2
+    return 125
+  fi
+}
 
 case "${1-}" in
 start)
@@ -39,7 +49,6 @@ print(any(place.get("provider") == "docker" and place.get("image") == sys.argv[2
   unset RUNNER_UP_DIND_DOCKERFILE
   exec "$0" image --ensure ;;
 image)
-  [ -z "$dind_recipe" ] || : "${dind_image:?Set RUNNER_UP_DIND_IMAGE}"
   if [ "${2-}" = --ensure ] && have_images; then
     [ -z "$dind_recipe" ] || probe_dind "$dind_image"
     exit 0
@@ -73,9 +82,10 @@ clean)
   # so one that is left here belongs to a place that crashed.
   # Each step runs on its own, with a time limit: a prune that fails (another prune runs) or hangs on a
   # busy disk must not skip the others, or the build cache grows past its cap. The unit still fails.
-  limit=${RUNNER_UP_PRUNE_TIMEOUT:-280}
+  limit=${RUNNER_UP_PRUNE_TIMEOUT:-210}
+  if ! [ "$limit" -ge 1 ] || ! [ "$limit" -le 210 ]; then limit=210; fi
   failed=0
-  prune() { timeout "$limit" docker "$@" >/dev/null || failed=1; }
+  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || failed=1; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
   prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force
