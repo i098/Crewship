@@ -181,14 +181,20 @@ A new host gets its own key; never copy `~/.ssh/id_ed25519_mac` from the old hos
 Use this recipe when the Mac has no SSH and no Aside Pro Remote Control. The host then runs commands on the signed-in Aside CLI of the Mac.
 
 1. On the host, run `tailscale up` to join the tailnet of the Mac.
-2. On the Mac, start Rex with its built-in Tailscale support. Rex uses Serve over Tailscale, limited to your own account.
+2. On the Mac, turn on the built-in Tailscale support of Rex: `rex server tailscale on --hostname <mac-device>`. By default only the owner's own account can connect. Do not pass `--allow-tailnet-members`.
 3. On the host, add the Mac:
 
    ```bash
    rex hosts add mac https://<mac-device>.<tailnet>.ts.net
    ```
 
-4. In a Rex session on `mac`, run commands with `send`, `send-key` and `capture`. Use `send` to type the command, `send-key` for Enter, and `capture` to read the screen.
+4. In a Rex session on `mac`, run commands with `send`, `send-key` and `capture`:
+
+   ```bash
+   rex -S mac send -s <session> 'aside --help'
+   rex -S mac send-key -s <session> Enter
+   rex -S mac capture -s <session>
+   ```
 
 Note: the output of `rex run --wait` vanishes with its block. Use `capture` to keep the output.
 
