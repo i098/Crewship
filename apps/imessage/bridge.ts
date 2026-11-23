@@ -237,7 +237,7 @@ const ownerBubbles = new Set<string>();
 const isOwnerBubble = (id: string) => said.has(id) || ownerBubbles.has(id);
 const whoSent = (id: string) => {
   if (isOwnerBubble(id)) return "the owner";
-  const sender = threadSenders.find(id);
+  const sender = threadSenders?.find(id);
   return sender === undefined ? undefined : sender ? `us (sender ${sender})` : "us";
 };
 let routingRetry: NodeJS.Timeout | undefined;
@@ -255,7 +255,7 @@ type Line = {
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
   sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
-  sent?(space: string, text: string, since: number): Promise<boolean>;
+  sent?(space: string, text: string, since: number, guid: string): Promise<boolean>;
   react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
   markSeen?(id: string): void; // the bridge has handled message `id`; a transport that keeps its own seen-set stores it
   release?(id: string): void; // the bridge failed to handle message `id`; the transport may deliver it again
@@ -286,7 +286,7 @@ async function startLine(name: string): Promise<Line> {
       messages: bb,
       find: (ref) => bb.message(ref.id),
       send: (space, text, reply, guid, beforeSend, sentId) => bb.send(space, text, reply, guid, beforeSend, sentId),
-      sent: (space, text, since) => bb.sent(space, text, since),
+      sent: (space, text, since, guid) => bb.sent(space, text, since, guid),
       markSeen: (id) => bb.markSeen(id),
       release: (id) => bb.release(id),
       react: (ref, emoji, beforeSend) => bb.react(ref.space, ref.id, emoji, beforeSend),
@@ -399,7 +399,8 @@ if (env.FM_IMESSAGE_SLOT) {
     checks: standbyChecks(env, () => readDesk(track(spawnDesk({ model: DESK_MODEL, provider: DESK_PROVIDER, reasoning: DESK_REASONING, voice: true, system: "Reply with the single word ok.", prompt: "ping", spent: 0, memoryDir: MEMORY_DIR, cwd: DESK_DIR, env })))),
   });
 } else await startups[0];
-const threadSenders = openThreadSenders(STATE);
+const threadSenders = DESK_SESSION ? openThreadSenders(STATE) : undefined;
+if (!threadSenders) rmSync(`${STATE}/senders.json`, { force: true });
 for (const ready of startups) void ready.then((line) => line?.activate?.()).catch((e) => console.error(`fm-imessage: could not start a transport's inbound side: ${brief(e)}`));
 memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
@@ -893,7 +894,7 @@ function webSend(text: string): boolean {
   return true;
 }
 
-async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble) {
+async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble: Bubble, guid: string) {
   const maybe: Record<string, string> = {};
   for (const [name, space] of Object.entries(attempts)) {
     if (o.kind === "desk" && (name !== (o.line ?? "photon") || space !== o.space)) continue;
@@ -904,7 +905,7 @@ async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble:
       continue;
     }
     try {
-      if (!await line.sent(space, bubble, o.since ?? 0)) continue;
+      if (!await line.sent(space, bubble, o.since ?? 0, guid)) continue;
       trace(o.id, "history-reconciled");
       return;
     } catch (e) {
@@ -917,15 +918,15 @@ async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble:
 
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
   const guid = `${o.guid}-${i}`;
-  const sender = o.sender ?? "";
-  const sentId = (id: string) => {
-    try { threadSenders.remember(id, sender); }
-    catch (error) { log("save thread sender")(error); }
-  };
-  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble) : {};
+  const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble, guid) : {};
   if (!maybe) return;
   if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   checkDeskDelivery(o);
+  const store = threadSenders;
+  const sentId = store && typeof bubble === "string" ? (id: string) => {
+    try { store.remember(id, o.sender ?? ""); }
+    catch (error) { log("save thread sender")(error); }
+  } : undefined;
   const since = o.since ?? Date.now();
   try {
     const via = await failover(routes(o, i, maybe, guid, sentId), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
@@ -957,7 +958,7 @@ function candidates(o: Out, i: number, retry: boolean): Line[] {
   return preferred ? [preferred, ...pool.filter((line) => line !== preferred)] : pool;
 }
 
-function routes(o: Out, i: number, maybe: Record<string, string>, guid: string, sentId: (id: string) => void): Route<Bubble>[] {
+function routes(o: Out, i: number, maybe: Record<string, string>, guid: string, sentId?: (id: string) => void): Route<Bubble>[] {
   const only = Object.keys(maybe);
   return candidates(o, i, only.length > 0).flatMap((line) => {
     const own = line === lineOf(o);
@@ -1596,7 +1597,7 @@ async function relayThreadReplies(pending: Routing[], current: () => boolean) {
   for (const item of pending) {
     if (!current() || stopping) break;
     if (!isThreadReply(item)) { remaining.push(item); continue; }
-    const sender = item.threadTarget ? threadSenders.find(item.threadTarget) : undefined;
+    const sender = item.threadTarget ? threadSenders?.find(item.threadTarget) : undefined;
     if (sender === "" || sender === FM_HOME || (item.threadTarget && isOwnerBubble(item.threadTarget))) {
       remaining.push(item);
       continue;

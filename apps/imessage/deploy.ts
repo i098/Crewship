@@ -113,7 +113,8 @@ async function rollback(cur: string, target: string, why: string): Promise<never
 // With no slot serving there is nothing to protect and no standby to gate: start the new slot as the owner. If it does not
 // come up, the previous slot is put back.
 async function startUngated(cur: string | undefined, prior: string | undefined, target: string) {
-  if (cur) await sc("stop", unit(cur));
+  const restore = cur && await slotState(cur) !== "failed" ? cur : undefined;
+  if (restore) await sc("stop", unit(restore));
   if (!prior) await sc("stop", FRONT);
   setActive(STATE, target);
   await sc("start", unit(target));
@@ -122,7 +123,7 @@ async function startUngated(cur: string | undefined, prior: string | undefined, 
   await sc("stop", unit(target));
   if (cur) setActive(STATE, cur);
   else rmSync(`${STATE}/active`, { force: true });
-  if (cur) { await sc("reset-failed", unit(cur)); await sc("start", unit(cur)); }
+  if (restore) { await sc("reset-failed", unit(restore)); await sc("start", unit(restore)); }
   await sc("start", FRONT);
   throw new Error(`${target} did not answer /health: ${up.body}`);
 }
@@ -224,9 +225,20 @@ async function slotState(slot: string) {
 async function boot() {
   const slot = readActive(STATE);
   if (!slot) return;
-  const state = await slotState(slot);
-  if (state === "failed") await sc("reset-failed", unit(slot));
-  if (state === "failed" || state === "inactive") await sc("start", unit(slot));
+  if (await slotState(slot) === "inactive") await sc("start", unit(slot));
+}
+
+async function recover() {
+  const lock = await holdLock(`${STATE}/deploy.lock`, 10_000);
+  if (!lock) throw new Error("another imessage-deploy holds the lock");
+  try {
+    const slot = readActive(STATE);
+    if (!slot) throw new Error("no active slot to recover");
+    for (const [action, name] of [["reset-failed", unit(slot)], ["start", unit(slot)], ["start", FRONT]] as const) {
+      const { code } = await sc(action, name);
+      if (code !== 0) throw new Error(`cannot ${action} ${name} (systemctl exit ${code})`);
+    }
+  } finally { lock.release(); }
 }
 
 async function stopAll() {
@@ -240,5 +252,9 @@ const mode = process.argv[2];
 if (mode === "follow") process.exit(await follow().catch((e) => { say(e.message); return 1; }));
 else if (mode === "needed") await needed();
 else if (mode === "stop-all") await stopAll();
+else if (mode === "recover") {
+  await recover();
+  process.exit(0);
+}
 else if (mode === undefined) await deploy().then(() => process.exit(0), (e) => { say(`FAILED: ${e instanceof Error ? e.message : e}`); process.exit(1); });
-else throw new Error("usage: imessage-deploy [needed|follow|stop-all]");
+else throw new Error("usage: imessage-deploy [needed|follow|stop-all|recover]");

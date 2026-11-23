@@ -440,13 +440,14 @@ def test_front_leaves_an_exhausted_active_slot_failed(rig):
     retry.unlink()
     rig.stage()
     (rig.dir / "stage").rename(rig.dir / "green")
-    with subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL) as front:
-        try:
-            wait_for(rig.health, "the deliberate start to recover the line", timeout=15)
-            assert front.poll() is None
-        finally:
-            front.terminate()
-            front.wait(timeout=5)
+    restarted = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+    assert restarted.returncode == 78, restarted.stdout + restarted.stderr
+    assert failed.exists()
+    assert not rig.health()
+
+    recovered = subprocess.run([*command[:-1], "recover"], env=env, capture_output=True, text=True, timeout=10)
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    wait_for(rig.health, "explicit recovery to start the active slot", timeout=15)
 
 
 def test_a_slot_that_is_still_starting_is_waited_for_and_the_deploy_stays_gated(rig):
@@ -461,13 +462,20 @@ def test_a_slot_that_is_still_starting_is_waited_for_and_the_deploy_stays_gated(
     assert rig.active() == "green" and rig.health()
 
 
-def test_a_new_build_that_does_not_start_on_a_downed_line_puts_the_previous_slot_back(rig):
+@pytest.mark.parametrize("exhausted", [False, True])
+def test_a_failed_deploy_on_a_downed_line_preserves_the_previous_slot(rig, exhausted):
     rig.stage()
     assert rig.deploy().returncode == 0 and rig.active() == "blue"
     subprocess.run(["systemctl", "--user", "stop", "fm-imessage@blue.service"], env=rig.env, check=True)
     assert not rig.health()
+    start_limit = rig.run / "blue.failed"
+    if exhausted:
+        start_limit.touch()
     rig.stage(plant_after_handover)
     failed = rig.deploy()
     assert failed.returncode == 1 and "serving slot: none" in failed.stdout, failed.stdout + failed.stderr
     assert rig.active() == "blue" and not rig.alive("green")
-    wait_for(rig.health, "the previous slot serving again")
+    if exhausted:
+        assert start_limit.exists() and not rig.alive("blue")
+    else:
+        wait_for(rig.health, "the previous slot serving again")

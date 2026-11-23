@@ -54,7 +54,7 @@ test("a send without a reply target is not threaded", async () => {
   expect(sent[0]!.selectedMessageGuid).toBeUndefined();
 });
 
-for (const retry of ["relay", "outbox"]) {
+for (const retry of ["relay", "outbox", "restart"]) {
   test(`the ${retry} retry deduplicates delivery without creating a sender match`, async () => {
     const chat = "iMessage;-;+15550000000";
     const tempGuid = crypto.randomUUID();
@@ -71,6 +71,7 @@ for (const retry of ["relay", "outbox"]) {
         if (path.endsWith("/server/info")) return Response.json({ data: {} });
         if (path.endsWith("/message/text")) {
           posts++;
+          if (posts > 1) return Response.json({ data: { guid: "next-send" } });
           return new Response("lost answer", { status: 500 });
         }
         if (path.endsWith(`/chat/${encodeURIComponent(chat)}/message`)) return Response.json({ data: history });
@@ -89,18 +90,19 @@ for (const retry of ["relay", "outbox"]) {
       expect(await bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).toBe("reconciled");
     } else {
       await expect(bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).rejects.toThrow();
-      receiving = new BlueBubbles([relay], dir, {}, () => {});
-      expect(await receiving.sent(chat, "Done.", Date.now())).toBe(true);
+      if (retry === "restart") receiving = new BlueBubbles([relay], dir, {}, () => {});
+      expect(await receiving.sent(chat, "Done.", Date.now(), tempGuid)).toBe(true);
     }
     expect(posts).toBe(1);
     expect(recorded).toEqual([]);
+    await receiving.send(chat, "Done.", undefined, undefined, undefined, record);
     for (const [match, guid] of [[crypto.randomUUID(), "same-text"], [tempGuid, "sent-by-relay"]]) {
       await receiving.webhook(new Request("http://localhost/bluebubbles", {
         method: "POST",
         body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: match, guid } }),
       }));
     }
-    expect(recorded).toEqual(retry === "relay" ? ["sent-by-relay"] : []);
+    expect(recorded).toEqual(retry === "restart" ? ["next-send"] : ["next-send", "sent-by-relay"]);
   });
 }
 
@@ -108,7 +110,7 @@ test("a definite rejection does not block attribution for the next send", async 
   const { bb, reject } = relay(false);
   const chat = "iMessage;-;+15550000000";
   reject(true);
-  await expect(bb.send(chat, "Done.")).rejects.toThrow("HTTP 400");
+  await expect(bb.send(chat, "Done.", undefined, undefined, undefined, () => {})).rejects.toThrow("HTTP 400");
   reject(false);
   const recorded: string[] = [];
   await bb.send(chat, "Done!", undefined, undefined, undefined, (id) => recorded.push(id));

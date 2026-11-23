@@ -523,7 +523,8 @@ The code is `apps/imessage/selfheal.ts`.
   If the line cannot send a text, the handler appends a `failed` line to `$FM_IMESSAGE_ALERT_STATUS` (default `$FM_HOME/state/imessage-selfheal.status`).
 - **Give-up.** After 5 starts in 10 minutes, systemd stops retrying and runs `fm-imessage-heal@<slot>.service` with the installed report handler.
   The front reports `no slot serves the line` once and stays failed.
-  After correcting the fault, run `systemctl --user start fm-imessage.service` to start the active slot again.
+  After correcting the fault, run `bun ~/.local/bin/imessage-deploy.ts recover` with `FM_IMESSAGE_DIR` set.
+  An automatic front start does not reset a failed slot.
 
 To test a fault on a copy, set `STATE_DIRECTORY`, `HOME`, `FM_IMESSAGE_SEND=false` and `FM_IMESSAGE_ALERT_STATUS`, then run `bun selfheal.ts start`.
 
@@ -546,7 +547,11 @@ The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
 - **Handover.** The deploy writes `active`, then stops the old slot. The new slot takes the exclusive lock `owner.lock`, waits for the main port, replays routing and the durable outbox, and listens. Two outbox senders cannot run: the lock and the port each allow one owner. Outbox items keep their ids, and keyed dedupe stops a repeat. While the old slot stops, the main port answers `503 stopping` for 0.5 s, then drops or refuses connections (curl exit 52, 56 or 7). All of these mean nothing was queued, so `fm-imessage` sends the request again every second for up to 150 s (`FM_IMESSAGE_WAIT_S`). A handover or a rollback costs no text, and a retry cannot repeat one. Any other failure ends the command at once.
 - **Confirm.** `POST /probe` queues one item in its own outbox lane, so a retrying text never holds it; its delivery reads the owner's latest text back from the transport and sends no text. With no latest text known the probe fails. If the new slot does not answer `/health` or the probe in time, the deploy stops it, sets `active` back and starts the old slot again (about 100 s). The old slot is stopped during the handover, not kept running: both cannot hold the port and the outbox.
 - **Retry after a failure.** A deploy records a hash of the staged files and the rendered units in `~/.local/state/fm-imessage/deployed` only when it succeeds. The Ansible role runs `imessage-deploy.ts needed` on every apply (exit 3: not deployed) and deploys whenever it answers 3, so a failed deploy runs again at the next apply.
-- **No slot serving.** A deploy first waits up to 120 s (`FM_DEPLOY_SETTLE_MS`) for a slot that is starting or waiting to restart. A slot that settles `active` is gated as above. If the old slot is already down (`failed` or `inactive`), there is no health gate: the new slot starts as the owner and must answer `/health` in time. If it does not, the deploy stops it, puts the previous slot back as `active`, starts it, and exits 1.
+- **No slot serving.** A deploy first waits up to 120 s (`FM_DEPLOY_SETTLE_MS`) for a slot that is starting or waiting to restart.
+  If the slot settles `active`, the deploy uses the health gate.
+  If the old slot is down, the new slot starts as the owner and must answer `/health` in time.
+  If the new slot fails, the deploy restores the previous `active` value and exits 1.
+  The deploy does not reset or start a previous slot that was already failed.
 - **One deploy at a time.** `deploy.lock` serializes deploys.
 
 Run `imessage-deploy.ts` with `FM_IMESSAGE_DIR` set; exit 0 means the new slot serves the line, 1 means the new build was rolled back or failed. After exit 1 the old slot serves only if it was serving before the deploy.
