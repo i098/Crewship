@@ -58,11 +58,10 @@ for (const retry of ["relay", "outbox", "restart"]) {
   test(`the ${retry} retry deduplicates delivery without creating a sender match`, async () => {
     const chat = "iMessage;-;+15550000000";
     const tempGuid = crypto.randomUUID();
-    const history = [
-      { guid: "same-text", text: "Done.", isFromMe: true, chats: [{ guid: chat }] },
-      { guid: "sent-by-relay", text: "Done.", isFromMe: true, chats: [{ guid: chat }] },
-    ];
+    const older = { guid: "same-text", text: "Done.", isFromMe: true, chats: [{ guid: chat }] };
+    const late = { ...older, guid: "sent-by-relay" };
     let posts = 0;
+    let rejectRetry = false;
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -71,11 +70,12 @@ for (const retry of ["relay", "outbox", "restart"]) {
         if (path.endsWith("/server/info")) return Response.json({ data: {} });
         if (path.endsWith("/message/text")) {
           posts++;
+          if (rejectRetry) return new Response("rejected", { status: 400 });
           if (posts > 1) return Response.json({ data: { guid: "next-send" } });
           return new Response("lost answer", { status: 500 });
         }
-        if (path.endsWith(`/chat/${encodeURIComponent(chat)}/message`)) return Response.json({ data: history });
-        return Response.json({ data: history.find((m) => path.endsWith(`/message/${m.guid}`)) });
+        if (path.endsWith(`/chat/${encodeURIComponent(chat)}/message`)) return Response.json({ data: [older] });
+        return Response.json({ data: [older, late].find((m) => path.endsWith(`/message/${m.guid}`)) });
       },
     });
     servers.push(server);
@@ -91,10 +91,15 @@ for (const retry of ["relay", "outbox", "restart"]) {
     } else {
       await expect(bb.send(chat, "Done.", undefined, tempGuid, undefined, record)).rejects.toThrow();
       if (retry === "restart") receiving = new BlueBubbles([relay], dir, {}, () => {});
-      expect(await receiving.sent(chat, "Done.", Date.now(), tempGuid)).toBe(true);
+      expect(await receiving.sent(chat, "Done.", Date.now())).toBe(true);
     }
     expect(posts).toBe(1);
     expect(recorded).toEqual([]);
+    if (retry === "outbox") {
+      rejectRetry = true;
+      await expect(receiving.send(chat, "Done.", undefined, tempGuid, undefined, record)).rejects.toThrow("HTTP 400");
+      rejectRetry = false;
+    }
     await receiving.send(chat, "Done.", undefined, undefined, undefined, record);
     for (const [match, guid] of [[crypto.randomUUID(), "same-text"], [tempGuid, "sent-by-relay"]]) {
       await receiving.webhook(new Request("http://localhost/bluebubbles", {
@@ -102,7 +107,7 @@ for (const retry of ["relay", "outbox", "restart"]) {
         body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: match, guid } }),
       }));
     }
-    expect(recorded).toEqual(retry === "restart" ? ["next-send"] : ["next-send", "sent-by-relay"]);
+    expect(recorded).toEqual(retry === "restart" ? ["next-send"] : []);
   });
 }
 
@@ -156,8 +161,8 @@ test.each([
   const now = Date.now.bind(Date);
   const clock = spyOn(Date, "now").mockImplementation(() => now() + delay);
   try {
-    expect(await bb.send(chat, "Done?", undefined, secondGuid, undefined, record)).toBe("accepted");
     expect(await bb.sent(chat, "Done!", Date.now())).toBe(true);
+    expect(await bb.send(chat, "Done?", undefined, secondGuid, undefined, record)).toBe("accepted");
     await bb.webhook(new Request("http://localhost/bluebubbles", {
       method: "POST",
       body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: firstGuid, guid: bubble.guid } }),
