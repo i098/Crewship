@@ -35,11 +35,11 @@ If the publisher supplies a SHA-256 or SHA-512 digest, add `--checksum=ALGO=DIGE
 Use the publisher's algorithm (`sha-256` or `sha-512`) and hex digest, for example `--checksum="sha-256=$SHA256"`.
 Treat a mismatch as a failed download.
 Without a checksum, parallel requests can mix versions if the file changes during transfer.
-If the file looks corrupt, use a new destination and replace `-x 4 -s 4` with `-x 1 -s 1`.
 
 ## Video or audio page: yt-dlp
 
 Use an HTTP or HTTPS URL for one video, not a playlist-only URL.
+Refuse YouTube clip URLs (`/clip/` on `youtube.com` or its subdomains) because this skill does not support clips.
 Run `command -v yt-dlp`.
 Install commands for the user: `pipx install 'yt-dlp[default]'` (requires pipx) or `brew install yt-dlp` (macOS).
 
@@ -74,8 +74,10 @@ yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 \
 ```
 
 Use the default format selection unless the user requests a specific quality or format.
-Add `-f FORMAT_ID` before `--` to select a format from the list.
-For video with sound, select a combined format or pair separate streams with `-f VIDEO_ID+AUDIO_ID`.
+Add `-f 'FORMAT_ID'` before `--` in the video or audio command.
+For separate streams, use `-f 'VIDEO_ID+AUDIO_ID'`.
+Shell-quote the complete selector as one argument.
+For video with sound, select a combined format or pair separate streams.
 For audio extraction, select a format that contains audio.
 Check `command -v ffmpeg` before merging streams or extracting audio.
 Install commands for the user: `sudo apt install ffmpeg` (Debian/Ubuntu) or `brew install ffmpeg` (macOS).
