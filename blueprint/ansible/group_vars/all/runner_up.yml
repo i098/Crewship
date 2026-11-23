@@ -76,6 +76,7 @@ crewship_runner_up_instances: >-
 crewship_runner_up_machines_repo: >-
   {{ crewship_runner_up.machines_repo | default(crewship_runner_up_repo_names | first | default(''), true) | lower }}
 crewship_runner_up_maintain: "{{ crewship_local_bin }}/runner-up-maintain"
+crewship_runner_up_image_timeout: 3600
 crewship_runner_up_build_gate_bin: "{{ crewship_local_bin }}/build-gate"
 # Opt in: jobs start only when the host-wide build gate has a free slot (docs/runner-up.md#build-gate).
 crewship_runner_up_build_gate: "{{ crewship_runner_up.build_gate | default(false) }}"

@@ -136,7 +136,13 @@
       block:
         - name: Build the initial Docker-in-Docker image
           ansible.builtin.command:
-            argv: ["{{ crewship_runner_up_maintain }}", image, --ensure]
+            argv:
+              - timeout
+              - --kill-after=10s
+              - "{{ crewship_runner_up_image_timeout }}s"
+              - "{{ crewship_runner_up_maintain }}"
+              - image
+              - --ensure
           environment:
             PATH: "{{ crewship_runner_up_shim_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             RUNNER_UP_IMAGE: "{{ crewship_runner_up_image }}"

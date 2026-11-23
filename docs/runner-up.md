@@ -117,7 +117,8 @@ It never touches a running container.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
 Below `resume_pct` (85), the guard queues starts only for the coordinators it stopped.
-It keeps each entry until the coordinator is active.
+The guard leaves a coordinator with an I/O pause to the I/O resume rule.
+For the other coordinators, the guard keeps each entry until the coordinator is active.
 `runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
 The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
 When `full avg60` stays below 40% for 2 minutes, each guard run checks one recorded unit.
@@ -130,6 +131,7 @@ The coordinator's start builds it when it is missing.
 `runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
 Managed apply checks the same runtime before it publishes the config.
+Image preparation during apply, coordinator startup, and timer refresh has a one-hour deadline.
 With `start_services: false`, apply does not publish new or updated configs that contain Docker-in-Docker places.
 Run a managed apply to publish those configs and enable new coordinators.
 The runner-up image timer tests the new derived image before it replaces the image that jobs use.

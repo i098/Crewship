@@ -15,6 +15,6 @@ Environment=RUNNER_UP_DIND_DOCKERFILE={{ crewship_runner_up_dind_dockerfile }}
 Environment=RUNNER_UP_REFRESH_BASE={{ (crewship_runner_up_build_image | bool) | ternary('1', '0') }}
 {% endif %}
 ExecStart={{ crewship_runner_up_maintain }} image
-TimeoutStartSec=3600
+TimeoutStartSec={{ crewship_runner_up_image_timeout }}
 Nice=10
 IOSchedulingClass=idle

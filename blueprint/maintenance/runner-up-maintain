@@ -21,7 +21,7 @@ fi
 have_image() { docker image inspect "$1" >/dev/null 2>&1; }
 have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
 probe_dind() {
-  expected=$(stat -c %d "${RUNNER_UP_GUARD_PATH:?}")
+  expected=$(stat -Lc %d "${RUNNER_UP_GUARD_PATH:?}")
   actual=$(timeout --kill-after=10s 90s docker check-dind-runtime "$1")
   if [ "$actual" != "$expected" ]; then
     echo "runner-up: Set the Sysbox data root on the filesystem of $RUNNER_UP_GUARD_PATH." >&2
@@ -96,6 +96,7 @@ guard)
   pause=${RUNNER_UP_PAUSE_PCT:-88}
   resume=${RUNNER_UP_RESUME_PCT:-85}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
+  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
   queue_start() { timeout --kill-after=1s 2s systemctl --user --no-block start "$@"; }
   if [ "$used" -ge "$pause" ]; then
@@ -112,6 +113,7 @@ guard)
     while read -r i; do
       unit=runner-up@$i.service
       systemctl --user is-active --quiet "$unit" && continue
+      grep -qxF "$unit" "$io_state" 2>/dev/null && continue
       printf '%s\n' "$i" >> "$state.new"
       set -- "$@" "$unit"
     done < "$state"
@@ -120,7 +122,6 @@ guard)
   fi
   # IO resume: /proc/pressure/io "full avg60" below the level for the whole window, then one unit per run.
   # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
-  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   io_calm=$io_state.calm
   io_hot=$io_state.hot
   now=${RUNNER_UP_NOW:-$(date +%s)}
@@ -129,23 +130,21 @@ guard)
   io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
   # IO resume: below the level for the whole window, then one unit per run.
   # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
-  if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
-    if io_below; then
-      [ -s "$io_calm" ] || echo "$now" > "$io_calm"
-      if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
-        read -r unit < "$io_state"
-        if systemctl --user is-active --quiet "$unit"; then
-          grep -vxF "$unit" "$io_state" > "$io_state.new" || :
-        else
-          tail -n +2 "$io_state" > "$io_state.new"
-          printf '%s\n' "$unit" >> "$io_state.new"
-          queue_start "$unit" || :
-        fi
-        mv "$io_state.new" "$io_state"
-        [ -s "$io_state" ] || rm -f "$io_calm"
+  if ! io_below; then
+    rm -f "$io_calm"
+  elif [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
+    [ -s "$io_calm" ] || echo "$now" > "$io_calm"
+    if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
+      read -r unit < "$io_state"
+      if systemctl --user is-active --quiet "$unit"; then
+        grep -vxF "$unit" "$io_state" > "$io_state.new" || :
+      else
+        tail -n +2 "$io_state" > "$io_state.new"
+        printf '%s\n' "$unit" >> "$io_state.new"
+        queue_start "$unit" || :
       fi
-    else
-      rm -f "$io_calm"
+      mv "$io_state.new" "$io_state"
+      [ -s "$io_state" ] || rm -f "$io_calm"
     fi
   fi
   # IO pause: above the level for the whole window, then the newest running heavy coordinator, one per window.

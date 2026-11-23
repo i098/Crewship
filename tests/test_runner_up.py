@@ -475,7 +475,13 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     del plain["docker"]
     machine = {"name": "laptop", "ssh": ["ci@laptop"], "cores": 2, "memory_gb": 8}
     settings = runner(
-        home, repos=[plain, dind, REPOS[1]], machines=[machine], machines_repo="Acme/E2E.Tests"
+        home,
+        repos=[plain, dind, REPOS[1]],
+        machines=[machine],
+        machines_repo="Acme/E2E.Tests",
+        io_write_device=str(home.parent / "test-block-device"),
+        io_write_mb=200,
+        io_write_iops=500,
     )
     ship.validate_config(document(runner_up=settings))
     facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
@@ -500,6 +506,9 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     image_service = unit_sections(units(home) / "runner-up-image.service")["Service"]
     refresh = int(custom_image)
     assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
+    limits = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
+    assert limits["IOWriteBandwidthMax"] == [f'{settings["io_write_device"]} 200M']
+    assert limits["IOWriteIOPSMax"] == [f'{settings["io_write_device"]} 500']
     assert apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs) == 0
 
 
@@ -967,6 +976,23 @@ def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
     assert calls == [] and left == ["a", "b"]
 
 
+def test_disk_resume_leaves_io_paused_units_until_io_recovers(stubs, tmp_path):
+    unit = "runner-up@a-b.service"
+    calls, left = io_guard(
+        stubs, tmp_path, "60.00", now=1000, io=f"{unit}\n", disk_paused="a-b\nc-d\n"
+    )
+    assert calls == ["systemctl --user --no-block start runner-up@c-d.service"]
+    assert left == [unit]
+    assert (tmp_path / "paused").read_text() == "c-d\n"
+    calls, _ = io_guard(
+        stubs, tmp_path, "5.00", now=1100, io="", active_units="runner-up@c-d.service"
+    )
+    assert calls == []
+    assert io_guard(stubs, tmp_path, "5.00", now=1220, io="") == (
+        [f"systemctl --user --no-block start {unit}"], [unit]
+    )
+
+
 def heal(stubs, tmp_path, used, *, disk_paused="", io_paused="", failed=True, env=None):
     """Run `guard` with both coordinators down and return the `start` calls."""
     (tmp_path / "io.paused").write_text(io_paused)
@@ -1117,11 +1143,14 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
     sock.touch()
     recipe = tmp_path / "Dockerfile"
     recipe.write_text("FROM scratch\n")
+    guard_path = tmp_path / "guard"
+    guard_path.symlink_to("/proc", target_is_directory=True)
     env = {
         "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER_SOCK": str(sock),
         "DOCKER_CGROUP_DRIVER": "systemd",
-        "RUNNER_UP_GUARD_PATH": str(tmp_path),
+        "RUNNER_UP_GUARD_PATH": str(guard_path),
+        "DOCKER_STORE_DEVICE": str(os.stat("/proc").st_dev),
         "RUNNER_UP_DOCKERFILE": str(recipe),
         "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
         "RUNNER_UP_REFRESH_BASE": "0",
@@ -1141,7 +1170,9 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
         "runner-up-maintain",
         stubs,
         "image",
-        env={**env, "BUILD_CONTENT": "wrong disk", "DOCKER_STORE_DEVICE": "-1"},
+        env={
+            **env, "BUILD_CONTENT": "wrong disk", "DOCKER_STORE_DEVICE": str(guard_path.lstat().st_dev)
+        },
         code=125,
     )
     assert (images / derived).read_text() == "built\n"

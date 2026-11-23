@@ -23,7 +23,7 @@ Environment=RUNNER_UP_DIND_DOCKERFILE={{ crewship_runner_up_dind_dockerfile }}
 # The first start builds the job image when the host does not have it yet.
 ExecStartPre={{ crewship_runner_up_maintain }} start {{ crewship_runner_up_config_dir }}/%i.json
 ExecStart={{ crewship_runner_up_bin }} serve --config {{ crewship_runner_up_config_dir }}/%i.json
-TimeoutStartSec=3600
+TimeoutStartSec={{ crewship_runner_up_image_timeout }}
 Restart=on-failure
 RestartSec=10
 # Stop only the coordinator: the place runners of running jobs carry on.
