@@ -1,7 +1,7 @@
 # CI pool
 
 **Deprecated:** Move each repository to [runner-up](runner-up.md) before you remove its CI pool slots.
-On Ubuntu 26.04, keep jobs that need Docker-in-Docker on the CI pool.
+Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 
 The CI pool runs GitHub Actions jobs on this host with no runner to register or remove by hand. [runner-up](runner-up.md) replaces it one repository at a time. One list in `.local/host.yml` names each repository and its number of slots. Each slot is a systemd user unit that asks GitHub for a just-in-time (JIT) runner, runs one job in a fresh container, and exits. GitHub removes a JIT runner after its one job, and systemd starts the slot again for the next job.
 

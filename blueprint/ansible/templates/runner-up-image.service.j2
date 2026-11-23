@@ -10,6 +10,7 @@ Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
 Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
 Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
 {% if crewship_runner_up_dind | bool %}
+Environment=RUNNER_UP_DIND_IMAGE={{ crewship_runner_up_dind_image }}
 Environment=RUNNER_UP_DIND_DOCKERFILE={{ crewship_runner_up_dind_dockerfile }}
 Environment=RUNNER_UP_REFRESH_BASE={{ (crewship_runner_up_build_image | bool) | ternary('1', '0') }}
 {% endif %}

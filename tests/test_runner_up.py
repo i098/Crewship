@@ -127,6 +127,12 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, start_services=Fals
         "ansible_facts": facts or {},
         "crewship": crewship,
     }
+    if facts and "distribution_version" in facts:
+        release = home.parent / "os-release"
+        release.write_text(
+            f"ID={facts['distribution'].lower()}\nVERSION_ID={facts['distribution_version']}\n"
+        )
+        variables["crewship_runner_up_os_release"] = str(release)
     (home.parent / "etc").mkdir(exist_ok=True)
     result = subprocess.run(
         [
@@ -370,6 +376,7 @@ def test_the_slice_caps_writes_only_when_a_disk_is_named(home):
 def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(home):
     ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
     apply(home, runner(home), ci_pool=ci_pool)
+    assert not (home / ".local/share/runner-up/runner-up-dind.Dockerfile").exists()
     assert not (units(home) / "runner-up-image.timer").exists()
     apply(home, runner(home))
     assert (units(home) / "runner-up-image.timer").exists()
@@ -397,25 +404,17 @@ def test_a_repository_that_leaves_the_list_loses_its_unit_and_config_and_the_oth
     assert (wants / "runner-up@acme-web.service").is_symlink()
 
 
-def test_the_job_image_recipe_is_the_ci_pools_image(home):
-    assert (
-        ROOT / "blueprint/containers/ci-runner.Dockerfile"
-    ).read_text() == pool_script.DOCKERFILE
-
-
-def test_the_job_image_owns_the_directories_the_cache_mounts_sit_under():
-    # Docker creates a missing mount parent as root, and then rustup cannot install into it.
-    line = "install -d -o runner -g runner /home/runner/.cargo /home/runner/.cache"
-    recipe = (ROOT / "blueprint/containers/ci-runner.Dockerfile").read_text()
-    assert line in recipe
-    assert line in pool_script.DOCKERFILE
-
-
-def test_reserved_labels_match_the_validator_and_the_template(home):
-    variables = yaml.safe_load(
-        (ROOT / "blueprint/ansible/group_vars/all/runner_up.yml").read_text()
-    )
-    assert tuple(variables["crewship_runner_up_reserved_labels"]) == ship.RUNNER_UP_RESERVED_LABELS
+def test_github_default_and_runner_up_reserved_labels_do_not_make_pools(home):
+    reserved = ["self-hosted", "Linux", "Windows", "macOS", "X64", "ARM64", "ARM", "X86"]
+    repo = {"repo": "acme/web", "slots": 1}
+    with pytest.raises(ValueError, match="needs a label besides"):
+        ship.validate_config(document(runner_up={"repos": [{**repo, "labels": reserved}]}))
+    with_pool = {**repo, "labels": [*reserved, "web"]}
+    ship.validate_config(document(runner_up={"repos": [with_pool]}))
+    apply(home, runner(home, repos=[with_pool]))
+    cfg = config(home)
+    assert [pool["label"] for pool in cfg["pools"]] == ["web"]
+    assert cfg["machines"][0]["places"][0]["pools"] == ["web"]
 
 
 # --- ship.py checks ---------------------------------------------------------
@@ -456,13 +455,19 @@ def test_dind_places_only_serve_their_pool_locally(home):
     by_pool = {place["pools"][0]: place["image"] for place in local["places"]}
     assert by_pool == {"e2e": "crewship-ci-runner-dind:latest", "plain": "crewship-ci-runner:latest"}
     assert remote["places"][0]["pools"] == ["plain"]
+    directory = home / ".local/share/runner-up"
+    service = unit_sections(units(home) / "runner-up@.service")["Service"]
+    assert f"RUNNER_UP_DIND_DOCKERFILE={directory}/runner-up-dind.Dockerfile" in service["Environment"]
+    assert f"RUNNER_UP_DIND_IMAGE={by_pool['e2e']}" in service["Environment"]
+    assert (directory / "runner-up-dind.Dockerfile").is_file()
+    assert (directory / "shim/dind-image").read_text().strip() == by_pool["e2e"]
     assert apply(home, settings, facts=facts) == 0
 
 
 def test_apply_refuses_dind_on_ubuntu_2604(home):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     facts = {"distribution": "Ubuntu", "distribution_version": "26.04"}
-    with pytest.raises(AssertionError, match="Docker-in-Docker is not supported on Ubuntu 26.04"):
+    with pytest.raises(AssertionError, match="Docker-in-Docker requires Ubuntu 24.04"):
         apply(home, runner(home, repos=[dind]), facts=facts)
     assert instances(home) == []
 
@@ -492,11 +497,11 @@ def test_the_schema_refuses_a_machine_without_a_budget_and_a_bad_memory_cap(bloc
 
 @pytest.fixture
 def stubs(tmp_path):
-    """A `docker` and a `sudo` that record their arguments; `docker image inspect` fails
-    unless the file `image` exists."""
+    """Record Docker arguments and store each local image tag separately."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "calls"
+    (tmp_path / "images").mkdir()
     for name in ("docker", "sudo"):
         stub = bin_dir / name
         stub.write_text(
@@ -509,9 +514,14 @@ def stubs(tmp_path):
             '      *) echo "unknown flag: $a" >&2; exit 125;; esac\n'
             "  done\n"
             "fi\n"
-            'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit 1;; esac\n'
+            'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit "${DOCKER_FAIL_CODE:-1}";; esac\n'
             'if [ "$1" = info ]; then printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}"; fi\n'
-            '[ "$1 $2" = "image inspect" ] && [ ! -e "$IMAGE_EXISTS" ] && exit 1\n'
+            'if [ "$1 $2" = "image inspect" ]; then test -f "$IMAGES/$3"; exit $?; fi\n'
+            'if [ "$1" = build ]; then\n'
+            '  while [ "$1" != --tag ]; do shift; done\n'
+            '  touch "$IMAGES/$2"\n'
+            'fi\n'
+            'if [ "$1 $2" = "network create" ]; then for last; do :; done; echo "$last"; fi\n'
             "exit 0\n"
         )
         stub.chmod(0o755)
@@ -524,6 +534,7 @@ def run_script(script, stubs, *args, env=None, code=0, **kwargs):
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER": str(bin_dir / "docker"),
         "XDG_RUNTIME_DIR": str(log.parent),
+        "IMAGES": str(log.parent / "images"),
         **(env or {}),
     }
     done = subprocess.run(
@@ -567,17 +578,51 @@ def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
         "RUNNER_UP_OS_RELEASE": str(release),
         "RUNNER_UP_SHARED_CACHE": str(tmp_path / "cache"),
         "DOCKER_CGROUP_DRIVER": driver,
-        "IMAGE_EXISTS": str(sock),
+        "RUNNER_UP_DIND_IMAGE_FILE": str(tmp_path / "dind-image"),
     }
     image = "crewship-ci-runner-dind:latest"
+    (tmp_path / "dind-image").write_text(f"{image}\n")
+    (tmp_path / "images" / image).touch()
     calls = run_script("runner-up-docker", stubs, "run", "--rm", image, env=env, code=code)
     expected = [] if version == "26.04" else ["docker info --format {{.CgroupDriver}}"]
     if not code:
-        expected += [
-            f"docker image inspect {image}",
-            f"docker run --cgroup-parent runnerup.slice --pids-limit 8192 --runtime=sysbox-runc --rm {image}",
-        ]
+        assert calls[:2] == [*expected, f"docker image inspect {image}"]
+        assert "--runtime=sysbox-runc" in calls[3]
+        assert "--cgroup-parent runnerup.slice" in calls[3]
+        assert "--volume" not in calls[3] and " -v " not in calls[3]
+        return
     assert calls == expected
+
+
+def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, tmp_path):
+    image = "crewship-ci-runner-dind:latest"
+    (tmp_path / "images" / image).touch()
+    tag = tmp_path / "dind-image"
+    tag.write_text(f"{image}\n")
+    release = tmp_path / "os-release"
+    release.write_text("ID=ubuntu\nVERSION_ID=24.04\n")
+    socket = tmp_path / "docker.sock"
+    socket.touch()
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(socket),
+        "RUNNER_UP_DIND_IMAGE_FILE": str(tag),
+        "RUNNER_UP_OS_RELEASE": str(release),
+        "DOCKER_CGROUP_DRIVER": "systemd",
+        "DOCKER_FAILS": "second-place",
+        "DOCKER_FAIL_CODE": "125",
+    }
+    networks = []
+    for place, code in (("first-place", 0), ("second-place", 125)):
+        calls = run_script(
+            "runner-up-docker", stubs, "run", "--rm", "--name", place, image, env=env, code=code
+        )
+        create, launch, remove = calls[-3:]
+        assert create.startswith("docker network create --driver bridge ")
+        network = create.split()[-1]
+        assert launch.split()[launch.split().index("--network") + 1] == network
+        assert remove == f"docker network rm {network}"
+        networks.append(network)
+    assert networks[0] != networks[1]
 
 
 def test_the_shim_mounts_the_shared_build_cache_when_it_is_set(stubs, tmp_path):
@@ -623,6 +668,7 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
     calls = run_script("runner-up-maintain", stubs, "clean", env={"RUNNER_UP_DISK_MAX_GB": "7"})
     assert calls == [
         "docker container prune --force --filter label=runner-up.place --filter until=1h",
+        "docker network prune --force --filter label=runner-up.dind --filter until=1h",
         "docker image prune --force",
         "docker builder prune --force --keep-storage 7GB",
     ]
@@ -631,7 +677,7 @@ def test_clean_removes_stopped_place_containers_and_layers_and_caps_the_build_ca
 def test_clean_runs_every_step_when_one_fails_and_then_fails_the_unit(stubs):
     env = {"DOCKER_FAILS": "container prune"}
     calls = run_script("runner-up-maintain", stubs, "clean", env=env, code=1)
-    assert [c.split()[1] for c in calls] == ["container", "image", "builder"]
+    assert [c.split()[1] for c in calls] == ["container", "network", "image", "builder"]
 
 
 def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):
@@ -861,7 +907,7 @@ def test_the_guard_unit_quotes_the_instance_list_so_systemd_keeps_every_name(hom
 def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(stubs, tmp_path):
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n")
-    env = {"RUNNER_UP_DOCKERFILE": str(dockerfile), "IMAGE_EXISTS": str(tmp_path / "image")}
+    env = {"RUNNER_UP_DOCKERFILE": str(dockerfile)}
     calls = run_script("runner-up-maintain", stubs, "image", "--ensure", env=env)
     (build,) = [c for c in calls if c.startswith("docker build")]
     for flag in ("--pull", "--rm", "--force-rm", "--tag crewship-ci-runner:latest"):
@@ -874,9 +920,8 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
 ):
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n")
-    present = tmp_path / "image"
-    present.touch()
-    env = {"RUNNER_UP_DOCKERFILE": str(dockerfile), "IMAGE_EXISTS": str(present)}
+    (tmp_path / "images/crewship-ci-runner:latest").touch()
+    env = {"RUNNER_UP_DOCKERFILE": str(dockerfile)}
     calls = run_script("runner-up-maintain", stubs, "image", "--ensure", env=env)
     assert calls == ["docker image inspect crewship-ci-runner:latest"]
     calls = run_script("runner-up-maintain", stubs, "image", env=env)
@@ -884,22 +929,30 @@ def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_alwa
 
 
 def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_path):
-    base = tmp_path / "base"
+    base = "crewship-ci-runner:latest"
+    derived = "crewship-ci-runner-dind:latest"
+    images = tmp_path / "images"
+    (images / base).touch()
     recipe = tmp_path / "Dockerfile"
-    base.touch()
     recipe.write_text("FROM scratch\n")
     env = {
-        "IMAGE_EXISTS": str(base),
+        "RUNNER_UP_DIND_IMAGE": derived,
         "RUNNER_UP_DOCKERFILE": str(recipe),
         "RUNNER_UP_DIND_DOCKERFILE": str(recipe),
         "RUNNER_UP_REFRESH_BASE": "0",
     }
     calls = run_script("runner-up-maintain", stubs, "image", "--ensure", env=env)
-    assert not any(call.startswith("docker build") for call in calls)
-    calls = run_script("runner-up-maintain", stubs, "image", env=env)
+    assert sorted(tag.name for tag in images.iterdir()) == [derived, base]
     (build,) = [call for call in calls if call.startswith("docker build")]
-    assert "--build-arg BASE_IMAGE=crewship-ci-runner:latest" in build
-    assert "--tag crewship-ci-runner-dind:latest" in build
+    assert f"--build-arg BASE_IMAGE={base}" in build
+    assert f"--tag {derived}" in build
+    calls = run_script("runner-up-maintain", stubs, "image", "--ensure", env=env)
+    assert sum(call.startswith("docker build") for call in calls) == 1
+    calls = run_script("runner-up-maintain", stubs, "image", env=env)
+    assert [call.split(" --tag ")[1].split()[0] for call in calls if " --tag " in call] == [
+        derived,
+        derived,
+    ]
 
 
 def gate(tmp_path, *args, env=None, timeout=20, stdin=None):

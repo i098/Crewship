@@ -16,8 +16,15 @@ Environment=RUNNER_UP_BUILD_GATE={{ crewship_runner_up_build_gate_bin }}
 {% endif %}
 Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
 Environment=RUNNER_UP_DOCKERFILE={{ crewship_runner_up_dockerfile }}
+{% if crewship_runner_up_dind | bool %}
+Environment=RUNNER_UP_DIND_IMAGE={{ crewship_runner_up_dind_image }}
+Environment=RUNNER_UP_DIND_DOCKERFILE={{ crewship_runner_up_dind_dockerfile }}
+{% endif %}
 # The first start builds the job image when the host does not have it yet.
 ExecStartPre={{ crewship_runner_up_maintain }} image --ensure
+{% if crewship_runner_up_dind | bool %}
+ExecStartPre={{ crewship_runner_up_shim_dir }}/docker check-dind-runtime
+{% endif %}
 ExecStart={{ crewship_runner_up_bin }} serve --config {{ crewship_runner_up_config_dir }}/%i.json
 TimeoutStartSec=3600
 Restart=on-failure

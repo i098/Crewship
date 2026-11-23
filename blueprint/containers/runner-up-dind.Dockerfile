@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=crewship-ci-runner:latest
+ARG BASE_IMAGE
 FROM docker:29-dind@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c AS engine
 FROM ${BASE_IMAGE}
 USER root

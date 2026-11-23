@@ -58,6 +58,7 @@ crewship_runner_up_cache_max_gb: >-
 crewship_runner_up_slice: runnerup.slice
 crewship_runner_up_slice_dir: /etc/systemd/system
 crewship_runner_up_image: crewship-ci-runner:latest
+crewship_runner_up_dind_image: crewship-ci-runner-dind:latest
 crewship_runner_up_dir: "{{ crewship_cfg.home }}/.local/share/runner-up"
 crewship_runner_up_shim_dir: "{{ crewship_runner_up_dir }}/shim"
 crewship_runner_up_dockerfile: "{{ crewship_runner_up_dir }}/ci-runner.Dockerfile"

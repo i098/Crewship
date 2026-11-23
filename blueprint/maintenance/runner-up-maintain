@@ -14,12 +14,13 @@ image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
 lock=${RUNNER_UP_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-image.lock}
 
 dind_recipe=${RUNNER_UP_DIND_DOCKERFILE-}
-dind_image=crewship-ci-runner-dind:latest
+dind_image=${RUNNER_UP_DIND_IMAGE-}
 have_image() { docker image inspect "$1" >/dev/null 2>&1; }
 have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
 
 case "${1-}" in
 image)
+  [ -z "$dind_recipe" ] || : "${dind_image:?Set RUNNER_UP_DIND_IMAGE}"
   [ "${2-}" = --ensure ] && have_images && exit 0
   : "${RUNNER_UP_DOCKERFILE:?}"
   exec 9>"$lock"
@@ -47,6 +48,7 @@ clean)
   failed=0
   prune() { timeout "$limit" docker "$@" >/dev/null || failed=1; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
+  prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force
   prune builder prune --force --keep-storage "${RUNNER_UP_DISK_MAX_GB:-50}GB"
   exit "$failed" ;;

@@ -32,6 +32,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check runner write access to the cache parents
+        run: test -w /home/runner/.cargo && test -w /home/runner/.cache
+
       - name: Install latest uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
@@ -73,10 +76,30 @@ jobs:
     if: inputs.dind_pool != ''
     runs-on: ${{ inputs.dind_pool }}
     timeout-minutes: 20
+    outputs:
+      daemon_id: ${{ steps.smoke.outputs.id }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build and run a Compose service
+      - name: Build with Buildx and run a Compose service
+        id: smoke
         run: sh tests/runner-up-dind-smoke.sh
+
+  docker-in-docker-isolation:
+    needs: docker-in-docker
+    runs-on: ${{ inputs.dind_pool }}
+    timeout-minutes: 5
+    steps:
+      - name: Require an independent empty Docker daemon
+        env:
+          FIRST_DAEMON_ID: ${{ needs.docker-in-docker.outputs.daemon_id }}
+        run: |
+          daemon=$(docker info --format '{{.ID}}')
+          containers=$(docker ps -aq)
+          test -n "$FIRST_DAEMON_ID"
+          test -n "$daemon"
+          test "$daemon" != "$FIRST_DAEMON_ID"
+          test -z "$containers"
+          printf 'daemon=%s\n' "$daemon"

@@ -123,7 +123,8 @@ Each guard run also starts a coordinator in the failed state when no pause holds
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
-When any entry uses `docker: dind`, apply builds the derived image before publishing the config.
+On a Docker-in-Docker host, coordinator start also ensures the derived image and checks the Sysbox runtime.
+Apply checks the same runtime before it publishes the config when `start_services` is enabled.
 The runner-up image timer refreshes the derived image even if the CI pool owns the base image.
 
 ## Cut over one repository
@@ -146,7 +147,7 @@ No step stops a busy runner.
 5. Repeat for the next repository.
 
 Keep `crewship.ci_pool` only for repositories that did not move yet.
-On Ubuntu 26.04, keep Docker-in-Docker repositories on the CI pool.
+Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
@@ -188,10 +189,9 @@ Podman with its Docker socket is also a drop-in, but it would save only dockerd 
 
 ## Docker in a job
 
-Install [Sysbox](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md) on the Linux host and register `sysbox-runc` with Docker.
-Use a [distribution that Sysbox supports](https://github.com/nestybox/sysbox/blob/master/docs/distro-compat.md).
-Apply rejects Docker-in-Docker places on Ubuntu 26.04 because its AppArmor policy blocks Sysbox FUSE mounts.
-Use Ubuntu 24.04 for these places, or keep these jobs on the CI pool.
+Use Ubuntu 24.04 with [Sysbox](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md).
+Register `sysbox-runc` with Docker.
+Apply and launch reject all other releases, including Ubuntu 26.04.
 Keep the host's default Docker runtime unchanged.
 Use Docker with the systemd cgroup driver.
 Check the runtime and driver with `sudo docker info --format '{{json .Runtimes}} {{.CgroupDriver}}'`.
@@ -204,11 +204,15 @@ The job starts only after its own Docker daemon answers on a Unix socket inside 
 The job can use `docker`, `docker compose`, and `docker buildx`.
 The job, daemon, and nested containers stay under the job's CPU, memory, and process caps in `runnerup.slice`.
 The job does not get the host Docker socket or the shared build cache.
+Each place uses a separate outer bridge network with outbound access and no host port mappings.
+The shim removes the network when the place exits.
 Docker images and volumes inside the job go away with the place container.
 
 For a smoke test, add a Docker-in-Docker pool for Crewship.
 Run [`ci-pool-smoke`](../.github/workflows/ci-pool-smoke.yml) manually with `dind_pool` set to that pool label.
-The Docker job must print `runner-up-dind-ok` and exit successfully.
+The first job must print `runner-up-dind-ok`. The second job must report a different daemon ID.
+While the Compose service is active, run `sh tests/runner-up-dind-smoke.sh --host <outer-container-name>` on the host with Docker access.
+The host check must print cgroup paths under `runnerup.slice` for `dockerd` and the nested process.
 
 ## Not covered
 

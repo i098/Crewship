@@ -7,33 +7,57 @@ set -eu
 docker=${RUNNER_UP_DOCKER:-/usr/bin/docker}
 slice=${RUNNER_UP_SLICE:-runnerup.slice}
 [ -w "${RUNNER_UP_DOCKER_SOCK:-/var/run/docker.sock}" ] || docker="sudo -n $docker"
+check_dind_host() {
+  # shellcheck source=/dev/null
+  . "${RUNNER_UP_OS_RELEASE:-/etc/os-release}"
+  if [ "${ID-}:${VERSION_ID-}" != ubuntu:24.04 ]; then
+    echo 'runner-up: Docker-in-Docker requires Ubuntu 24.04 with Sysbox.' >&2
+    exit 125
+  fi
+}
+dind_image_file=${RUNNER_UP_DIND_IMAGE_FILE:-$(dirname "$0")/dind-image}
+dind_image=
+
 case "${1-}" in
+check-dind-host)
+  check_dind_host
+  exit 0 ;;
+check-dind-runtime)
+  read -r dind_image < "$dind_image_file"
+  [ -n "$dind_image" ] || exit 125
+  RUNNER_UP_BUILD_GATE= exec "$0" run --rm --entrypoint /bin/sh "$dind_image" -ec \
+    'test -w /home/runner/.cargo && test -w /home/runner/.cache' ;;
 run)
   shift
-  runtime=
+  network=
+  if [ -f "$dind_image_file" ]; then
+    read -r dind_image < "$dind_image_file"
+  fi
   for arg do
-    [ "$arg" = crewship-ci-runner-dind:latest ] || continue
-    runtime=--runtime=sysbox-runc
-    # shellcheck source=/dev/null
-    . "${RUNNER_UP_OS_RELEASE:-/etc/os-release}"
-    if [ "${ID-}:${VERSION_ID-}" = ubuntu:26.04 ]; then
-      echo 'runner-up: Docker-in-Docker is not supported on Ubuntu 26.04: AppArmor blocks Sysbox FUSE mounts. Use a Sysbox-supported host such as Ubuntu 24.04.' >&2
-      exit 125
+    [ -n "$dind_image" ] && [ "$arg" = "$dind_image" ] || continue
+    if [ -n "${RUNNER_UP_BUILD_GATE-}" ]; then
+      gate=$RUNNER_UP_BUILD_GATE
+      RUNNER_UP_BUILD_GATE= exec "$gate" "$0" run "$@"
     fi
+    check_dind_host
     # shellcheck disable=SC2086 # $docker can include sudo -n.
     if [ "$($docker info --format '{{.CgroupDriver}}')" != systemd ]; then
       echo 'runner-up: Docker-in-Docker places require the systemd cgroup driver' >&2
       exit 125
     fi
     # shellcheck disable=SC2086 # $docker can include sudo -n.
-    if ! $docker image inspect "$arg" >/dev/null 2>&1; then
+    if ! $docker image inspect "$dind_image" >/dev/null 2>&1; then
       echo 'runner-up: Docker-in-Docker image is missing. Run the runner-up image service.' >&2
       exit 125
     fi
+    # shellcheck disable=SC2086 # $docker can include sudo -n.
+    network=$($docker network create --driver bridge --label runner-up.dind \
+      "runner-up-dind-$(cat /proc/sys/kernel/random/uuid)") || exit 125
+    trap '$docker network rm "$network" >/dev/null' EXIT
     break
   done
   cache=
-  if [ -z "$runtime" ] && [ -n "${RUNNER_UP_SHARED_CACHE-}" ]; then
+  if [ -z "$network" ] && [ -n "${RUNNER_UP_SHARED_CACHE-}" ]; then
     # The build cache every job of the host shares (docs/runner-up.md#shared-build-cache): the
     # compile cache, the cargo registry, the package stores, and cargo's lock files so the lock holds across jobs.
     # Never a shared target directory: a job builds in its own container.
@@ -55,9 +79,21 @@ run)
   # A job's own value of either variable still wins.
   jobs=
   [ -z "${RUNNER_UP_JOB_CPUS-}" ] || jobs="-e MOLD_JOBS=1 -e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
+  if [ -n "$network" ]; then
+    exec 8<&0
+    # shellcheck disable=SC2086 # $docker and $jobs contain separate arguments.
+    $docker run --cgroup-parent "$slice" --pids-limit 8192 --runtime=sysbox-runc \
+      --network "$network" $jobs "$@" <&8 8<&- &
+    child=$!
+    trap 'kill -TERM "$child" 2>/dev/null || :' HUP INT TERM
+    status=0
+    wait "$child" || status=$?
+    while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+    exit "$status"
+  fi
   # RUNNER_UP_BUILD_GATE names build-gate (docs/runner-up.md#build-gate): the job starts when the host has a free slot.
   # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache and $jobs hold no spaces inside a word
-  exec ${RUNNER_UP_BUILD_GATE-} $docker run --cgroup-parent "$slice" --pids-limit 8192 $runtime $jobs $cache "$@" ;;
+  exec ${RUNNER_UP_BUILD_GATE-} $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;
 build)
   shift
   # shellcheck disable=SC2086
