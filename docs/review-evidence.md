@@ -19,6 +19,8 @@ Use each row that applies to your change.
    Attach PNG board exports to a PR comment and copy the attachment URL.
    Never commit evidence binaries.
 3. Embed the screenshots on separate lines under `## Review evidence` as `![Before](URL)` and `![After](URL)`.
+   Use `https://github.com/user-attachments/assets/` URLs with the upload ID.
+   Keep the screenshots outside code blocks.
    If GitHub inserts an HTML tag, copy its `src` URL into the Markdown image.
    Use a separate upload for each revision.
    For a new view, put `Before: none, new view` on its own line in place of the Before image.
@@ -28,7 +30,8 @@ Use each row that applies to your change.
 
 ## Automatic screenshot checks
 
-The local pre-push check and CI use the same case-insensitive Git globs from the repository root:
+CI and the local pre-push check compare the PR head with its merge base.
+They use the same case-insensitive Git globs from the repository root:
 
 - Site pages, templates, styles, and scripts: `site/public/**/*.html`, `site/public/**/*.css`, `site/public/**/*.js`, `site/build.py`.
 - Terminal UI source: `tools/*-tui/**/*.ts`, `tools/fleet-health/**/*.ts`, `tools/tui-theme/**/*.ts`.
