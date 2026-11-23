@@ -45,6 +45,8 @@ Follow the [Witch web viewer setup](https://github.com/i098/witch/blob/HEAD/web/
 Set up the Witch server for real screen capture with the [Witch configuration guide](https://github.com/i098/witch/blob/HEAD/docs/configuration.md).
 In `[voxl]`, map each device ID you pass to `--device` to its voxl WebSocket URL.
 Witch records synthetic frames only when the `[voxl]` map is empty.
+For remote access, follow [Witch’s TLS deployment guide](https://github.com/i098/witch/blob/HEAD/docs/deploy.md#tls-through-a-reverse-proxy).
+Use the proxy’s HTTPS URL for the web viewer and for `--server` on remote devices.
 
 The shared server token gives full access to recordings and capture controls for all devices.
 Enroll only Linux or macOS devices you trust with that access.
