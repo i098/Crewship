@@ -14,6 +14,7 @@ LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)", re
 RAW_HTML = re.compile(r"^ {0,3}<(?:[!?/]|[A-Za-z])")
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
+HTML_COMMENT = re.compile(r"<!--")
 MARKUP = re.compile(CODE_SPAN + r"|</?[A-Za-z][\w-]*(?:\s+[^<>]*)?\s*/?>")
 LINK_DEFINITION = re.compile(
     r"^ {0,3}\[(?:\\.|[^\[\]\\\n])+\]:[ \t]*(?:\n[ \t]*)?"
@@ -38,7 +39,7 @@ SCREENSHOT = re.compile(
 NEW_VIEW = re.compile(r" {0,3}Before: none, new view[ \t]*")
 
 
-def strip_comments(line, comment):
+def strip_comments(line, comment, *, token_pattern=COMMENT_TOKEN):
     output = []
     while line:
         if comment:
@@ -47,12 +48,12 @@ def strip_comments(line, comment):
                 break
             comment = False
             continue
-        token = COMMENT_TOKEN.search(line)
+        token = token_pattern.search(line)
         if not token:
             output.append(line)
             break
         output.append(line[:token.start()])
-        if token[1]:
+        if token[0] != "<!--":
             output.append(token[0])
         else:
             comment = True
@@ -64,7 +65,7 @@ def literal_html_lines(tag, line, lines):
     end = re.compile(rf"</{tag}>", re.I)
     comment = False
     while line is not None:
-        line, comment = strip_comments(line, comment)
+        line, comment = strip_comments(line, comment, token_pattern=HTML_COMMENT)
         yield line, "html"
         if end.search(line):
             return comment
@@ -88,7 +89,9 @@ def body_lines(markdown):
             comment = yield from literal_html_lines(opening[1], raw, lines)
             continue
         raw_html = comment or RAW_HTML.match(raw)
-        line, comment = strip_comments(raw, comment)
+        line, comment = strip_comments(
+            raw, comment, token_pattern=HTML_COMMENT if raw_html else COMMENT_TOKEN
+        )
         if raw_html:
             yield line, "html"
         elif marker := FENCE.match(line):
@@ -156,7 +159,6 @@ def changes_ui(base):
         "diff",
         "--name-only",
         "--no-renames",
-        "-z",
         f"{base}...HEAD",
         "--",
         *(f":(top,icase,glob){pattern}" for pattern in UI_GLOBS),
