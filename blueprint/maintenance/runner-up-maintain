@@ -89,8 +89,12 @@ clean)
   # so one that is left here belongs to a place that crashed.
   # Each step runs on its own, with a time limit: a prune that fails (another prune runs) or hangs on a
   # busy disk must not skip the others, or the build cache grows past its cap. The unit still fails.
+  limit=${RUNNER_UP_PRUNE_TIMEOUT:-210}
+  if ! [ "$limit" -gt 0 ] 2>/dev/null || ! [ "$limit" -lt 210 ]; then
+    limit=210
+  fi
   failed=0
-  prune() { timeout --kill-after=5s 210 docker "$@" >/dev/null || failed=1; }
+  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || failed=1; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
   prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force

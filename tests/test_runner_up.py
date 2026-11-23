@@ -147,6 +147,8 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         systemctl.write_text(
             '#!/bin/sh\n'
             f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
+            'case " $* " in *" show "*) printf "%s\\n" '
+            'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\n'
             'exit 0\n'
         )
         systemctl.chmod(0o755)
@@ -411,6 +413,9 @@ def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(hom
     apply(home, runner(home), ci_pool=ci_pool)
     assert not (units(home) / "runner-up-image.timer").exists()
     assert not (units(home) / "timers.target.wants/runner-up-image.timer").exists()
+    apply(home, runner(home), ci_pool={**ci_pool, "image": "acme/ci:latest"})
+    assert not (units(home) / "runner-up-image.timer").exists()
+    assert not (units(home) / "timers.target.wants/runner-up-image.timer").exists()
 
 
 def test_a_second_apply_changes_nothing_and_check_mode_writes_nothing(home):
@@ -506,6 +511,7 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     image_service = unit_sections(units(home) / "runner-up-image.service")["Service"]
     refresh = int(custom_image)
     assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
+    assert (units(home) / "timers.target.wants/runner-up-image.timer").is_symlink()
     limits = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert limits["IOWriteBandwidthMax"] == [f'{settings["io_write_device"]} 200M']
     assert limits["IOWriteIOPSMax"] == [f'{settings["io_write_device"]} 500']
@@ -858,6 +864,18 @@ def test_clean_runs_every_step_when_one_fails_and_fits_the_unit_deadline(stubs, 
     assert [c.split()[1] for c in calls if c.startswith("docker ")] == [
         "container", "network", "image", "builder"
     ]
+
+
+@pytest.mark.parametrize(("override", "expected"), [("30", "30"), ("300", "210")])
+def test_clean_uses_the_shorter_prune_timeout(stubs, override, expected):
+    bin_dir, log = stubs
+    timeout = bin_dir / "timeout"
+    timeout.write_text(f'#!/bin/sh\necho "$2" >> {log}\nshift 2\nexec "$@"\n')
+    timeout.chmod(0o755)
+    calls = run_script(
+        "runner-up-maintain", stubs, "clean", env={"RUNNER_UP_PRUNE_TIMEOUT": override}
+    )
+    assert [call for call in calls if not call.startswith("docker ")] == [expected] * 4
 
 
 def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):

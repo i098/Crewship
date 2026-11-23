@@ -110,6 +110,7 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 - keeps the Docker build cache under `disk_max_gb`.
 
 Each step has a 210-second limit, with up to 5 more seconds for forced termination.
+Set `RUNNER_UP_PRUNE_TIMEOUT` to a positive whole number of seconds to shorten this limit.
 A failed or timed-out step does not skip the remaining steps, but the unit ends failed.
 It never touches a running container.
 

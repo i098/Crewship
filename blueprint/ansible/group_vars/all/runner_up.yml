@@ -92,7 +92,8 @@ crewship_runner_up_bin: "{{ crewship_local_bin }}/runner-up"
 crewship_runner_up_check: "{{ crewship_runner_up_bin }} check-config --config %s"
 crewship_runner_up_build_image: >-
   {{ crewship_cfg.ci_pool is not defined
-     or (crewship_cfg.ci_pool.image | default('crewship-ci-runner:latest')) != 'crewship-ci-runner:latest' }}
+     or ((crewship_runner_up_dind | bool)
+         and (crewship_cfg.ci_pool.image | default('crewship-ci-runner:latest')) != 'crewship-ci-runner:latest') }}
 crewship_runner_up_dind_repos: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | map(attribute='repo') | map('lower') | unique | list }}"
 crewship_runner_up_dind: "{{ crewship_runner_up_dind_repos | length > 0 }}"
 crewship_runner_up_image_timer: "{{ (crewship_runner_up_build_image | bool) or (crewship_runner_up_dind | bool) }}"
