@@ -354,8 +354,9 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   The bridge stores the sender with the exact text message ID from Photon or BlueBubbles in `thread-senders.sqlite`.
   This includes photo captions, but not the photos themselves.
   If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
-  The bridge skips attribution if another unresolved send to the same chat has the same normalized text within ten seconds.
-  A history match by text can prevent a duplicate send, but cannot register a sender match.
+  The bridge skips attribution for unresolved sends with the same normalized text in the same chat within ten seconds.
+  It also skips attribution if an older send is still unresolved within the relay's 120-second match window.
+  A text match in history can prevent a duplicate send, but cannot register sender attribution.
   The bridge does not register a sender when it resumes an outbox item after restart, even if it sends the text again.
   An unresolved replay still counts when the bridge checks for an ambiguous match.
   The store retains up to 5,000 entries for 30 days and prunes them on write.

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,7 +117,12 @@ test("a definite rejection does not block attribution for the next send", async 
   expect(recorded).toEqual(["sent-1"]);
 });
 
-test.each([false, true])("overlapping sends block attribution (replay: %s)", async (replayed) => {
+test.each([
+  { replayed: false, delay: 0 },
+  { replayed: true, delay: 0 },
+  { replayed: false, delay: 11_000 },
+  { replayed: true, delay: 11_000 },
+])("overlapping sends block attribution (%j)", async ({ replayed, delay }) => {
   const chat = "iMessage;-;+15550000000";
   const firstGuid = crypto.randomUUID();
   const { promise: held, resolve: release } = Promise.withResolvers<void>();
@@ -148,6 +153,8 @@ test.each([false, true])("overlapping sends block attribution (replay: %s)", asy
   const first = bb.send(chat, "Done!", undefined, firstGuid, undefined, replayed ? undefined : record);
   await started;
   const secondGuid = crypto.randomUUID();
+  const now = Date.now.bind(Date);
+  const clock = spyOn(Date, "now").mockImplementation(() => now() + delay);
   try {
     expect(await bb.send(chat, "Done?", undefined, secondGuid, undefined, record)).toBe("accepted");
     expect(await bb.sent(chat, "Done!", Date.now())).toBe(true);
@@ -156,6 +163,7 @@ test.each([false, true])("overlapping sends block attribution (replay: %s)", asy
       body: JSON.stringify({ type: "new-message", data: { isFromMe: true, tempGuid: firstGuid, guid: bubble.guid } }),
     }));
   } finally {
+    clock.mockRestore();
     release();
     await first;
   }

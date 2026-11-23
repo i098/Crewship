@@ -60,6 +60,7 @@ type BBMessage = {
 
 type SendMatch = { chat: string; text: string; at: number; ambiguous: boolean; reconciled?: true; record?: (id: string) => void };
 const SEND_MATCH_MS = 10_000;
+const RELAY_MATCH_MS = 120_000;
 
 export class BlueBubbles implements AsyncIterable<Bubble> {
   private opts: typeof DEFAULTS;
@@ -256,7 +257,9 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     const match = { chat, text: normalized, at, record, ambiguous: this.sendMatches.get(tempGuid)?.ambiguous ?? false };
     this.sendMatches.delete(tempGuid);
     for (const other of this.sendMatches.values()) {
-      if (other.reconciled || other.chat !== chat || other.text !== normalized || Math.abs(other.at - at) > SEND_MATCH_MS) continue;
+      if (other.reconciled || other.chat !== chat || other.text !== normalized) continue;
+      const age = at - other.at;
+      if (age < -SEND_MATCH_MS || age > RELAY_MATCH_MS) continue;
       other.ambiguous = match.ambiguous = true;
     }
     this.sendMatches.set(tempGuid, match);
