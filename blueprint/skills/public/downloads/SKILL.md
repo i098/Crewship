@@ -10,11 +10,7 @@ If a prerequisite is missing, stop the affected action and tell the user which i
 Do not run install commands.
 Do not use stored credentials.
 
-Create a temporary input file with `mktemp` and mode `0600`. Set `URL_FILE` to its path.
-Put one URL on the first line without tabs or other whitespace.
-For signed links, populate the file from a private source or through a non-recorded terminal with echo off.
-Do not paste signed links into chat or tool calls, type them as shell commands, or print the file.
-Delete the file after the last command, including on failure.
+Do not use this skill for private, signed, or credential-bearing links.
 
 ## Direct file URL: aria2c
 
@@ -22,24 +18,23 @@ Pass one direct HTTP, HTTPS, or FTP URL per call and use only trusted origins.
 aria2 can follow mirrors from HTTP `Link` headers on new downloads and resumes.
 Run `command -v aria2c`. Install commands for the user: `sudo apt install aria2` (Debian/Ubuntu) or `brew install aria2` (macOS).
 Set `DOWNLOAD_DIR` to an unused directory for each new download.
-In the input file, indent `out=download` with two spaces on the line below the URL.
 
 ```bash
 aria2c --no-conf --no-netrc=true --follow-torrent=false --follow-metalink=false \
-  --auto-file-renaming=false -x 4 -s 4 -d "$DOWNLOAD_DIR" -i "$URL_FILE" >/dev/null 2>&1
+  --auto-file-renaming=false -x 4 -s 4 -d "$DOWNLOAD_DIR" -o download -- "$FILE_URL"
 ```
 
 `-x` limits connections per server. `-s` sets the number of connections for the file.
 The server must support range requests for parallel HTTP downloads.
-Add `-c` only if the known partial file and its matching `.aria2` control file exist at the same destination.
+Add `-c` before `--` only if the known partial file and its matching `.aria2` control file exist.
 Resume only from the same URL and only if the version is unchanged or the publisher's checksum verifies the result.
 Otherwise, start at a new destination.
 
-If the publisher supplies a SHA-256 or SHA-512 digest, add `--checksum=ALGO=DIGEST`.
+If the publisher supplies a SHA-256 or SHA-512 digest, add `--checksum=ALGO=DIGEST` before `--`.
 Use the publisher's algorithm (`sha-256` or `sha-512`) and hex digest, for example `--checksum="sha-256=$SHA256"`.
 Treat a mismatch as a failed download.
 Without a checksum, parallel requests can mix versions if the file changes during transfer.
-If the file looks corrupt, download to a new destination with `-x 1 -s 1`.
+If the file looks corrupt, use a new destination and replace `-x 4 -s 4` with `-x 1 -s 1`.
 
 ## Video or audio page: yt-dlp
 
@@ -55,26 +50,25 @@ Run this check before any media action. The empty playlist range prevents the ch
 
 ```bash
 yt-dlp --ignore-config --no-playlist --playlist-items 1:0 --simulate \
-  --print '%(_type|video)s' -a "$URL_FILE" 2>/dev/null
+  --print '%(_type|video)s' -- "$VIDEO_URL" 2>/dev/null
 ```
 
 Continue only if the check succeeds and prints exactly `video`. This also covers audio-only items.
 For a collection, use the requested item's individual URL and repeat the check.
 Set `DOWNLOAD_DIR` to an unused directory for each download, including a new format of the same resource.
-Use a URL-only input file for yt-dlp.
 Check the exit status and confirm the requested output; a skipped collection can exit without an error or output.
-Use only direct HTTP(S) media formats. Do not download live HLS or streams that require an external downloader.
+Do not download live HLS.
 
 ```bash
-yt-dlp --ignore-config --quiet --no-playlist --playlist-items 1:0 -F -a "$URL_FILE" 2>/dev/null
-yt-dlp --ignore-config --no-playlist --playlist-items 1:0 --downloader native -P "$DOWNLOAD_DIR" \
-  -o 'video.%(ext)s' -a "$URL_FILE" >/dev/null 2>&1
-yt-dlp --ignore-config --no-playlist --playlist-items 1:0 --downloader native -P "$DOWNLOAD_DIR" -x \
-  -o 'audio.%(ext)s' -a "$URL_FILE" >/dev/null 2>&1
+yt-dlp --ignore-config --quiet --no-playlist --playlist-items 1:0 -F -- "$VIDEO_URL"
+yt-dlp --ignore-config --no-playlist --playlist-items 1:0 -P "$DOWNLOAD_DIR" \
+  -o 'video.%(ext)s' -- "$VIDEO_URL"
+yt-dlp --ignore-config --no-playlist --playlist-items 1:0 -P "$DOWNLOAD_DIR" -x \
+  -o 'audio.%(ext)s' -- "$VIDEO_URL"
 ```
 
 Use the default format selection unless the user requests a specific quality or format.
-Add `-f FORMAT_ID` to select a format from the list.
+Add `-f FORMAT_ID` before `--` to select a format from the list.
 For video with sound, select a combined format or pair separate streams with `-f VIDEO_ID+AUDIO_ID`.
 For audio extraction, select a format that contains audio.
 Check `command -v ffmpeg` before merging streams or extracting audio.
