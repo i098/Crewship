@@ -37,6 +37,8 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
     assert not checkout_inputs.get("ref"), "Use the pull_request event's synthetic merge checkout"
     depth = checkout_inputs.get("fetch-depth", 1)
     body_step = next(step for step in steps if "PR_BODY" in step.get("env", {}))
+    assert body_step["env"]["PR_BASE"] == "${{ github.event.pull_request.base.sha }}"
+    assert body_step["env"]["PR_HEAD"] == "${{ github.event.pull_request.head.sha }}"
     source = tmp_path / "source"
     source.mkdir()
 
