@@ -17,10 +17,22 @@ Use each row that applies to your change.
    Attach PNG or HTML board exports to a PR comment and copy the attachment URL.
    Never commit evidence binaries.
 3. Embed the screenshots on separate lines under `## Review evidence` as `![Before](URL)` and `![After](URL)`.
+   If GitHub inserts an HTML tag, copy its `src` URL into the Markdown image.
+   Use a separate upload for each revision.
    For a new view, put `Before: none, new view` on its own line in place of the Before image.
    Link the recording or board with a descriptive label, such as `[Recording of the setup flow](https://…)`.
    Open each link as a reviewer to check access.
 
-The required PR body check detects UI files in the diff and checks the format of screenshot links in `Review evidence`.
-PRs without UI file changes can omit the section unless another row applies.
-Reviewers verify that the linked evidence covers the change.
+## Automatic screenshot checks
+
+The local pre-push check and CI use the same case-insensitive Git path globs:
+
+- Web views, components, and styles: `**/*.html`, `**/*.tsx`, `**/*.jsx`, `**/*.vue`, `**/*.svelte`, `**/*.css`, `**/*.scss`.
+- Site rendering code: `site/public/**/*.js`, `site/build.py`.
+- Terminal UI source: `tools/*-tui/**/*.ts`, `tools/fleet-health/**/*.ts`, `tools/tui-theme/**/*.ts`.
+
+The checks exclude `tools/**/*.test.ts` and `site/public/google2a77445d3f9ccb0e.html`, a site verification file.
+Supply screenshots for other visible changes even if the check does not require them.
+Omit the `Review evidence` section only when no row calls for it.
+The checker reads link format and upload IDs, but does not fetch attachments.
+Reviewers open the links and verify that the evidence covers the change.

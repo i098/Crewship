@@ -262,7 +262,7 @@ python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
 It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
 It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or fails the same screenshot check as CI.
-UI files are `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, and `.html` files, `site/`, and `apps/<app>/web`, `apps/<app>/src/components`, and `apps/<app>/public`.
+See [automatic screenshot checks](docs/review-evidence.md#automatic-screenshot-checks) for the path list and manual review rule.
 Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
 
 ## Branch rules

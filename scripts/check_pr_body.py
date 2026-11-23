@@ -10,6 +10,7 @@ TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)", re.I)
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
 MARKUP = re.compile(CODE_SPAN + r"|</?[A-Za-z][\w-]*(?:\s+[^<>]*)?\s*/?>")
@@ -19,12 +20,24 @@ LINK_DEFINITION = re.compile(
     r"""(?:[ \t]*(?:\n[ \t]*)?(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*(?=\n|$)""",
     re.M,
 )
-UI_PATH = re.compile(
-    r"\.(tsx|jsx|vue|svelte|css|scss|html)$|^(apps/[^/]+/(web|src/components|public)|site)/", re.I
+UI_GLOBS = (
+    "**/*.tsx",
+    "**/*.jsx",
+    "**/*.vue",
+    "**/*.svelte",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.html",
+    "site/public/**/*.js",
+    "site/build.py",
+    "tools/*-tui/**/*.ts",
+    "tools/fleet-health/**/*.ts",
+    "tools/tui-theme/**/*.ts",
 )
+UI_EXCLUDES = ("site/public/google2a77445d3f9ccb0e.html", "tools/**/*.test.ts")
 SCREENSHOT = re.compile(
     r" {0,3}!\[(Before|After)\]\(https://github\.com/user-attachments/assets/"
-    r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\)[ \t]*"
+    r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\)[ \t]*"
 )
 NEW_VIEW = re.compile(r" {0,3}Before: none, new view[ \t]*")
 
@@ -51,25 +64,38 @@ def strip_comments(line, comment):
     return "".join(output), comment
 
 
-def sections(markdown):
-    result = [("", [])]
-    fence = ""
+def body_lines(markdown):
+    block_end = None
     comment = False
     for line in markdown.splitlines():
-        if not fence:
-            line, comment = strip_comments(line, comment)
-        marker = FENCE.match(line)
-        in_code = bool(fence or marker)
-        if fence:
-            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
-                if not marker[2].strip():
-                    fence = ""
-        elif marker:
+        if block_end:
+            if block_end.search(line):
+                block_end = None
+            else:
+                yield line, True
+            continue
+        if not comment and (opening := LITERAL_HTML.match(line)):
+            end = re.compile(f"</{opening[1]}>", re.I)
+            if end.search(line):
+                yield line, False
+            else:
+                block_end = end
+            continue
+        line, comment = strip_comments(line, comment)
+        if marker := FENCE.match(line):
             fence = marker[1]
+            block_end = re.compile(rf"^ {{0,3}}{fence[0]}{{{len(fence)},}}\s*$")
+        else:
+            yield line, False
+
+
+def sections(markdown):
+    result = [("", [])]
+    for line, in_code in body_lines(markdown):
         heading = HEADING.fullmatch(line) if not in_code else None
         if heading:
             result.append((heading[1], []))
-        elif not marker:
+        else:
             result[-1][1].append((line, in_code))
     return result
 
@@ -91,19 +117,20 @@ def check_screenshots(actual):
     matches = [lines for name, lines in actual if name == "Review evidence"]
     if len(matches) != 1:
         return ["Include exactly one ## Review evidence section."]
-    images = set()
+    images = {"Before": set(), "After": set()}
     new_view = False
     for line, code in matches[0]:
         if code:
             continue
         if image := SCREENSHOT.fullmatch(line):
-            images.add(image[1])
+            images[image[1]].add(image[2].lower())
         elif NEW_VIEW.fullmatch(line):
             new_view = True
-    if "After" in images and ("Before" in images or new_view):
+    before, after = images["Before"], images["After"]
+    if after and (new_view or before) and before.isdisjoint(after):
         return []
     return [
-        "Embed GitHub Before and After screenshots in ## Review evidence. "
+        "Embed distinct GitHub Before and After screenshots in ## Review evidence. "
         "For a new view, replace the Before screenshot with: Before: none, new view"
     ]
 
@@ -115,8 +142,17 @@ def git(*args):
 
 
 def changes_ui(base):
-    paths = git("diff", "--name-only", "--no-renames", "-z", f"{base}...HEAD", "--")
-    return any(UI_PATH.search(path) for path in paths.split("\0"))
+    paths = git(
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        f"{base}...HEAD",
+        "--",
+        *(f":(icase,glob){pattern}" for pattern in UI_GLOBS),
+        *(f":(exclude,icase,glob){pattern}" for pattern in UI_EXCLUDES),
+    )
+    return bool(paths)
 
 
 def check_body(body, template, *, ui=False):

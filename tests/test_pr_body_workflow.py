@@ -47,7 +47,12 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
 
     git("init")
     git("commit", "--allow-empty", "-m", "Base")
-    git("commit", "--allow-empty", "-m", "Non-UI change")
+    indexnow = repo / "site/public/e3c5c1952d33a0d51288552a3907210a.txt"
+    indexnow.parent.mkdir(parents=True)
+    indexnow.write_text("verification key\n")
+    (indexnow.parent / "google2a77445d3f9ccb0e.html").write_text("site verification\n")
+    git("add", "site")
+    git("commit", "-m", "Site verification files")
     env = {**os.environ, "GIT_DIR": str(repo / ".git"), "GIT_WORK_TREE": str(repo)}
     before = "![Before](https://github.com/user-attachments/assets/347457ab-5159-470e-913b-b2023f215543)"
     after = "![After](https://github.com/user-attachments/assets/672de857-f49e-4def-95f8-b576d8290bb6)"
@@ -71,15 +76,46 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     check(VALID_BODY + heading + "<!-- No UI changes. -->\n")
     check("Closes #695\n", "Include exactly one ## Summary section.")
 
+    for path in (
+        "site/public/about.html",
+        "site/public/harbor.js",
+        "site/build.py",
+        "tools/runs-tui/runs-tui.ts",
+        "tools/tui-theme/theme.ts",
+    ):
+        source = repo / path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("view source\n")
+        git("add", path)
+        git("commit", "-m", f"Change {path}")
+        check(VALID_BODY, "Include exactly one ## Review evidence section.")
+
+    test_source = repo / "tools/runs-tui/runs-tui.test.ts"
+    test_source.write_text("test source\n")
+    git("add", str(test_source))
+    git("commit", "-m", "Test change only")
+    check(VALID_BODY)
+
     (repo / "ui.css").write_text("body { color: red; }\n")
     git("add", "ui.css")
     git("commit", "-m", "UI change")
     check(VALID_BODY, "Include exactly one ## Review evidence section.")
     misplaced = VALID_BODY.replace("```text", before + "\n" + after + "\n\n```text", 1)
     check(misplaced + heading + "Screenshots pending.", "screenshot")
+    check(
+        VALID_BODY + f'\n<PRE class="example">\n{heading}\n{before}\n{after}\n</PRE>\n',
+        "Include exactly one ## Review evidence section.",
+    )
+    same_upload = after.replace("After", "Before").replace("672de857", "672DE857")
     for evidence in (
         after,
         "Before: none, new view",
+        f"{same_upload}\n{after}",
+        f"{before}\n{same_upload}\n{after}",
+        f"{before}\n{after}\n{before.replace('Before', 'After')}",
+        f"Before: none, new view\n{same_upload}\n{after}",
+        f"<pre>\n{before}\n{after}\n</pre>",
+        f"<pre>\nBefore: none, new view\n</pre>\n{after}",
         f"<!--\n{before}\n-->\n{after}",
         f"```md\n{before}\n{after}\n```",
         f"    {before}\n    {after}",
@@ -88,6 +124,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     ):
         check(VALID_BODY + heading + evidence, "screenshot")
     check(VALID_BODY + heading + before + "\n" + after)
+    check(VALID_BODY + heading + f"<pre>\n## Sample\n</pre>\n\n{before}\n{after}")
     check(VALID_BODY + heading + "Before: none, new view\n" + after)
     check(
         VALID_BODY + heading + before + "\n" + after + heading,
