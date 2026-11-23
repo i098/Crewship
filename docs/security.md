@@ -176,6 +176,22 @@ A new host gets its own key; never copy `~/.ssh/id_ed25519_mac` from the old hos
 3. Run `ssh mac true` on the new host.
 4. At cutover, remove the old host's line from the Mac's `~/.ssh/authorized_keys`. Each line ends with the comment `<user>@<hostname>`, the project name and the word `mac`; the hostname identifies the host. A key made before the Crewship rename carries the earlier project name. Keep the old line until the new host works.
 
+### Reach a Mac without SSH (Rex)
+
+Use this recipe when the Mac has no SSH and no Aside Pro Remote Control. The host then runs commands on the signed-in Aside CLI of the Mac.
+
+1. On the host, run `tailscale up` to join the tailnet of the Mac.
+2. On the Mac, start Rex with its built-in Tailscale support. Rex uses Serve over Tailscale, limited to your own account.
+3. On the host, add the Mac:
+
+   ```bash
+   rex hosts add mac https://<mac-device>.<tailnet>.ts.net
+   ```
+
+4. In a Rex session on `mac`, run commands with `send`, `send-key` and `capture`. Use `send` to type the command, `send-key` for Enter, and `capture` to read the screen.
+
+Note: the output of `rex run --wait` vanishes with its block. Use `capture` to keep the output.
+
 ### From a Mac to the host
 
 The other direction, from the operator's Mac to the host, is also a manual setup on the Mac. Apply does not change it. Every host gets `mosh` (`mosh-server`) in the base packages.
