@@ -400,7 +400,6 @@ if (env.FM_IMESSAGE_SLOT) {
   });
 } else await startups[0];
 const threadSenders = DESK_SESSION ? openThreadSenders(STATE) : undefined;
-if (!threadSenders) rmSync(`${STATE}/senders.json`, { force: true });
 for (const ready of startups) void ready.then((line) => line?.activate?.()).catch((e) => console.error(`fm-imessage: could not start a transport's inbound side: ${brief(e)}`));
 memory = new Memory(MEMORY_DIR, (system) => compactChat(system, () => stopping, track), log("memory"));
 sizeView(memory, DESK_PROVIDER, DESK_PROMPT, handoffPrompt(secondmates(FM_HOME)));
@@ -450,7 +449,7 @@ if (existsSync(ROUTING_LOG)) {
   if (torn) truncateSync(ROUTING_LOG, Buffer.byteLength(saved.slice(0, saved.lastIndexOf("\n") + 1)));
   else if (saved && !saved.endsWith("\n")) appendFileSync(ROUTING_LOG, "\n");
 }
-const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", (o, save) => (o.probe ? probe.confirm(o) : deliver(o, save)), RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
+const outbox = new Queue<Out>(OUTBOX_DIR, "outbox item", (o, save, replayed) => (o.probe ? probe.confirm(o) : deliver(o, save, replayed)), RETRY_MS, lostDeskAnswer, (o) => o.requestId, outLane);
 const downloads = new Queue<Ref>(DOWNLOADS_DIR, "attachment download", fetchAgain, RETRY_MS, (ref) => {
   if (!fileNote(`${ref.line ?? "photon"}-${ref.id}-lost`, `(an earlier attachment of message ${ref.id} could not be saved; the bridge gave up, so no path will follow)`)) {
     console.error(`fm-imessage: the inbox note for the lost attachment of message ${ref.id} failed`);
@@ -755,7 +754,7 @@ function checkDeskDelivery(o: Out) {
   if (o.kind === "desk" && (o.deskGeneration !== deskGeneration || hasRestoredUnsentText(o))) throw deskCancelled;
 }
 
-async function deliver(o: Out, save: (o: Out) => void) {
+async function deliver(o: Out, save: (o: Out) => void, replayed: boolean) {
   if (stopping) throw new Error("bridge stopping");
   const kind = o.kind ?? "supervisor";
   if (o.card) return deliverCard(o, kind);
@@ -770,7 +769,7 @@ async function deliver(o: Out, save: (o: Out) => void) {
       deliveryTyping(kind, true);
       await Bun.sleep(typingPause(part));
     }
-    if (!await sendCurrentBubble(o, i, part, update)) {
+    if (!await sendCurrentBubble(o, i, part, update, replayed ? undefined : threadSenders)) {
       lostDeskAnswer(o);
       break;
     }
@@ -791,11 +790,11 @@ function settleSent(image: { path: string; name: string }, at: number | undefine
   else rmSync(image.path, { force: true });
 }
 
-async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void): Promise<boolean> {
+async function sendCurrentBubble(o: Out, i: number, part: Bubble, save: (o: Out) => void, store: typeof threadSenders): Promise<boolean> {
   try {
     if (o.deskSession !== deskSession) checkDeskDelivery(o);
     if (latest && o.kind !== "desk" && !stopDeskTyping) typing(latest.space, false);
-    await sendBubble(o, i, part, save);
+    await sendBubble(o, i, part, save, store);
     return true;
   } catch (e) {
     if (e !== deskCancelled) throw e;
@@ -916,13 +915,12 @@ async function reconcileBubble(o: Out, attempts: Record<string, string>, bubble:
   return maybe;
 }
 
-async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void) {
+async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void, store: typeof threadSenders) {
   const guid = `${o.guid}-${i}`;
   const maybe = o.maybe ? await reconcileBubble(o, o.maybe, bubble, guid) : {};
   if (!maybe) return;
   if (o.maybe) save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   checkDeskDelivery(o);
-  const store = threadSenders;
   const sentId = store && typeof bubble === "string" ? (id: string) => {
     try { store.remember(id, o.sender ?? ""); }
     catch (error) { log("save thread sender")(error); }

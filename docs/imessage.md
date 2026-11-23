@@ -356,8 +356,9 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
   If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
   The bridge skips attribution if another unresolved send to the same chat has the same normalized text within ten seconds.
   A history match by text can prevent a duplicate send, but cannot register a sender match.
+  The bridge does not register a sender when it resumes an outbox item after restart, even if it sends the text again.
   The store retains up to 5,000 entries for 30 days and prunes them on write.
-  The bridge removes `senders.json` without importing its entries because they have no individual timestamps.
+  When session mode opens the store, it removes `senders.json` without importing entries because they have no individual timestamps.
   The reply must name that exact message ID, and the sender must match an ID or home in `data/secondmates.md`.
   The usual protected-topic, mute, and `relayTargetCurrent` checks still apply.
   Replies to known desk, Firstmate, or owner messages keep the normal desk turn.
@@ -545,8 +546,14 @@ The code is `apps/imessage/deploy.ts`, `ownership.ts` and `standby.ts`.
 - **Standby.** A slot that is not active starts, connects the transports and serves only `GET /ready` and `/health` on `127.0.0.1:8766` (`FM_IMESSAGE_NEXT_PORT`). It builds no memory, outbox, routing replay or inbound loop, so it can send nothing.
 - **Gate.** The deploy passes only when `/ready` answers: the pi-natives load, one real desk model call with a stub prompt gives a reply (no text is sent), and every configured transport (Photon) is connected. The checks run in order: after the first failure the later ones are skipped, so a build with broken natives makes no paid desk call. A standby slot binds no webhook port and starts no BlueBubbles polling. A failure or a dead unit stops the new slot. A slot that already owns the line (a reboot) needs only the first transport and degrades to the others. The deploy stops a target slot left running before it installs the new build. The serving slot is never touched.
 - **Handover.** The deploy writes `active`, then stops the old slot. The new slot takes the exclusive lock `owner.lock`, waits for the main port, replays routing and the durable outbox, and listens. Two outbox senders cannot run: the lock and the port each allow one owner. Outbox items keep their ids, and keyed dedupe stops a repeat. While the old slot stops, the main port answers `503 stopping` for 0.5 s, then drops or refuses connections (curl exit 52, 56 or 7). All of these mean nothing was queued, so `fm-imessage` sends the request again every second for up to 150 s (`FM_IMESSAGE_WAIT_S`). A handover or a rollback costs no text, and a retry cannot repeat one. Any other failure ends the command at once.
-- **Confirm.** `POST /probe` queues one item in its own outbox lane, so a retrying text never holds it; its delivery reads the owner's latest text back from the transport and sends no text. With no latest text known the probe fails. If the new slot does not answer `/health` or the probe in time, the deploy stops it, sets `active` back and starts the old slot again (about 100 s). The old slot is stopped during the handover, not kept running: both cannot hold the port and the outbox.
+- **Confirm.** `POST /probe` queues one item in its own outbox lane, so a retrying text never holds it.
+  The probe reads the owner's latest text back from the transport and sends no text.
+  With no latest text known, the probe fails.
+  If the new slot fails the health check or probe, the deploy stops it and restores the previous `active` value.
+  The deploy restarts the previous slot unless it was already failed at handover.
+  Both slots cannot hold the port and the outbox at the same time.
 - **Retry after a failure.** A deploy records a hash of the staged files and the rendered units in `~/.local/state/fm-imessage/deployed` only when it succeeds. The Ansible role runs `imessage-deploy.ts needed` on every apply (exit 3: not deployed) and deploys whenever it answers 3, so a failed deploy runs again at the next apply.
+  A new build can reset a failed target slot. A retry of the same build cannot.
 - **No slot serving.** A deploy first waits up to 120 s (`FM_DEPLOY_SETTLE_MS`) for a slot that is starting or waiting to restart.
   If the slot settles `active`, the deploy uses the health gate.
   If the old slot is down, the new slot starts as the owner and must answer `/health` in time.

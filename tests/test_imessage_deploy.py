@@ -270,6 +270,25 @@ def test_a_failed_first_install_leaves_the_legacy_slot_and_the_next_deploy_still
     assert rig.needed() == 3
 
 
+def test_only_a_new_build_can_reset_an_exhausted_rollout_target(rig):
+    rig.legacy()
+    rig.inbound("m1")
+    rig.stage()
+    assert rig.deploy().returncode == 0 and rig.active() == "blue"
+    start_limit = rig.run / "green.failed"
+    start_limit.touch()
+    assert rig.deploy().returncode == 1
+    assert start_limit.exists() and rig.active() == "blue" and rig.health()
+
+    rig.stage(plant_after_handover)
+    failed = rig.deploy()
+    assert failed.returncode == 1 and "rolling back to blue" in failed.stdout, failed.stdout + failed.stderr
+    assert not start_limit.exists()
+    start_limit.touch()
+    assert rig.deploy().returncode == 1
+    assert start_limit.exists() and rig.active() == "blue" and rig.health()
+
+
 def test_the_confirm_step_fails_when_there_is_no_text_to_read_back(rig):
     rig.legacy()  # no inbound text: the bridge knows no latest text, so a probe would reach no transport
     rig.stage()

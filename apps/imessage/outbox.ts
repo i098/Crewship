@@ -56,6 +56,7 @@ export function brief(e: unknown): string {
 // Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
   private next: number;
+  private readonly firstNew: number;
   private busy = new Set<string>();
   private laneBySeq = new Map<number, string>();
   private keys = new Set<string>();
@@ -63,7 +64,7 @@ export class Queue<T> {
   constructor(
     private dir: string,
     private name: string,
-    private deliver: (item: T, save: (item: T) => void) => Promise<void>,
+    private deliver: (item: T, save: (item: T) => void, replayed: boolean) => Promise<void>,
     private retryMs: number,
     private lost?: (item: T) => void,
     private key?: (item: T) => string | undefined,
@@ -75,6 +76,7 @@ export class Queue<T> {
       mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
       for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) this.restoreKeys(folder, key);
     }
+    this.firstNew = this.next;
     this.drainAll();
   }
 
@@ -187,7 +189,7 @@ export class Queue<T> {
           await this.deliver(item as T, (next) => {
             this.write(seq, next);
             item = next;
-          });
+          }, seq < this.firstNew);
           if (this.key?.(item as T)) renameSync(this.file(seq), `${this.dir}-done/${seq}.json`);
           else unlinkSync(this.file(seq));
           this.laneBySeq.delete(seq);

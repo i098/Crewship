@@ -2505,6 +2505,9 @@ def test_legacy_photon_thread_does_not_route_directly_to_a_mate(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data/secondmates.md").write_text("- render - Render mate (home: /srv/render; scope: render; projects: none)\n")
     fake, state, _, _, start, inbound, cli, text = fake_bridge(tmp_path)
+    legacy_senders = state / "senders.json"
+    state.mkdir(exist_ok=True)
+    legacy_senders.write_text("{}\n")
     deliveries = tmp_path / "deliveries"
     sender = tmp_path / "bin" / "fm-send.sh"
     sender.write_text(f'#!/bin/bash\nprintf "%s\\n" "$1" >> {shlex.quote(str(deliveries))}\n')
@@ -2525,6 +2528,7 @@ def test_legacy_photon_thread_does_not_route_directly_to_a_mate(tmp_path):
         })
         assert not deliveries.exists()
         assert not (state / "thread-senders.sqlite").exists()
+        assert legacy_senders.read_text() == "{}\n"
     finally:
         bridge.terminate()
         bridge.wait(10)

@@ -459,6 +459,31 @@ def test_thread_reply_without_a_relay_match_reaches_firstmate(tmp_path):
         assert not message.exists()
 
 
+def test_thread_reply_to_a_text_sent_by_outbox_replay_reaches_firstmate(tmp_path):
+    message = mate_data(tmp_path)
+    with session_rig(tmp_path) as rig:
+        mate_script(tmp_path, message)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        text = "Retry this check."
+        rig.relay_mode("lost")
+        result = subprocess.run([str(SEND), text], capture_output=True, text=True,
+                                env={**rig.env, "FM_MATE_ID": "engram"}, timeout=30)
+        assert result.returncode == 0, result.stderr
+        wait_for(lambda: any(item.get("maybe") for item in rig.outbox()), "the uncertain send", timeout=120)
+        assert not sent_guids(rig, text)
+        rig.stop()
+        rig.relay_mode("")
+        rig.start()
+        wait_for(lambda: sent_guids(rig, text), "the replayed text", timeout=120)
+        wait_for(lambda: not rig.outbox(), "the completed outbox replay", timeout=120)
+        [guid] = sent_guids(rig, text)
+        reply_in_thread(rig, "m2", guid, text, "thanks")
+        wait_for(lambda: "note --request-id bluebubbles-m2 -- " in read_text(rig.notes),
+                 "the Firstmate handoff", timeout=120)
+        assert not message.exists()
+
+
 def test_thread_reply_goes_to_the_mate_that_sent_the_id_even_when_the_quote_matches_another_mate(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:

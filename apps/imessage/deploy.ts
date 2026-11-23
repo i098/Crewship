@@ -97,13 +97,13 @@ function dropProbes() {
   }
 }
 
-async function rollback(cur: string, target: string, why: string): Promise<never> {
+async function rollback(cur: string, target: string, oldState: string, why: string): Promise<never> {
   say(`FAILED: ${why}; rolling back to ${cur}`);
   await sc("stop", unit(target));
   setActive(STATE, cur);
   dropProbes();
-  await sc("reset-failed", unit(cur));
-  await sc("start", unit(cur));
+  if (oldState === "active") await sc("reset-failed", unit(cur));
+  if (oldState !== "failed") await sc("start", unit(cur));
   const back = await until(BACK_MS, () => get(PORT, "/health"), cur);
   await sc("start", FRONT);
   say(back.ok ? `${cur} serves again; the failed build is ${target}` : `${cur} did not answer /health after the rollback: ${back.body}`);
@@ -112,18 +112,18 @@ async function rollback(cur: string, target: string, why: string): Promise<never
 
 // With no slot serving there is nothing to protect and no standby to gate: start the new slot as the owner. If it does not
 // come up, the previous slot is put back.
-async function startUngated(cur: string | undefined, prior: string | undefined, target: string) {
+async function startUngated(cur: string | undefined, prior: string | undefined, target: string, hash: string) {
   const restore = cur && await slotState(cur) !== "failed" ? cur : undefined;
   if (restore) await sc("stop", unit(restore));
   if (!prior) await sc("stop", FRONT);
   setActive(STATE, target);
   await sc("start", unit(target));
   const up = await until(BACK_MS, () => get(PORT, "/health"), target);
-  if (up.ok) return finish(target);
+  if (up.ok) return finish(target, hash);
   await sc("stop", unit(target));
   if (cur) setActive(STATE, cur);
   else rmSync(`${STATE}/active`, { force: true });
-  if (restore) { await sc("reset-failed", unit(restore)); await sc("start", unit(restore)); }
+  if (restore) await sc("start", unit(restore));
   await sc("start", FRONT);
   throw new Error(`${target} did not answer /health: ${up.body}`);
 }
@@ -136,13 +136,18 @@ async function deploy() {
   const cur = prior ?? ((await legacyRunning()) ? "legacy" : undefined);
   const live = cur === "legacy" ? await legacyRunning() : cur ? await serving(cur) : false;
   const target = cur === "blue" ? "green" : "blue";
+  const hash = await buildHash();
+  const installed = `${DIR}/${target}/.build-hash`;
+  const newBuild = hash !== recordedHash(installed) && hash !== recordedHash(`${STATE}/deployed`);
+  if (!newBuild && await slotState(target) === "failed") throw new Error(`${target} is failed; an unchanged build cannot reset it`);
   if (cur === "legacy") snapshotLegacy();
   await sc("stop", unit(target));
-  await sc("reset-failed", unit(target));
   install(target);
+  writeFileSync(installed, hash);
+  if (newBuild) await sc("reset-failed", unit(target));
   say(`staged ${target}; serving slot: ${live ? cur : "none"}`);
 
-  if (!live) return startUngated(cur, prior, target);
+  if (!live) return startUngated(cur, prior, target, hash);
 
   setActive(STATE, cur!); // the new slot starts as standby
   await sc("start", unit(target));
@@ -155,19 +160,20 @@ async function deploy() {
   }
   say(`${target} passed the gate: ${gate.body}`);
 
+  const oldState = await slotState(cur!);
   setActive(STATE, target); // the handover: the old slot stops, the new one takes the lock, the port and the outbox
-  await sc("stop", unit(cur!));
+  if (oldState !== "failed") await sc("stop", unit(cur!));
   if (cur === "legacy") await sc("stop", FRONT);
   const own = await until(OWN_MS, () => get(PORT, "/health"), target);
-  if (!own.ok) return rollback(cur!, target, `${target} did not take the line: ${own.body}`);
+  if (!own.ok) return rollback(cur!, target, oldState, `${target} did not take the line: ${own.body}`);
   const probe = await get(PORT, "/probe", "POST");
-  if (!probe.ok) return rollback(cur!, target, `${target} probe: ${probe.body}`);
+  if (!probe.ok) return rollback(cur!, target, oldState, `${target} probe: ${probe.body}`);
   say(`${target} confirmed one outbox pass`);
-  await finish(target);
+  await finish(target, hash);
 }
 
-async function finish(target: string) {
-  writeFileSync(`${STATE}/deployed.tmp`, await buildHash());
+async function finish(target: string, hash: string) {
+  writeFileSync(`${STATE}/deployed.tmp`, hash);
   renameSync(`${STATE}/deployed.tmp`, `${STATE}/deployed`);
   await sc("start", FRONT);
   say(`${target} serves the line`);
@@ -191,10 +197,11 @@ async function buildHash() {
   return hash.digest("hex");
 }
 
+const recordedHash = (path: string) => existsSync(path) ? readFileSync(path, "utf8").trim() : "";
+
 async function needed() {
   const slot = readActive(STATE);
-  const recorded = existsSync(`${STATE}/deployed`) ? readFileSync(`${STATE}/deployed`, "utf8").trim() : "";
-  const same = slot && recorded === (await buildHash());
+  const same = slot && recordedHash(`${STATE}/deployed`) === (await buildHash());
   say(same ? `${slot} runs the staged build` : "the staged build is not deployed yet");
   process.exit(same ? 0 : 3);
 }
