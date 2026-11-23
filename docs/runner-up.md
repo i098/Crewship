@@ -130,6 +130,7 @@ The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/con
 The coordinator's start builds it when it is missing.
 `runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
+Managed apply loads the systemd slice limits before it prepares the Docker-in-Docker image.
 Managed apply checks the same runtime before it publishes the config.
 Image preparation during apply, coordinator startup, and timer refresh has a one-hour deadline.
 With `start_services: false`, apply does not publish new or updated configs that contain Docker-in-Docker places.

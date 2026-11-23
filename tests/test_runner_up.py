@@ -139,11 +139,13 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         lsblk.chmod(0o755)
         environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
     if docker_stub:
-        bin_dir, _ = docker_stub
+        bin_dir, log = docker_stub
         shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         systemctl = home / ".local/bin/systemctl"
         systemctl.write_text(
-            '#!/bin/sh\ncase " $* " in *" show "*) printf "%s\\n" '
+            '#!/bin/sh\n'
+            f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
+            'case " $* " in *" show "*) printf "%s\\n" '
             'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\nexit 0\n'
         )
         systemctl.chmod(0o755)
@@ -545,9 +547,15 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     apply(home, runner(home, repos=[existing]), facts=facts)
     assert "acme-web" not in instances(home)
     assert not (wants / "runner-up@acme-web.service").exists()
+    slice_file = home.parent / "etc/runnerup.slice"
+    before = slice_file.stat().st_mtime_ns
     apply(home, runner(home, repos=[existing, new]), facts=facts, docker_stub=stubs)
     assert config(home)["pools"][0]["label"] == "web-dind"
     assert config(home, "acme-e2e-tests")["pools"][0]["label"] == "e2e"
+    assert slice_file.stat().st_mtime_ns == before
+    calls = stubs[1].read_text().splitlines()
+    reload = calls.index("systemctl daemon-reload")
+    assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker "))
 
 
 def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
