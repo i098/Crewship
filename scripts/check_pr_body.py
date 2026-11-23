@@ -64,9 +64,10 @@ def strip_comments(line, comment, *, token_pattern=COMMENT_TOKEN):
 def literal_html_lines(tag, line, lines):
     end = re.compile(rf"</{tag}>", re.I)
     comment = False
-    token_pattern = HTML_COMMENT if tag.lower() == "pre" else COMMENT_TOKEN
+    strip_pre_comments = tag.lower() == "pre"
     while line is not None:
-        line, comment = strip_comments(line, comment, token_pattern=token_pattern)
+        if strip_pre_comments:
+            line, comment = strip_comments(line, comment, token_pattern=HTML_COMMENT)
         yield line, "html"
         if end.search(line):
             return comment

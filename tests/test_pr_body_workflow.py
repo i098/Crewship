@@ -202,6 +202,10 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     check(VALID_BODY + heading + before + "\n" + after)
     check(VALID_BODY + heading + before + "<!-- Base -->\n" + after)
     check(VALID_BODY + heading + f"<pre>\n## Sample\n</pre>\n\n{before}\n{after}")
+    for tag in ("script", "style", "textarea"):
+        block = f'<{tag}>\n"<!--"\n{before}\n{after}\n</{tag}>\n\n'
+        check(VALID_BODY + heading + block, "screenshot")
+        check(VALID_BODY + heading + block + before + "\n" + after)
     check(VALID_BODY + heading + "Before: none, new view\n" + after)
     check(
         VALID_BODY + heading + before + "\n" + after + heading,
