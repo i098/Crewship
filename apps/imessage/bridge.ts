@@ -253,7 +253,7 @@ type Line = {
   messages: AsyncIterable<LineMessage>;
   find(ref: Ref): Promise<LineMessage>;
   send(space: string, text: string, reply?: string, guid?: string, beforeSend?: () => void, sentId?: (id: string) => void): Promise<"accepted" | "reconciled">;
-  sendImage?(space: string, picture: Picture, reply?: string): Promise<{ id: string } | undefined>; // Photon only
+  sendImage?(space: string, picture: Picture, reply?: string): Promise<unknown>; // Photon only
   sendCard?(space: string, url: string, layout: Layout, live?: boolean, session?: unknown): Promise<unknown>; // Photon only; returns the card session
   sent?(space: string, text: string, since: number, guid: string, sentId: (id: string) => void): Promise<boolean>;
   react(ref: Ref, emoji: string, beforeSend: () => void): Promise<unknown>;
@@ -972,8 +972,7 @@ function routes(o: Out, i: number, maybe: Record<string, string>, guid: string, 
           const outcome = await line.send(space, bubble, reply, guid, () => checkDeskDelivery(o), sentId);
           trace(o.id, outcome === "reconciled" ? "history-reconciled" : "transport-accepted");
         } else {
-          const sent = await line.sendImage!(space, bubble, reply);
-          if (sent?.id) sentId(sent.id);
+          await line.sendImage!(space, bubble, reply);
           trace(o.id, "transport-accepted");
         }
       } catch (e) {

@@ -351,9 +351,10 @@ The code is `apps/imessage/desk-session.ts`, `desk-session-turn.ts`, `desk-actio
 - Each assistant message adds one `desk-session` line to the token log.
 - A thread reply to a bubble that a second mate sent goes back to that mate without a model turn.
   `fm-imessage` sends `X-Fm-Sender` from `FM_MATE_ID` or, if unset, `FM_HOME`.
-  The bridge stores the sender with the exact message ID from Photon or BlueBubbles in `thread-senders.sqlite` in the state directory.
+  The bridge stores the sender with the exact text message ID from Photon or BlueBubbles in `thread-senders.sqlite`.
+  This includes photo captions, but not the photos themselves.
   If the BlueBubbles send response is lost, the relay's matching `tempGuid` event and authenticated message lookup can still identify the bubble.
-  The bridge does not record a sender when two sends to the same chat have the same normalized text within ten seconds.
+  The bridge skips attribution if another unresolved send to the same chat has the same normalized text within ten seconds.
   A history match by text can prevent a duplicate send, but cannot identify the sender.
   The store retains up to 5,000 entries for 30 days and prunes them on write.
   The bridge removes `senders.json` without importing its entries because they have no individual timestamps.

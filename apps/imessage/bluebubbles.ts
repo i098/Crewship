@@ -115,7 +115,7 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
       else if (data.isFromMe === true && typeof data.tempGuid === "string") {
         const { tempGuid } = data;
         const match = this.sendMatches.get(tempGuid);
-        if (match?.record && !match.ambiguous) {
+        if (match) {
           const message = await this.read(data.guid).catch(() => undefined);
           if (message?.guid === data.guid && message.isFromMe === true && message.chats?.some((c) => c.guid === match.chat)
             && this.sendMatches.get(tempGuid) === match) {
@@ -204,8 +204,12 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
           this.trackSend(tempGuid, chat, text, Date.now(), sentId);
           const sent = await this.call(r, "POST", "message/text", undefined,
             { chatGuid: chat, tempGuid, message: text, ...(replyTo && this.privateApi.get(r)?.enabled ? { selectedMessageGuid: replyTo, partIndex: 0 } : {}) }, this.opts.sendMs)
-            .catch((e) => { if (e instanceof RelayError && e.maybeSent) this.suspects.add(r); throw e; }) as { guid?: unknown } | undefined;
-          if (typeof sent?.guid === "string" && sent.guid) this.recordSend(tempGuid, sent.guid);
+            .catch((e) => {
+              if (e instanceof RelayError && e.maybeSent) this.suspects.add(r);
+              else if (!maybeSent) this.sendMatches.delete(tempGuid);
+              throw e;
+            }) as { guid?: unknown } | undefined;
+          this.recordSend(tempGuid, typeof sent?.guid === "string" ? sent.guid : undefined);
         }
         this.suspects.clear();
         return reconciled ? "reconciled" : "accepted";
@@ -258,12 +262,10 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     if (this.sendMatches.size > this.opts.seenMax) this.sendMatches.delete(this.sendMatches.keys().next().value!);
   }
 
-  private recordSend(tempGuid: string, id: string) {
+  private recordSend(tempGuid: string, id?: string) {
     const match = this.sendMatches.get(tempGuid);
-    if (!match || match.ambiguous) return;
-    const record = match.record;
-    match.record = undefined;
-    record?.(id);
+    this.sendMatches.delete(tempGuid);
+    if (id && match && !match.ambiguous) match.record?.(id);
   }
 
   async sent(chat: string, text: string, since: number, tempGuid?: string, sentId?: (id: string) => void): Promise<boolean> {

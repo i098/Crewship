@@ -13,6 +13,7 @@ afterEach(() => {
 
 function relay(privateApi: boolean) {
   const sent: Record<string, unknown>[] = [];
+  let rejected = false;
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -20,6 +21,7 @@ function relay(privateApi: boolean) {
       if (path.endsWith("/server/info")) return Response.json({ data: { private_api: privateApi } });
       if (path.endsWith("/message/text")) {
         sent.push((await req.json()) as Record<string, unknown>);
+        if (rejected) return new Response("rejected", { status: 400 });
         return Response.json({ data: { guid: "sent-1" } });
       }
       return new Response("no", { status: 404 });
@@ -29,7 +31,7 @@ function relay(privateApi: boolean) {
   const dir = mkdtempSync(join(tmpdir(), "bb-thread-"));
   dirs.push(dir);
   const bb = new BlueBubbles([{ url: `http://127.0.0.1:${server.port}`, password: "p" }], dir, {}, () => {});
-  return { bb, sent };
+  return { bb, sent, reject: (value: boolean) => { rejected = value; } };
 }
 
 test("a reply goes out as a thread reply when the relay has the Private API", async () => {
@@ -101,6 +103,17 @@ for (const retry of ["relay", "outbox"]) {
     expect(recorded).toEqual(["sent-by-relay"]);
   });
 }
+
+test("a definite rejection does not block attribution for the next send", async () => {
+  const { bb, reject } = relay(false);
+  const chat = "iMessage;-;+15550000000";
+  reject(true);
+  await expect(bb.send(chat, "Done.")).rejects.toThrow("HTTP 400");
+  reject(false);
+  const recorded: string[] = [];
+  await bb.send(chat, "Done!", undefined, undefined, undefined, (id) => recorded.push(id));
+  expect(recorded).toEqual(["sent-1"]);
+});
 
 test("ambiguous relay matches record no sender through either response path", async () => {
   const chat = "iMessage;-;+15550000000";

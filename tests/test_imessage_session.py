@@ -429,7 +429,7 @@ def test_thread_reply_to_the_owner_stays_with_the_desk_after_restart(tmp_path, e
         assert any("an earlier message from the owner" in prompt for prompt in desk_lines(rig, "prompt"))
 
 
-def test_thread_reply_to_a_bubble_with_an_ambiguous_send_falls_back_to_firstmate(tmp_path):
+def test_thread_reply_to_a_desk_bubble_with_the_same_text_as_a_completed_mate_send_stays_with_the_desk(tmp_path):
     message = mate_data(tmp_path)
     with session_rig(tmp_path) as rig:
         mate_script(tmp_path, message)
@@ -438,7 +438,23 @@ def test_thread_reply_to_a_bubble_with_an_ambiguous_send_falls_back_to_firstmate
         send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
         send_bubble(rig, "On it.", "", 3)
         reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
-        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m3" in e["ids"] for e in events(rig)),
+        wait_for(lambda: len(texts(rig)) == 4, "the desk reply", timeout=120)
+        assert not message.exists()
+
+
+def test_thread_reply_without_a_relay_match_reaches_firstmate(tmp_path):
+    message = mate_data(tmp_path)
+    with session_rig(tmp_path) as rig:
+        mate_script(tmp_path, message)
+        deliver(rig, "m1", "how are you")
+        wait_for(lambda: len(texts(rig)) == 1, "the session reply", timeout=120)
+        send_bubble(rig, "On it.", f"{tmp_path}/engram", 2)
+        rig.relay_mode("garbled")
+        send_bubble(rig, "On it.", f"{tmp_path}/atlas", 3)
+        wait_for(lambda: any(item.get("maybe") for item in rig.outbox()), "the uncertain send", timeout=120)
+        rig.relay_mode("")
+        reply_in_thread(rig, "m3", sent_guids(rig, "On it.")[1], "On it.", "thanks")
+        wait_for(lambda: "note --request-id bluebubbles-m3 -- " in read_text(rig.notes),
                  "the Firstmate handoff", timeout=120)
         assert not message.exists()
 
@@ -464,6 +480,6 @@ def test_thread_reply_goes_to_the_mate_that_sent_the_id_even_when_the_quote_matc
             )
         message.unlink()
         reply_in_thread(rig, "m4", "unknown-guid", "Done.", "thanks")
-        wait_for(lambda: any(e.get("route") == "handoff" and "bluebubbles-m4" in e["ids"] for e in events(rig)),
+        wait_for(lambda: "note --request-id bluebubbles-m4 -- " in read_text(rig.notes),
                  "the Firstmate handoff", timeout=120)
         assert not message.exists()
