@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bridgeNatives, loadState, markHealthy, nativesDir, onStart, Turns } from "./selfheal.ts";
@@ -97,6 +97,19 @@ test("natives are found in a single embedded-* folder when the version folder ha
     expect(nativesDir(dir)).toBe(`${dir}/embedded-abc`);
     writeFileSync(`${dir}/a.node`, "");
     expect(nativesDir(dir)).toBe(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("with several embedded-* folders the newest one is used", () => {
+  const dir = mkdtempSync(join(tmpdir(), "natives-"));
+  try {
+    mkdirSync(`${dir}/embedded-old`);
+    mkdirSync(`${dir}/embedded-new`);
+    utimesSync(`${dir}/embedded-old`, 1000, 1000);
+    utimesSync(`${dir}/embedded-new`, 2000, 2000);
+    expect(nativesDir(dir)).toBe(`${dir}/embedded-new`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -3,7 +3,7 @@
 // past the deadline, the pi-natives .node loads). A failed start that never became healthy counts as a failed heal;
 // the second one in a row alerts the owner once. Run as `bun selfheal.ts start` from ExecStartPre, and as
 // `bun selfheal.ts failed` from the OnFailure unit.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -45,8 +45,8 @@ export function nativesDir(dir: string): string {
   if (!existsSync(dir)) return dir;
   const names = readdirSync(dir);
   if (names.some((f) => f.endsWith(".node"))) return dir;
-  const embedded = names.filter((f) => f.startsWith("embedded-"));
-  return embedded.length === 1 ? join(dir, embedded[0]) : dir;
+  const embedded = names.filter((f) => f.startsWith("embedded-")).sort((a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs);
+  return embedded.length ? join(dir, embedded[0]) : dir;
 }
 
 // Does every pi-natives .node under ~/.omp/natives/<omp version> load? Run in a child so a bad file cannot crash the bridge.
