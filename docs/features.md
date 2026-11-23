@@ -41,9 +41,13 @@ These features turn one server into a self-hosted AI coding agent server where y
 Use [Witch](https://github.com/i098/witch) to watch agent sessions live and replay recordings by device.
 You need access to the private Witch repository.
 Crewship does not install or configure Witch.
-Set up a Witch server with voxl for real screen capture. Without voxl, Witch records synthetic frames.
+Set up the Witch server for real screen capture with the [Witch configuration guide](https://github.com/i098/witch/blob/HEAD/docs/configuration.md).
+In `[voxl]`, map each device ID you pass to `--device` to its voxl WebSocket URL.
+Witch records synthetic frames only when the `[voxl]` map is empty.
 
-On each Linux or macOS device you want to record, use a Witch checkout with `cargo` installed.
+The shared server token gives full access to recordings and capture controls for all devices.
+Enroll only Linux or macOS devices you trust with that access.
+Install `cargo` and run the command from the root of the Witch checkout.
 Use this bootstrap synopsis to build the command:
 
 ```text
@@ -54,3 +58,7 @@ Replace the server URL and device ID, and set `TOKEN` to your server token.
 For the base command, omit both bracketed groups.
 For each optional group you use, remove the square brackets.
 Replace `NAME` with the agent name and `COMMAND...` with the command and its arguments.
+
+Without `-- COMMAND...`, capture continues until you run `witch stop --device ID` with the same device ID.
+Run the setup lines that bootstrap prints in the shell where you run `witch stop`.
+With `-- COMMAND...`, capture lasts only while the command runs.
