@@ -39,7 +39,6 @@ Without a checksum, parallel requests can mix versions if the file changes durin
 ## Video or audio page: yt-dlp
 
 Use an HTTP or HTTPS URL for one video, not a playlist-only URL.
-Refuse YouTube clip URLs (`/clip/` on `youtube.com` or its subdomains) because this skill does not support clips.
 Run `command -v yt-dlp`.
 Install commands for the user: `pipx install 'yt-dlp[default]'` (requires pipx) or `brew install yt-dlp` (macOS).
 
@@ -51,12 +50,13 @@ Run this check before any media action. The empty playlist range prevents the ch
 
 ```bash
 yt-dlp --ignore-config --no-cache-dir --no-playlist --playlist-items 1:0 --simulate \
-  --print '%(_type|video)s %(live_status)s' -- "$VIDEO_URL" 2>/dev/null
+  --print '%(_type|video)s %(live_status)s %(section_start)s %(section_end)s' -- "$VIDEO_URL" 2>/dev/null
 ```
 
 Continue only if the check succeeds and prints one line with type `video`. This also covers audio-only items.
 Continue only for status `not_live` or `was_live`. Finished public HLS recordings are allowed.
 Refuse missing status (`NA`) because the check cannot confirm that the media is not live.
+If either clip bound is not `NA`, refuse with this reason: This skill does not support clips.
 For a collection, use the requested item's individual URL and repeat the check.
 Set `DOWNLOAD_DIR` to an unused directory for each download, including a new format of the same resource.
 Check the exit status and confirm the requested output; yt-dlp can skip an item without an error.
