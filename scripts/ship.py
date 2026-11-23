@@ -114,6 +114,19 @@ def validate_runner_up_pools(entries):
                 raise ValueError(f"{entry['repo']}: pool {label} serves both plain and Docker-in-Docker places")
 
 
+def validate_runner_up_apply(runner):
+    schema = json.loads((ROOT / "blueprint/schemas/crewship.schema.json").read_text())
+    fields = schema["properties"]["crewship"]["properties"]["runner_up"]["properties"]
+    docker = fields["repos"]["items"]["properties"]["docker"]
+    for entry in runner["repos"]:
+        if "docker" in entry:
+            jsonschema.Draft202012Validator(docker).validate(entry["docker"])
+    for name in ("io_write_device", "io_write_mb", "io_write_iops"):
+        if name in runner:
+            jsonschema.Draft202012Validator(fields[name]).validate(runner[name])
+    validate_runner_up_pools(runner["repos"])
+
+
 def validate_cloudflare_runner(config):
     runner = config["cloudflare_runner"]
     if "credentials_file" not in runner and not all(entry.get("kvz") for entry in runner["repos"]):

@@ -10,16 +10,44 @@
 #
 # Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
 
-- name: Validate the runner-up pool labels before configuration
+- name: Validate the runner-up settings before configuration
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python }}"
       - -c
-      - "import json, runpy, sys; runpy.run_path(sys.argv[1])['validate_runner_up_pools'](json.load(sys.stdin))"
+      - "import json, runpy, sys; runpy.run_path(sys.argv[1])['validate_runner_up_apply'](json.load(sys.stdin))"
       - "{{ crewship_repo }}/scripts/ship.py"
-    stdin: "{{ crewship_runner_up_repos | to_json }}"
+    stdin: "{{ crewship_runner_up | to_json }}"
   delegate_to: localhost
   become: false
+  check_mode: false
+  changed_when: false
+
+- name: Render the requested Docker-in-Docker configs for preflight
+  ansible.builtin.set_fact:
+    crewship_runner_up_requested: >-
+      {{ crewship_runner_up_requested | default({}) |
+         combine({item.1: lookup('ansible.builtin.template', 'runner-up.config.json.j2')}) }}
+  vars:
+    crewship_runner_up_repo: "{{ item.0 }}"
+    crewship_runner_up_instance: "{{ item.1 }}"
+  loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+  when: item.0 in crewship_runner_up_dind_repos
+
+- name: Refuse changes while Docker-in-Docker is in use
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_systemd_env }}"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ crewship_blueprint }}/maintenance/runner-up-preflight.py"
+      - "{{ crewship_runner_up_config_dir }}"
+      - "{{ crewship_user_units }}"
+      - "{{ crewship_runner_up_slice_dir }}/{{ crewship_runner_up_slice }}"
+      - "{{ crewship_runner_up_shim_dir }}/dind-image"
+      - "{{ crewship_runner_up_dind_image }}"
+    stdin: "{{ {'configs': crewship_runner_up_requested | default({}), 'slice': lookup('ansible.builtin.template', 'runner-up.slice.j2')} | to_json }}"
   check_mode: false
   changed_when: false
 
@@ -41,17 +69,6 @@
       - check-dind-storage
       - "{{ crewship_runner_up_data_dir }}"
       - "{{ crewship_runner_up_io_write_device }}"
-  check_mode: false
-  changed_when: false
-  when: crewship_runner_up_dind | bool
-
-- name: Require the Sysbox data root on the capped filesystem
-  become: true
-  ansible.builtin.command:
-    argv:
-      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
-      - check-sysbox-storage
-      - "{{ crewship_runner_up_data_dir }}"
   check_mode: false
   changed_when: false
   when: crewship_runner_up_dind | bool

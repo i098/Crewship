@@ -35,37 +35,6 @@ check-dind-storage)
   fi
   echo 'runner-up: runner_up.data_dir must be on runner_up.io_write_device.' >&2
   exit 125 ;;
-check-sysbox-storage)
-  if ! pid=$(systemctl show --property=MainPID --value sysbox-mgr.service) ||
-     ! python3 - "$pid" "$2" <<'PY'
-import os
-import sys
-from pathlib import Path
-
-pid, data_dir = sys.argv[1:]
-if not pid.isdecimal() or int(pid) == 0:
-    sys.exit(1)
-process = Path("/proc") / pid
-args = iter((process / "cmdline").read_bytes().rstrip(b"\0").split(b"\0"))
-if not next(args):
-    sys.exit(1)
-root = Path("/var/lib/sysbox")
-for arg in args:
-    if arg == b"--":
-        break
-    if arg in (b"--data-root", b"-data-root"):
-        root = Path(os.fsdecode(next(args)))
-    elif arg.startswith((b"--data-root=", b"-data-root=")):
-        root = Path(os.fsdecode(arg.split(b"=", 1)[1]))
-if not root.is_absolute():
-    root = process / "cwd" / root
-sys.exit(not (root.is_dir() and root.stat().st_dev == Path(data_dir).stat().st_dev))
-PY
-  then
-    echo 'runner-up: The running Sysbox manager must use a data root on the runner_up.data_dir filesystem.' >&2
-    exit 125
-  fi
-  exit 0 ;;
 run|check-dind-runtime)
   probe=
   network=

@@ -97,21 +97,9 @@ guard)
   resume=${RUNNER_UP_RESUME_PCT:-85}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
-  prune_pauses() {
-    [ -s "$1" ] || return 0
-    while IFS= read -r entry; do
-      instance=${entry#"$2"}
-      instance=${instance%"$3"}
-      [ "$entry" = "$2$instance$3" ] || continue
-      case " ${RUNNER_UP_INSTANCES-} " in
-        *" $instance "*) printf '%s\n' "$entry" ;;
-      esac
-    done < "$1" > "$1.new"
-    if [ -s "$1.new" ]; then mv "$1.new" "$1"; else rm -f "$1.new" "$1"; fi
+  managed() {
+    case " ${RUNNER_UP_INSTANCES-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac
   }
-  prune_pauses "$state" '' ''
-  prune_pauses "$io_state" runner-up@ .service
-  [ -s "$io_state" ] || rm -f "$io_state.calm"
   used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
   queue_start() { timeout --kill-after=1s 2s systemctl --user --no-block start "$@"; }
   if [ "$used" -ge "$pause" ]; then
@@ -126,6 +114,7 @@ guard)
     : > "$state.new"
     set --
     while read -r i; do
+      managed "$i" || continue
       unit=runner-up@$i.service
       systemctl --user is-active --quiet "$unit" && continue
       grep -qxF "$unit" "$io_state" 2>/dev/null && continue
@@ -145,23 +134,31 @@ guard)
   io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
   # IO resume: below the level for the whole window, then one unit per run.
   # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
-  if ! io_below; then
-    rm -f "$io_calm"
-  elif [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
-    [ -s "$io_calm" ] || echo "$now" > "$io_calm"
-    if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
-      read -r unit < "$io_state"
-      if systemctl --user is-active --quiet "$unit"; then
-        grep -vxF "$unit" "$io_state" > "$io_state.new" || :
-      else
-        tail -n +2 "$io_state" > "$io_state.new"
-        printf '%s\n' "$unit" >> "$io_state.new"
-        queue_start "$unit" || :
+  (
+    flock 8
+    if ! io_below; then
+      rm -f "$io_calm"
+    elif [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
+      [ -s "$io_calm" ] || echo "$now" > "$io_calm"
+      if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
+        while read -r unit < "$io_state"; do
+          i=${unit#runner-up@}
+          i=${i%.service}
+          tail -n +2 "$io_state" > "$io_state.new"
+          if [ "$unit" = "runner-up@$i.service" ] && managed "$i"; then
+            if ! systemctl --user is-active --quiet "$unit"; then
+              printf '%s\n' "$unit" >> "$io_state.new"
+              queue_start "$unit" || :
+            fi
+            mv "$io_state.new" "$io_state"
+            break
+          fi
+          mv "$io_state.new" "$io_state"
+        done
+        [ -s "$io_state" ] || rm -f "$io_calm"
       fi
-      mv "$io_state.new" "$io_state"
-      [ -s "$io_state" ] || rm -f "$io_calm"
     fi
-  fi
+  ) 8>"$io_state.lock"
   # IO pause: above the level for the whole window, then the newest running heavy coordinator, one per window.
   # Jobs that run keep running; the unit comes back through the IO resume above.
   if io_above; then
@@ -201,6 +198,8 @@ io-pause)
   shift
   [ "$#" -gt 0 ] || { echo "usage: runner-up-maintain io-pause <unit...>" >&2; exit 2; }
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
+  exec 8>"$io_state.lock"
+  flock 8
   for u in "$@"; do
     systemctl --user stop "$u" || continue
     grep -qxF "$u" "$io_state" 2>/dev/null || echo "$u" >> "$io_state"

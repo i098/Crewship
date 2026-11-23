@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -72,7 +71,7 @@ def validator():
     return f"{program} check-config --config %s" if os.access(program, os.X_OK) else "true %s"
 
 
-def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None, sysbox_root=None):
+def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
     playbook = home.parent / "runner_up.yml"
     if not (home.parent / "templates").exists():
         (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
@@ -139,56 +138,42 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None, s
         )
         lsblk.chmod(0o755)
         environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
+    socket = home.parent / ("docker.sock" if docker_stub else "no-docker.sock")
+    environment["RUNNER_UP_DOCKER_SOCK"] = str(socket)
+    if docker_stub:
+        socket.touch()
+        bin_dir, log = docker_stub
+        shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         systemctl = home / ".local/bin/systemctl"
-        record = f'printf "systemctl %s\\n" "$*" >> "{docker_stub[1]}"' if docker_stub else ":"
         systemctl.write_text(
             '#!/bin/sh\n'
-            'case " $* " in *" sysbox-mgr.service "*) printf "%s\\n" "$SYSBOX_PID"; exit;; esac\n'
-            f'case " $* " in *" daemon-reload "*) {record};; esac\n'
+            f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
             'case " $* " in *" show "*) printf "%s\\n" '
             'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\nexit 0\n'
         )
         systemctl.chmod(0o755)
-    if docker_stub:
-        bin_dir, _ = docker_stub
-        shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
-        socket = home.parent / "docker.sock"
-        socket.touch()
         variables["crewship_user_runtime_dir"] = str(home.parent)
         environment.update(
             RUNNER_UP_DOCKER=str(bin_dir / "docker"),
-            RUNNER_UP_DOCKER_SOCK=str(socket),
             IMAGES=str(home.parent / "images"),
             DOCKER_CGROUP_DRIVER="systemd",
         )
     (home.parent / "etc").mkdir(exist_ok=True)
-    manager = (
-        subprocess.Popen(
-            [sys.executable, "-c", "input()", "--data-root", str(sysbox_root or home)],
-            stdin=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        if facts and facts.get("distribution_version") == "24.04"
-        else nullcontext()
+    result = subprocess.run(
+        [
+            Path(sys.executable).parent / "ansible-playbook",
+            "-i",
+            "localhost,",
+            str(playbook),
+            "--extra-vars",
+            json.dumps(variables),
+            *flags,
+        ],
+        cwd=home.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
     )
-    with manager as process:
-        if process is not None:
-            environment["SYSBOX_PID"] = str(process.pid)
-        result = subprocess.run(
-            [
-                Path(sys.executable).parent / "ansible-playbook",
-                "-i",
-                "localhost,",
-                str(playbook),
-                "--extra-vars",
-                json.dumps(variables),
-                *flags,
-            ],
-            cwd=home.parent,
-            env=environment,
-            capture_output=True,
-            text=True,
-        )
     assert result.returncode == 0, result.stdout + result.stderr
     return int(result.stdout.rsplit("changed=", 1)[1].split()[0])
 
@@ -557,6 +542,9 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     assert "acme-e2e-tests" not in instances(home)
     wants = units(home) / "default.target.wants"
     assert not (wants / "runner-up@acme-e2e-tests.service").exists()
+    apply(home, runner(home, repos=[existing, new]), facts=facts)
+    assert config(home) == original
+    assert not (wants / "runner-up@acme-e2e-tests.service").exists()
     apply(home, runner(home, repos=[REPOS[1]]))
     assert "acme-web" not in instances(home)
     apply(home, runner(home, repos=[existing]), facts=facts)
@@ -570,11 +558,11 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     assert slice_file.stat().st_mtime_ns == before
     calls = stubs[1].read_text().splitlines()
     reload = calls.index("systemctl daemon-reload")
-    assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker "))
+    assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker image inspect "))
     for docker_stub in (None, stubs):
-        settings = runner(home, repos=[existing, new], io_write_mb=200)
-        with pytest.raises(AssertionError, match="running Sysbox manager must use a data root"):
-            apply(home, settings, facts=facts, docker_stub=docker_stub, sysbox_root=Path("/proc"))
+        settings = runner(home, repos=[REPOS[1]])
+        with pytest.raises(AssertionError, match="Stop all Docker-in-Docker places"):
+            apply(home, settings, docker_stub=docker_stub)
         assert slice_file.stat().st_mtime_ns == before
         assert stubs[1].read_text().splitlines() == calls
         assert config(home)["pools"][0]["label"] == "web-dind"
@@ -588,6 +576,18 @@ def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(
         ship.validate_config(document(runner_up={"repos": [dind, plain]}))
     with pytest.raises(AssertionError, match="both plain and Docker-in-Docker"):
         apply(home, runner(home, repos=[dind, plain]))
+    assert instances(home) == []
+
+
+@pytest.mark.parametrize("field", ["docker", "io_write_device", "io_write_mb", "io_write_iops"])
+def test_direct_apply_rejects_invalid_docker_and_io_settings(home, field):
+    settings = runner(home)
+    if field == "docker":
+        settings["repos"] = [{**REPOS[0], "docker": "DinD"}]
+    else:
+        settings[field] = "invalid"
+    with pytest.raises(AssertionError, match="ValidationError"):
+        apply(home, settings)
     assert instances(home) == []
 
 

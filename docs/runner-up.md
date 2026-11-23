@@ -160,6 +160,7 @@ Keep `crewship.ci_pool` only for repositories that did not move yet.
 Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
+Before changing Docker-in-Docker pools, storage, or slice limits, drain their places and stop and disable their coordinators.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
 
 ## Other machines
@@ -211,7 +212,6 @@ Set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/
 Before managed apply, drain the Sysbox containers and use `sudo systemctl edit sysbox-mgr.service`.
 In `[Service]`, reset `ExecStart=` and repeat the existing command with all its flags and the new `--data-root`.
 Reload systemd and restart `sysbox.service`.
-Apply checks the running Sysbox manager's storage before it writes or reloads the slice limits.
 Apply does not move data or restart Sysbox.
 
 Set `docker: dind` on an entry in `runner_up.repos`.
