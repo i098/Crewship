@@ -42,10 +42,17 @@ Install commands for the user: `pipx install 'yt-dlp[default]'` (requires pipx) 
 For YouTube, check for compatible `yt-dlp-ejs` scripts and a supported runtime before any command below.
 Check `deno --version` for Deno 2.3.0 or later, which yt-dlp enables by default.
 For Node 22 or later, check `node --version` and add `--js-runtimes node` before `--`.
-Refer the user to the [yt-dlp EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) if any YouTube prerequisite is missing.
+Refer the user to the upstream yt-dlp EJS setup guide if any YouTube prerequisite is missing.
 
-Check unfamiliar pages before any media action: `yt-dlp --ignore-config --no-playlist --flat-playlist --simulate --dump-single-json -- "$VIDEO_URL"`.
-If the result has multiple entries, use the requested video's individual URL and check it again.
+Run this check before any media action. The empty playlist range prevents the check from processing collection entries.
+
+```bash
+yt-dlp --ignore-config --no-playlist --playlist-items 1:0 --simulate \
+  --print '%(_type|video)s' -- "$VIDEO_URL" 2>/dev/null
+```
+
+Continue only if the check succeeds and prints exactly `video`. This also covers audio-only items.
+For a collection, use the requested item's individual URL and repeat the check.
 Set `DOWNLOAD_DIR` to an unused output directory for each distinct media resource.
 
 ```bash
