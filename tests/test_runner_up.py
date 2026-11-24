@@ -134,10 +134,10 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         lsblk = home / ".local/bin/lsblk"
         lsblk.write_text(
             f'#!/bin/sh\n[ "$5" = {json.dumps(str(device))} ] || exit 1\n'
-            f'exec findmnt -rn -o MAJ:MIN -T {json.dumps(str(home))}\n'
+            f"exec findmnt -rn -o MAJ:MIN -T {json.dumps(str(home))}\n"
         )
         lsblk.chmod(0o755)
-        environment["PATH"] = f'{lsblk.parent}:{environment["PATH"]}'
+        environment["PATH"] = f"{lsblk.parent}:{environment['PATH']}"
     if docker_stub:
         socket = home.parent / "docker.sock"
         socket.touch()
@@ -145,15 +145,15 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         shutil.copy2(bin_dir / "cat", home / ".local/share/runner-up/shim/cat")
         systemctl = home / ".local/bin/systemctl"
         systemctl.write_text(
-            '#!/bin/sh\n'
+            "#!/bin/sh\n"
             f'case " $* " in *" daemon-reload "*) printf "systemctl %s\\n" "$*" >> "{log}";; esac\n'
             'case " $* " in *" runner-up.service "*) case " $* " in\n'
             '  *" show "*) printf "%s\\n" LoadState=not-found ActiveState=inactive; exit 0;;\n'
             '  *" is-enabled "*) exit 1;;\n'
-            'esac;; esac\n'
+            "esac;; esac\n"
             'case " $* " in *" show "*) printf "%s\\n" '
-            'LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\n'
-            'exit 0\n'
+            "LoadState=loaded ActiveState=active UnitFileState=enabled;; esac\n"
+            "exit 0\n"
         )
         systemctl.chmod(0o755)
         variables["crewship_user_runtime_dir"] = str(home.parent)
@@ -504,11 +504,16 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     local, remote = cfg["machines"]
     assert local["cores"] == 12
     by_pool = {place["pools"][0]: place["image"] for place in local["places"]}
-    assert by_pool == {"e2e": "crewship-ci-runner-dind:latest", "plain": "crewship-ci-runner:latest"}
+    assert by_pool == {
+        "e2e": "crewship-ci-runner-dind:latest",
+        "plain": "crewship-ci-runner:latest",
+    }
     assert remote["places"][0]["pools"] == ["plain"]
     directory = home / ".local/share/runner-up"
     service = unit_sections(units(home) / "runner-up@.service")["Service"]
-    assert f"RUNNER_UP_DIND_DOCKERFILE={directory}/runner-up-dind.Dockerfile" in service["Environment"]
+    assert (
+        f"RUNNER_UP_DIND_DOCKERFILE={directory}/runner-up-dind.Dockerfile" in service["Environment"]
+    )
     assert f'"RUNNER_UP_GUARD_PATH={home.parent}/data"' in service["Environment"]
     assert (directory / "runner-up-dind.Dockerfile").is_file()
     assert (directory / "shim/dind-image").read_text().strip() == by_pool["e2e"]
@@ -517,8 +522,8 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
     assert (units(home) / "timers.target.wants/runner-up-image.timer").is_symlink()
     limits = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
-    assert limits["IOWriteBandwidthMax"] == [f'{settings["io_write_device"]} 200M']
-    assert limits["IOWriteIOPSMax"] == [f'{settings["io_write_device"]} 500']
+    assert limits["IOWriteBandwidthMax"] == [f"{settings['io_write_device']} 200M"]
+    assert limits["IOWriteIOPSMax"] == [f"{settings['io_write_device']} 500"]
     assert apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs) == 0
 
 
@@ -563,7 +568,9 @@ def test_deferred_apply_does_not_publish_dind_configs(home, stubs):
     assert slice_file.stat().st_mtime_ns == before
     calls = stubs[1].read_text().splitlines()
     reload = calls.index("systemctl daemon-reload")
-    assert reload < next(i for i, call in enumerate(calls) if call.startswith("docker image inspect "))
+    assert reload < next(
+        i for i, call in enumerate(calls) if call.startswith("docker image inspect ")
+    )
 
 
 def test_inspect_and_direct_apply_reject_a_pool_shared_by_plain_and_dind_places(home):
@@ -638,12 +645,12 @@ def stubs(tmp_path):
             'if [ "$1" = info ]; then\n'
             '  case "$3" in *CgroupDriver*) printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}";;\n'
             f'    *) printf "%s\\n" "{runtime}";; esac\n'
-            'fi\n'
+            "fi\n"
             'if [ "$1 $2" = "image inspect" ]; then test -f "$IMAGES/$3"; exit $?; fi\n'
             'if [ "$1" = build ]; then\n'
             '  while [ "$1" != --tag ]; do shift; done\n'
             '  printf "%s\\n" "${BUILD_CONTENT:-built}" > "$IMAGES/$2"\n'
-            'fi\n'
+            "fi\n"
             'if [ "$1" = tag ]; then cp "$IMAGES/$2" "$IMAGES/$3"; fi\n'
             'if [ "$1 $2" = "image rm" ]; then rm "$IMAGES/$3"; fi\n'
             'if [ "$1 $2" = "network create" ]; then for last; do :; done; echo "$last"; fi\n'
@@ -689,20 +696,26 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
     assert "sudo" not in "".join(calls)
 
 
-@pytest.mark.parametrize(("release", "code"), [
-    ("26.04", 125),
-    ("24.04", 0),
-])
+@pytest.mark.parametrize(
+    ("release", "code"),
+    [
+        ("26.04", 125),
+        ("24.04", 0),
+    ],
+)
 def test_dind_release_policy(stubs, release, code):
     run_script("runner-up-docker", stubs, "check-dind-release", "ubuntu", release, code=code)
 
 
-@pytest.mark.parametrize(("version", "driver", "code"), [
-    ("0.7.1", "systemd", 125),
-    ("0.7.2", "cgroupfs", 125),
-    ("0.7.2", "systemd", 0),
-    ("0.10.0", "systemd", 0),
-])
+@pytest.mark.parametrize(
+    ("version", "driver", "code"),
+    [
+        ("0.7.1", "systemd", 125),
+        ("0.7.2", "cgroupfs", 125),
+        ("0.7.2", "systemd", 0),
+        ("0.10.0", "systemd", 0),
+    ],
+)
 def test_the_shim_requires_a_supported_dind_host_and_does_not_mount_the_cache(
     stubs, tmp_path, version, driver, code
 ):
@@ -758,7 +771,9 @@ def test_each_dind_place_gets_its_own_bridge_and_removes_it_at_teardown(stubs, t
 
 
 @pytest.mark.parametrize(("dind", "code"), [(False, 0), (True, 0), (True, 125)])
-def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs, tmp_path, dind, code):
+def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(
+    stubs, tmp_path, dind, code
+):
     bin_dir, _ = stubs
     base = "crewship-ci-runner:latest"
     derived = "crewship-ci-runner-dind:latest"
@@ -773,10 +788,19 @@ def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs,
     recipe = tmp_path / "Dockerfile"
     recipe.write_text("FROM scratch\n")
     config_file = tmp_path / "config.json"
-    config_file.write_text(json.dumps({"machines": [
-        {"name": "local", "places": [{"provider": "docker", "image": derived if dind else base}]},
-        {"name": "remote", "places": [{"provider": "docker", "image": derived}]},
-    ]}))
+    config_file.write_text(
+        json.dumps(
+            {
+                "machines": [
+                    {
+                        "name": "local",
+                        "places": [{"provider": "docker", "image": derived if dind else base}],
+                    },
+                    {"name": "remote", "places": [{"provider": "docker", "image": derived}]},
+                ]
+            }
+        )
+    )
     env = {
         "PATH": f"{shim}:{bin_dir}:/usr/bin:/bin",
         "RUNNER_UP_DOCKER_SOCK": str(sock),
@@ -787,9 +811,7 @@ def test_coordinator_start_requires_the_daemon_only_for_local_dind_places(stubs,
         "DOCKER_FAILS": "--check-dind-runtime" if code else "@none@",
         "DOCKER_FAIL_CODE": "125",
     }
-    calls = run_script(
-        "runner-up-maintain", stubs, "start", str(config_file), env=env, code=code
-    )
+    calls = run_script("runner-up-maintain", stubs, "start", str(config_file), env=env, code=code)
     assert (tmp_path / "images" / derived).exists() == (dind and code == 0)
     if dind:
         (probe,) = [call for call in calls if "--entrypoint /home/runner/run.sh" in call]
@@ -866,7 +888,10 @@ def test_clean_runs_every_step_when_one_fails_and_fits_the_unit_deadline(stubs, 
     )
     assert budget < int(deadline)
     assert [c.split()[1] for c in calls if c.startswith("docker ")] == [
-        "container", "network", "image", "builder"
+        "container",
+        "network",
+        "image",
+        "builder",
     ]
 
 
@@ -890,8 +915,8 @@ def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=No
         f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
         + (
             'case "$2 $3" in "is-active --quiet") ;; "is-active "*) echo active;; esac\n'
-            if active else
-            '[ "$2" != is-active ] || { case " ${ACTIVE_UNITS:-} " in *" $4 "*) exit 0;; esac; exit 3; }\n'
+            if active
+            else '[ "$2" != is-active ] || { case " ${ACTIVE_UNITS:-} " in *" $4 "*) exit 0;; esac; exit 3; }\n'
         )
         + ("" if failed else '[ "$2" = is-failed ] && exit 1\n')
         + "exit 0\n"
@@ -1032,7 +1057,8 @@ def test_disk_resume_leaves_io_paused_units_until_io_recovers(stubs, tmp_path):
     )
     assert calls == []
     assert io_guard(stubs, tmp_path, "5.00", now=1220, io="") == (
-        [f"systemctl --user --no-block start {unit}"], [unit]
+        [f"systemctl --user --no-block start {unit}"],
+        [unit],
     )
 
 
@@ -1144,7 +1170,12 @@ def test_io_pause_stops_and_records_units_once(stubs, tmp_path):
     state = tmp_path / "io.paused"
     env = {"RUNNER_UP_IO_STATE": str(state)}
     run_script(
-        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", "runner-up@bad", "runner-up@a-b.service",
+        "runner-up-maintain",
+        stubs,
+        "io-pause",
+        "runner-up@a-b",
+        "runner-up@bad",
+        "runner-up@a-b.service",
         env=env,
     )
     assert state.read_text() == "runner-up@a-b.service\n"
@@ -1158,8 +1189,13 @@ def test_io_pause_rejects_the_whole_request_before_stopping_a_coordinator(stubs,
     systemctl.chmod(0o755)
     state = tmp_path / "io.paused"
     calls = run_script(
-        "runner-up-maintain", stubs, "io-pause", "runner-up@a-b", invalid,
-        env={"RUNNER_UP_IO_STATE": str(state)}, code=2,
+        "runner-up-maintain",
+        stubs,
+        "io-pause",
+        "runner-up@a-b",
+        invalid,
+        env={"RUNNER_UP_IO_STATE": str(state)},
+        code=2,
     )
     assert calls == []
     assert not state.exists()
@@ -1248,15 +1284,15 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
         stubs,
         "image",
         env={
-            **env, "BUILD_CONTENT": "wrong disk", "DOCKER_STORE_DEVICE": str(guard_path.lstat().st_dev)
+            **env,
+            "BUILD_CONTENT": "wrong disk",
+            "DOCKER_STORE_DEVICE": str(guard_path.lstat().st_dev),
         },
         code=125,
     )
     assert (images / derived).read_text() == "built\n"
     assert sorted(tag.name for tag in images.iterdir()) == [derived, base]
-    calls = run_script(
-        "runner-up-maintain", stubs, "image", env={**env, "BUILD_CONTENT": "fresh"}
-    )
+    calls = run_script("runner-up-maintain", stubs, "image", env={**env, "BUILD_CONTENT": "fresh"})
     assert (images / derived).read_text() == "fresh\n"
     assert [call.split(" --tag ")[1].split()[0] for call in calls if " --tag " in call] == [
         f"{derived}-candidate",
