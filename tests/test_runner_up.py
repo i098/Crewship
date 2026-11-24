@@ -1474,3 +1474,9 @@ def test_the_service_sets_the_build_gate_only_when_asked(home):
     apply(home, runner(home, build_gate=True))
     env = unit_sections(units(home) / "runner-up@.service")["Service"]["Environment"]
     assert f"RUNNER_UP_BUILD_GATE={home}/.local/bin/build-gate" in env
+
+
+def test_the_build_gate_holds_a_slot_for_every_place_and_one_per_repository(home):
+    apply(home, runner(home, build_gate=True))
+    slots = (home / ".local/share/build-gate/slots").read_text().strip()
+    assert slots == str(6 + len(REPOS))
