@@ -171,7 +171,7 @@ def changes_ui(base, *, head="HEAD"):
     return bool(paths)
 
 
-def check_body(body, template, *, ui=False):
+def check_issue_reference(body):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
     if not re.fullmatch(r" {0,3}Refs #[1-9][0-9]*[ \t]*", first):
@@ -181,6 +181,11 @@ def check_body(body, template, *, ui=False):
             "Remove the closing keyword: a merge never closes an issue. "
             "Use Refs #N; close the issue only after the change is deployed and tested."
         )
+    return errors
+
+
+def check_body(body, template, *, ui=False):
+    errors = check_issue_reference(body)
 
     actual = sections(body)
     for heading, template_lines in sections(template):
