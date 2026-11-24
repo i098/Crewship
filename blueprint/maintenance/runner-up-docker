@@ -19,6 +19,25 @@ check_dind_release() {
     "$(printf '%s\n' "$release" | sed -n 's/^ID=//p' | tr -d '"')" \
     "$(printf '%s\n' "$release" | sed -n 's/^VERSION_ID=//p' | tr -d '"')"
 }
+# A job container of the place can still be going away: --rm removes a big writable layer slowly while the
+# host is busy. Docker refuses the same name until then, so the agent exits at once and the coordinator places
+# the job again in a loop (#1444). Wait for the name instead, and push the removal along with `rm -f`.
+wait_name_free() {
+  name=
+  prev=
+  for a do
+    [ "$prev" = --name ] && name=$a
+    prev=$a
+  done
+  [ -n "$name" ] || return 0
+  waited=0
+  # shellcheck disable=SC2086 # $docker can include sudo -n.
+  while $docker inspect --type container "$name" >/dev/null 2>&1 && [ "$waited" -lt "${RUNNER_UP_NAME_WAIT:-1800}" ]; do
+    $docker rm -f "$name" >/dev/null 2>&1 || :
+    sleep "${RUNNER_UP_NAME_POLL:-5}"
+    waited=$((waited + ${RUNNER_UP_NAME_POLL:-5}))
+  done
+}
 dind_image_file=$(dirname "$0")/dind-image
 dind_image=
 
@@ -47,6 +66,7 @@ run|check-dind-runtime)
     if [ -f "$dind_image_file" ]; then
       read -r dind_image < "$dind_image_file"
     fi
+    wait_name_free "$@"
   fi
   for arg do
     [ -n "$dind_image" ] && [ "$arg" = "$dind_image" ] || continue
