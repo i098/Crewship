@@ -6,7 +6,7 @@ The iMessage bridge lets the owner talk to Firstmate from a phone. It is a small
 
 For each message from the owner, the service does these steps:
 
-1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names who sent the earlier message (the owner, us with the sender, or a sender the bridge did not record) and quotes its text, cut to 200 characters with "…". When that message is not in local history, the note shows no text. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
+1. It turns the message into text. A threaded reply, a message effect, or a group of messages is unwrapped, so nothing that he writes is lost. A threaded reply also names who sent the earlier message: the owner, or in desk session mode us with the sender. When the bridge has no record, the note says so. It quotes that message's text, cut to 200 characters with "…". When that message is not in local history, the note shows no text. A message kind that the service does not know becomes a note that names the kind. Tapbacks, typing, read receipts, unsends, and chat changes are only signals, and the service ignores them.
 2. For a supported desk, it starts reading `fm-inbox.sh status` before saving the message.
    It saves the full input and a stable request id in the private `routing.jsonl` journal before transport acknowledgement.
    It also appends the owner text to desk memory.
@@ -905,8 +905,8 @@ See [What it does](#what-it-does) for model-identity evidence and handoff rules.
 Apply installs these items:
 
 - the build in `~/.local/share/crewship/imessage/stage/`, with the latest spectrum-ts in `~/.local/share/crewship/imessage/node_modules`, rolled out into a slot by `imessage-deploy.ts`, which gives each slot its own copy of `node_modules`, so a rollback keeps the SDK that the old slot ran with. The one exception is the first rolling install: it snapshots the pre-slot files into `legacy` after the SDK upgrade has already rewritten `node_modules`, so a rollback to `legacy` on that install runs on the new SDK
-- the slot unit `~/.config/systemd/user/fm-imessage@.service` and the front unit `fm-imessage.service`, mode `0600` because they hold the owner's number
-- the commands `fm-imessage`, `fm-location` and `fm-call` and the deploy command `imessage-deploy.ts` in `~/.local/bin`
+- the units `fm-imessage@.service`, `fm-imessage.service` and `fm-imessage-heal@.service` in `~/.config/systemd/user`, mode `0600`; the slot and front units hold the owner's number
+- the commands `fm-imessage`, `fm-location` and `fm-call`, the deploy command `imessage-deploy.ts`, and the failure report command `imessage-selfheal.ts` in `~/.local/bin`
 
 The service listens on `127.0.0.1:8765`. To use a different port, set `FM_IMESSAGE_PORT` in a drop-in of the slot unit (`systemctl --user edit fm-imessage@.service`) and in the environment of the commands, including `imessage-deploy.ts`, which reads the port only from its own environment. `FM_INBOX_CMD` overrides the inbox command, which is `<workspace>/firstmate/bin/fm-inbox.sh` by default.
 

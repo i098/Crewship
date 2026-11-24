@@ -3,8 +3,10 @@
 // Outbound: calls fail over in config order; relay eligibility is described in docs/imessage.md.
 //   A send that may have reached a relay is retried on the next relay only after no relay shows it as sent.
 //   The bridge's outbox (outbox.ts) retries what fails.
-// Inbound: every relay posts its webhook here, and a catch-up query fills any gap. A webhook is only a hint: the
-//   message itself is read back from a relay with the password, so a forged webhook can only name a real message.
+// Inbound: every relay posts its webhook here, and a catch-up query fills any gap. An outbound event can complete a
+//   pending sender match by its tempGuid (see webhook). A webhook is only a hint: the message itself is read back
+//   from a relay with the password, so a forged webhook can only name a real message. That read does not confirm the
+//   tempGuid, so only the configured relays must reach this listener.
 //   Messages are de-duplicated by GUID with a bounded seen-set on disk. A failed attachment download is retried by
 //   the bridge's download queue.
 // The API takes the password only as a query parameter, so a request URL is never logged or put in an error.

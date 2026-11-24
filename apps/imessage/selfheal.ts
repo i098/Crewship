@@ -1,8 +1,9 @@
 // Self-healing for the iMessage line (docs/imessage.md#self-healing). Event driven: systemd restarts the bridge when it
 // stops sending WATCHDOG=1, and the bridge sends it only while the line is healthy (port answers, no desk turn stuck
 // past the deadline, the pi-natives .node loads). A failed start that never became healthy counts as a failed heal;
-// the second one in a row alerts the owner once. Run as `bun selfheal.ts start` from ExecStartPre, and as
-// `bun selfheal.ts failed` from the OnFailure unit.
+// the second one in a row alerts the owner once, and so does an active slot that exhausts its retries. Run as
+// `bun selfheal.ts start` from ExecStartPre, and as `bun selfheal.ts failed` from the OnFailure unit, which names the
+// slot in FM_IMESSAGE_SLOT.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";

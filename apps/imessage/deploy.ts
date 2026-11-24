@@ -6,6 +6,7 @@
 //   imessage-deploy needed     exit 3 when the staged build and units differ from the last deployed ones, or no slot is recorded
 //   imessage-deploy follow     the front unit's process: boot, then follow the slot until it stops or exhausts its retries
 //   imessage-deploy stop-all   stop every slot unless a deploy is running (the front unit's ExecStop)
+//   imessage-deploy recover    reset the active slot's start limit, start it, then start the front
 // Env: FM_IMESSAGE_DIR (required), STATE_DIRECTORY, FM_IMESSAGE_PORT (8765), FM_IMESSAGE_NEXT_PORT (8766),
 // FM_DEPLOY_SYSTEMCTL (systemctl).
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
