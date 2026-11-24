@@ -198,10 +198,6 @@
             "lavish_tab": {
               "type": "boolean"
             },
-            "ci_pool_tab": {
-              "type": "boolean",
-              "description": "Deprecated, no effect, removed with #1187."
-            },
             "theme": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]+$"
@@ -657,92 +653,6 @@
           "required": [
             "init",
             "live_restore"
-          ]
-        },
-        "ci_pool": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "data_dir": {
-              "type": "string",
-              "pattern": "^/[A-Za-z0-9_./-]+$"
-            },
-            "total_slots": {
-              "oneOf": [
-                {
-                  "const": "auto"
-                },
-                {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              ]
-            },
-            "job_cpus": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "job_memory_gb": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "nice": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 19
-            },
-            "image": {
-              "type": "string",
-              "minLength": 1
-            },
-            "repos": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "repo": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
-                  },
-                  "name": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-                  },
-                  "slots": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "labels": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9_.-]+$"
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
-                  },
-                  "docker": {
-                    "const": "dind"
-                  },
-                  "userns": {
-                    "type": "boolean"
-                  }
-                },
-                "dependentRequired": {
-                  "userns": ["docker"]
-                },
-                "required": [
-                  "repo",
-                  "slots",
-                  "labels"
-                ]
-              }
-            }
-          },
-          "required": [
-            "data_dir",
-            "repos"
           ]
         },
         "runner_up": {

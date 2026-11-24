@@ -29,7 +29,6 @@ def load(name, path):
 
 
 ship = load("ship_runner_up", "scripts/ship.py")
-pool_script = load("ci_pool_runner_up", "blueprint/maintenance/ci-pool.py")
 
 # The shapes of a real repository list: one label, a reserved label beside the pool label, a named
 # second group of one repository, and several labels.
@@ -71,7 +70,7 @@ def validator():
     return f"{program} check-config --config %s" if os.access(program, os.X_OK) else "true %s"
 
 
-def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
+def apply(home, runner_up, *flags, facts=None, docker_stub=None):
     playbook = home.parent / "runner_up.yml"
     if not (home.parent / "templates").exists():
         (home.parent / "templates").symlink_to(ROOT / "blueprint/ansible/templates")
@@ -115,8 +114,6 @@ def apply(home, runner_up, *flags, ci_pool=None, facts=None, docker_stub=None):
         "start_services": docker_stub is not None,
         "runner_up": runner_up,
     }
-    if ci_pool:
-        crewship["ci_pool"] = ci_pool
     variables = {
         "ansible_become": False,
         "crewship_repo": str(ROOT),
@@ -293,14 +290,6 @@ def test_two_repositories_with_one_instance_name_write_nothing(home):
     assert instances(home) == []
 
 
-def test_auto_slots_take_half_of_the_host_like_the_ci_pool(home):
-    auto = {key: value for key, value in runner(home).items() if key != "total_slots"}
-    apply(home, auto, facts={"processor_vcpus": 96, "memtotal_mb": 250 * 1024})
-    machine = config(home)["machines"][0]
-    total = pool_script.auto_slots({"job_cpus": 4, "job_memory_gb": 8}, 96, 250)
-    assert machine["cores"] == total * 3 // 8 * 4
-
-
 def test_another_machine_joins_with_a_hard_budget_and_serves_every_pool(home):
     machine = {
         "name": "laptop",
@@ -406,22 +395,6 @@ def test_the_slice_caps_writes_only_when_a_disk_is_named(home):
     assert slice_["IOWriteIOPSMax"] == ["/dev/sdc 900"]
 
 
-def test_the_image_timer_runs_only_when_the_ci_pool_does_not_build_the_image(home):
-    ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
-    apply(home, runner(home), ci_pool=ci_pool)
-    assert not (home / ".local/share/runner-up/runner-up-dind.Dockerfile").exists()
-    assert not (units(home) / "runner-up-image.timer").exists()
-    apply(home, runner(home))
-    assert (units(home) / "runner-up-image.timer").exists()
-    assert (units(home) / "timers.target.wants/runner-up-image.timer").is_symlink()
-    apply(home, runner(home), ci_pool=ci_pool)
-    assert not (units(home) / "runner-up-image.timer").exists()
-    assert not (units(home) / "timers.target.wants/runner-up-image.timer").exists()
-    apply(home, runner(home), ci_pool={**ci_pool, "image": "acme/ci:latest"})
-    assert not (units(home) / "runner-up-image.timer").exists()
-    assert not (units(home) / "timers.target.wants/runner-up-image.timer").exists()
-
-
 def test_a_second_apply_changes_nothing_and_check_mode_writes_nothing(home):
     assert apply(home, runner(home), "--check") > 0
     assert not (home / ".config/runner-up/acme-web.json").exists()
@@ -456,7 +429,6 @@ def test_github_default_and_runner_up_reserved_labels_do_not_make_pools(home):
 # --- ship.py checks ---------------------------------------------------------
 
 
-POOL_DOC = {"data_dir": "/data/ci", "repos": [*REPOS, DIND]}
 
 
 def document(**extra):
@@ -467,19 +439,18 @@ def document(**extra):
 
 
 def test_inspect_accepts_the_repos_and_refuses_a_pool_without_its_own_label():
-    ship.validate_config(document(ci_pool=POOL_DOC, runner_up={"repos": REPOS}))
+    ship.validate_config(document(runner_up={"repos": REPOS}))
     bad = [{"repo": "acme/web", "slots": 1, "labels": ["linux", "self-hosted"]}]
     with pytest.raises(ValueError, match="needs a label besides"):
         ship.validate_config(document(runner_up={"repos": bad}))
 
 
-def test_inspect_refuses_runner_up_without_repos_even_beside_a_ci_pool():
+def test_inspect_refuses_runner_up_without_repos():
     with pytest.raises(ValueError, match="runner_up needs repos"):
-        ship.validate_config(document(ci_pool=POOL_DOC, runner_up={}))
+        ship.validate_config(document(runner_up={}))
 
 
-@pytest.mark.parametrize("custom_image", [False, True])
-def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
+def test_dind_places_only_serve_their_pool_locally(home, stubs):
     dind = {key: value for key, value in DIND.items() if key != "userns"}
     plain = {**dind, "repo": dind["repo"].upper(), "name": "plain", "labels": ["plain"]}
     del plain["docker"]
@@ -494,10 +465,7 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     )
     ship.validate_config(document(runner_up=settings))
     facts = {"distribution": "Ubuntu", "distribution_version": "24.04"}
-    ci_pool = {"data_dir": str(home.parent / "data"), "repos": [DIND]}
-    if custom_image:
-        ci_pool["image"] = "acme/ci:latest"
-    apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs)
+    apply(home, settings, facts=facts, docker_stub=stubs)
     cfg = config(home, "acme-e2e-tests")
     assert cfg["github"]["repos"] == ["acme/e2e.tests"]
     assert instances(home) == ["acme-e2e-tests", "acme-engine"]
@@ -518,13 +486,12 @@ def test_dind_places_only_serve_their_pool_locally(home, custom_image, stubs):
     assert (directory / "runner-up-dind.Dockerfile").is_file()
     assert (directory / "shim/dind-image").read_text().strip() == by_pool["e2e"]
     image_service = unit_sections(units(home) / "runner-up-image.service")["Service"]
-    refresh = int(custom_image)
-    assert f"RUNNER_UP_REFRESH_BASE={refresh}" in image_service["Environment"]
+    assert "RUNNER_UP_REFRESH_BASE=1" in image_service["Environment"]
     assert (units(home) / "timers.target.wants/runner-up-image.timer").is_symlink()
     limits = unit_sections(home.parent / "etc/runnerup.slice")["Slice"]
     assert limits["IOWriteBandwidthMax"] == [f"{settings['io_write_device']} 200M"]
     assert limits["IOWriteIOPSMax"] == [f"{settings['io_write_device']} 500"]
-    assert apply(home, settings, facts=facts, ci_pool=ci_pool, docker_stub=stubs) == 0
+    assert apply(home, settings, facts=facts, docker_stub=stubs) == 0
 
 
 def test_apply_refuses_dind_on_ubuntu_2604(home):

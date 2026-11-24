@@ -240,10 +240,6 @@ crewship:
   #   history: 256        # the defaults
   #   cap_mb: 64
   #   max_msg_kb: 64
-  # ci_pool:              # Deprecated; see ci-pool.md
-  #   data_dir: /mnt/data/ci
-  #   repos:
-  #     - { repo: owner/name, slots: 2, labels: [my-label], docker: dind }
   # runner_up:            # Optional; one fresh container per GitHub Actions job behind caps. See runner-up.md
   #   repos:
   #     - { repo: owner/name, slots: 2, labels: [my-label] }
@@ -265,8 +261,6 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
-- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries can use the same unit name.
-  Set `name` to give a second slot group of one repository its own unit name.
 - `runner_up` needs `docker` and `runner_up.repos`.
   Each entry needs a pool label that GitHub does not reserve.
   Use a separate label for [Docker-in-Docker places](runner-up.md#docker-in-a-job).

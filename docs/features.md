@@ -17,7 +17,6 @@ These features turn one server into a self-hosted AI coding agent server where y
 - [Data disk](configuration.md#data-disk)
 - [Model usage metadata and SigNoz export](usage.md) (opt-in)
 - [Private token-saving suggestions](usage.md#optional-reader-installation): a read-only report with daily delivery after a proven manual cycle (opt-in)
-- [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container; deprecated, replaced by runner-up (opt-in)
 - [runner-up](runner-up.md): GitHub Actions jobs, one container per waiting job, behind CPU, I/O, memory and disk caps (opt-in)
 - [Cloudflare container runner](cloudflare-runner.md): GitHub Actions jobs, one Cloudflare Container per job (opt-in)
 - [Signal bridge](../apps/signal/README.md): save a password from your phone into the secrets file, sent as a Signal Note to Self (opt-in)

@@ -33,7 +33,6 @@ SCENE = {
     "docs/chat.md": ("antenna", "The radio mast"),
     "docs/imessage.md": ("bell", "The ship's bell"),
     "docs/capacity.md": ("barrels", "The barrels"),
-    "docs/ci-pool.md": ("containers", "The containers"),
     "docs/architecture.md": ("lighthouse", "The lighthouse"),
     "docs/recovery.md": ("lifeboat", "The lifeboat"),
     "docs/security.md": ("cabin", "The cabin"),

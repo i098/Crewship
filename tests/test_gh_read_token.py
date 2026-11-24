@@ -1,7 +1,6 @@
 import importlib.machinery
 import importlib.util
 import json
-import os
 import stat
 import sys
 from pathlib import Path
@@ -23,7 +22,6 @@ def load(name, path):
 tok = load("gh_read_token", "blueprint/maintenance/gh-read-token")
 guard = load("gh_guard", "blueprint/maintenance/gh")
 cf = load("cf_runner_app", "blueprint/maintenance/cf-runner.py")
-pool = load("ci_pool_app", "blueprint/maintenance/ci-pool.py")
 
 
 @pytest.fixture
@@ -182,11 +180,3 @@ def test_runner_dispatch_reads_with_the_app_and_writes_as_the_user(monkeypatch):
     helper = str(MAINTENANCE / "gh-read-token")
     assert seen[0][:4] == [helper, "run", "gh", "api"]
     assert seen[1][:2] == ["gh", "api"] and seen[2][:2] == ["gh", "api"]
-
-
-def test_runner_watch_reads_the_runner_list_with_the_app(monkeypatch):
-    seen = []
-    monkeypatch.setattr(pool, "command_json", lambda argv: seen.append(argv) or {"runners": []})
-    pool.github_runners("o/a")
-    assert seen == [[str(MAINTENANCE / "gh-read-token"), "run", "gh", "api", "repos/o/a/actions/runners?per_page=100"]]
-    assert os.access(MAINTENANCE / "gh-read-token", os.X_OK)

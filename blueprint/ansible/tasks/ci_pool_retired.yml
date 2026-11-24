@@ -1,0 +1,14 @@
+# The CI pool (crewship.ci_pool) is gone; runner-up replaces it. Stop and disable the units an
+# earlier apply made and leave their files on the host. Idempotent: reports a change only when
+# a unit was still running or enabled. Check mode skips it.
+- name: Stop the retired CI pool units
+  ansible.builtin.command:
+    argv: ["{{ crewship_blueprint }}/maintenance/ci-pool-retire.sh"]
+  become: "{{ crewship_become_target | bool }}"
+  become_user: "{{ crewship_cfg.user }}"
+  environment: "{{ crewship_user_systemd_env | combine({'HOME': crewship_cfg.home}) }}"
+  register: crewship_ci_pool_retired
+  changed_when: crewship_ci_pool_retired.stdout | length > 0
+  when:
+    - crewship_manage_services | bool
+    - not ansible_check_mode
