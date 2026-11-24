@@ -1487,8 +1487,6 @@ def test_the_build_gate_count_covers_the_jobs_the_coordinators_can_place(home):
     repos = [{"repo": f"acme/r{i}", "slots": 1, "labels": [f"r{i}"]} for i in range(9)]
     apply(home, runner(home, build_gate=True, repos=repos))
     slots = int((home / ".local/share/build-gate/slots").read_text())
-    placed = sum(
-        config(home, name)["machines"][0]["cores"] // 4 for name in instances(home)
-    )
+    placed = sum(config(home, name)["machines"][0]["cores"] // 4 for name in instances(home))
     assert placed > 6
     assert slots >= placed
