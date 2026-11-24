@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-push PR check: commit subjects, issue link, Review plan line, screenshots for UI changes.
+"""Pre-push PR check: commit subjects, closing keywords, issue reference, Review plan, screenshots.
 
 scripts/check_pr.py BODY_FILE [--base origin/main] [--ui | --no-ui] [--title TITLE]
 Run it before opening a PR. Run scripts/check_pr_body.py too; it checks the template sections.

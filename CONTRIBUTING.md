@@ -242,6 +242,7 @@ It omits generated intent and puts validation evidence in a collapsed section af
 The pipeline reads these settings from the default branch.
 
 The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It rejects a closing keyword in the body, the PR title, or a commit message on the branch.
 It also runs the [automatic screenshot check](docs/review-evidence.md#automatic-screenshot-checks).
 It runs for every PR, including Dependabot and release PRs.
 Body edits rerun this small check without restarting the full build.
@@ -251,8 +252,9 @@ Check a body file before publication:
 python3 scripts/check_pr_body.py /tmp/pr-body.md
 ```
 
-Pass `--base origin/main` to enable the screenshot check for the current branch.
+Pass `--base origin/main` to enable the screenshot check and the commit-message check for the current branch.
 Pass `--head <revision>` with `--base` to check a revision other than `HEAD`.
+Pass `--title "<PR title>"` to check the PR title.
 
 Match the template headings and checklist text exactly, and run the body checker before each PR publication or body edit.
 
