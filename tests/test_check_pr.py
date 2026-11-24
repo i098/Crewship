@@ -41,6 +41,8 @@ def test_body_needs_issue_first_and_plan(check_pr):
     assert len(check_pr.check_body("Summary\nRefs #12\nReview plan: x", False)) == 1
     assert len(check_pr.check_body("Refs #12\n", False)) == 1
     assert len(check_pr.check_body("```\nRefs #1\nReview plan: x\n```\n", False)) == 2
+    errors = check_pr.check_body("Refs #12\nMerge fixes #12.\nReview plan: x", False)
+    assert any("a merge never closes an issue" in e for e in errors)
 
 
 def test_ui_needs_hosted_image_in_review_evidence(check_pr):
