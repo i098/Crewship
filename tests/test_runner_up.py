@@ -1303,6 +1303,8 @@ def test_dind_image_maintenance_uses_the_base_without_rebuilding_it(stubs, tmp_p
 
 
 def gate(tmp_path, *args, env=None, timeout=20, stdin=None):
+    if not (tmp_path / "slots").exists():
+        (tmp_path / "slots").write_text("4\n")
     pressure = tmp_path / "pressure"
     if not pressure.exists():
         pressure.write_text(
@@ -1371,17 +1373,15 @@ def test_build_gate_slot_count_comes_from_the_shared_file(tmp_path):
     first.communicate()
 
 
-def test_build_gate_default_is_four_slots_when_no_count_is_installed(tmp_path):
-    holders = [gate(tmp_path, "sleep", "5") for _ in range(4)]
-    time.sleep(1.5)
-    fifth = gate(tmp_path, "echo", "fifth")
-    time.sleep(1.5)
-    assert fifth.poll() is None
-    fifth.kill()
-    fifth.communicate()
-    for holder in holders:
-        holder.kill()
-        holder.communicate()
+def test_build_gate_fails_without_running_the_command_when_no_count_is_installed(tmp_path):
+    marker = tmp_path / "ran"
+    job = gate(
+        tmp_path, "touch", str(marker), env={"BUILD_GATE_SLOTS_FILE": str(tmp_path / "missing")}
+    )
+    out, err = job.communicate(timeout=20)
+    assert job.returncode == 2
+    assert "no slot count" in err
+    assert not marker.exists()
 
 
 def test_build_gate_exits_zero_when_a_signalled_command_still_exits_zero(tmp_path):
@@ -1408,6 +1408,8 @@ def cargo_shim(tmp_path, *args, io="99.00", wrap=False):
     if wrap:
         (bindir / "cargo.wrap").write_text('#!/bin/sh\necho "wrap:$BUILD_GATE_HELD:$*"\n')
         (bindir / "cargo.wrap").chmod(0o755)
+    if not (tmp_path / "slots").exists():
+        (tmp_path / "slots").write_text("4\n")
     pressure = tmp_path / "pressure"
     pressure.write_text(f"full avg10=0.00 avg60={io} avg300=0.00 total=0\n")
     environment = {
@@ -1474,3 +1476,17 @@ def test_the_service_sets_the_build_gate_only_when_asked(home):
     apply(home, runner(home, build_gate=True))
     env = unit_sections(units(home) / "runner-up@.service")["Service"]["Environment"]
     assert f"RUNNER_UP_BUILD_GATE={home}/.local/bin/build-gate" in env
+
+
+def test_apply_rejects_a_build_gate_slot_count_below_the_places_runner_up_can_hold(home):
+    with pytest.raises(AssertionError, match="build_gate_slots is below"):
+        apply(home, runner(home, build_gate=True, build_gate_slots=5))
+
+
+def test_the_build_gate_count_covers_the_jobs_the_coordinators_can_place(home):
+    repos = [{"repo": f"acme/r{i}", "slots": 1, "labels": [f"r{i}"]} for i in range(9)]
+    apply(home, runner(home, build_gate=True, repos=repos))
+    slots = int((home / ".local/share/build-gate/slots").read_text())
+    placed = sum(config(home, name)["machines"][0]["cores"] // 4 for name in instances(home))
+    assert placed > 6
+    assert slots >= placed
