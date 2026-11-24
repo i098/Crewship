@@ -71,13 +71,14 @@ export function shortName(label = ""): string {
   return label === "firstmate" ? label : "";
 }
 
-// Same-repository closing keywords GitHub recognises in a PR body.
-const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b/i;
+// How a pull request body names its issue: the opening "Refs #N", or a closing
+// keyword in a body written before that rule.
+const BODY_ISSUE = /\b(?:Refs|close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s+#(\d+)\b/i;
 // How a task record names its issue: an issues/<n> link or "issue #<n>".
 const RECORD_ISSUE = /issues\/(\d+)|\bissue\s+#?(\d+)/i;
 
-export function closingIssue(body?: string | null): string {
-  return (body || "").match(CLOSING)?.[1] || "";
+export function bodyIssue(body?: string | null): string {
+  return (body || "").match(BODY_ISSUE)?.[1] || "";
 }
 
 export function recordIssue(texts: string[]): string {
@@ -313,7 +314,7 @@ export default function (pi) {
     // Herdr already indents continuation rows two columns, so this lines the
     // PR line up under the name: after the "└ " for a worker.
     const parts = prParts(
-      { pr: pr?.number, issue: taskIssue || closingIssue(pr?.body), ...(pr || taskId ? stat : {}) },
+      { pr: pr?.number, issue: taskIssue || bodyIssue(pr?.body), ...(pr || taskId ? stat : {}) },
       taskId ? 2 : 0,
     );
     const args = ["pane", "report-metadata", paneId, "--source", SOURCE];

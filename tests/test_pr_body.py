@@ -80,6 +80,14 @@ class PRBodyTests(unittest.TestCase):
                 errors = self.check(VALID_BODY + "\n" + text + "\n")
                 self.assertTrue(any("a merge never closes an issue" in e for e in errors))
 
+    def test_cli_rejects_a_closing_keyword_in_the_title(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--title", "fix: retry the request (closes #7)"],
+            input=VALID_BODY, text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("a merge never closes an issue", result.stderr)
+
     def test_indented_code_cannot_supply_the_opening_reference(self):
         for prefix in ("    ", "\t", " \t", "\n    ", "\n\t"):
             with self.subTest(prefix=prefix):
