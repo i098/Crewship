@@ -1480,4 +1480,15 @@ def test_the_service_sets_the_build_gate_only_when_asked(home):
 
 def test_apply_rejects_a_build_gate_slot_count_below_the_places_runner_up_can_hold(home):
     with pytest.raises(AssertionError, match="build_gate_slots is below"):
-        apply(home, runner(home, build_gate=True, build_gate_slots=6))
+        apply(home, runner(home, build_gate=True, build_gate_slots=5))
+
+
+def test_the_build_gate_count_covers_the_jobs_the_coordinators_can_place(home):
+    repos = [{"repo": f"acme/r{i}", "slots": 1, "labels": [f"r{i}"]} for i in range(9)]
+    apply(home, runner(home, build_gate=True, repos=repos))
+    slots = int((home / ".local/share/build-gate/slots").read_text())
+    placed = sum(
+        config(home, name)["machines"][0]["cores"] // 4 for name in instances(home)
+    )
+    assert placed > 6
+    assert slots >= placed
