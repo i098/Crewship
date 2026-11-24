@@ -84,7 +84,7 @@ crewship_build_gate_dir: /tmp/build-gate
 # Persistent, unlike the locks in /tmp: the count survives a reboot.
 crewship_build_gate_slots_file: "{{ crewship_cfg.home }}/.local/share/build-gate/slots"
 # The one host-wide job count; every build-gate caller reads it. The gate holds a runner that runner-up has already given a job, and runner-up
-# removes a runner that gets no job in time, so the count must cover every job runner-up places: total slots plus one per repository (each share is at least 1).
+# removes a runner that gets no job in time, so the count must cover every job runner-up places: total slots plus one per repos entry (each share is at least 1). Apply fails if it is lower.
 crewship_build_gate_slots: "{{ crewship_runner_up.build_gate_slots | default(crewship_runner_up_total_slots | int + crewship_runner_up_repos | length) | int }}"
 # The cargo shim file that sends host builds (workers, mates) through build-gate.
 crewship_build_gate_cargo: "{{ crewship_local_bin }}/cargo"

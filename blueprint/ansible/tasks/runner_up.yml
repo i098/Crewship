@@ -108,6 +108,11 @@
             state: directory
             mode: "1777"
 
+        - name: Check that the slot count covers every job runner-up places
+          ansible.builtin.assert:
+            that: crewship_build_gate_slots | int >= crewship_runner_up_total_slots | int + crewship_runner_up_repos | length
+            fail_msg: build_gate_slots is below runner_up total_slots plus one per repos entry; build-gate would starve placed runners
+
         - name: Write the host-wide slot count
           ansible.builtin.copy:
             content: "{{ crewship_build_gate_slots }}\n"

@@ -1,7 +1,7 @@
 #!/bin/sh
 # build-gate <command...>: run a heavy build behind the host's one shared job pool (docs/runner-up.md#build-gate).
 # It waits, and never fails, while the data disk is above BUILD_GATE_DISK_PCT or the io `full` avg60 pressure is
-# above BUILD_GATE_IO_PCT. Then it takes one flock slot out of the host-wide count in $BUILD_GATE_SLOTS_FILE (default 4)
+# above BUILD_GATE_IO_PCT. Then it takes one flock slot out of the host-wide count in $BUILD_GATE_SLOTS_FILE (required)
 # BUILD_GATE=off runs the command at once. A command that runs under a gate (BUILD_GATE_HELD) does not wait again.
 set -eu
 [ "$#" -gt 0 ] || { echo "usage: build-gate <command...>" >&2; exit 2; }
@@ -9,7 +9,7 @@ if [ "${BUILD_GATE-}" = off ] || [ -n "${BUILD_GATE_HELD-}" ]; then exec "$@"; f
 
 dir=${BUILD_GATE_DIR:-/tmp/build-gate}
 slots=$(cat "${BUILD_GATE_SLOTS_FILE:-$(dirname "$0")/../share/build-gate/slots}" 2>/dev/null | tr -dc 0-9) || slots=
-[ -n "$slots" ] || slots=4
+[ -n "$slots" ] || { echo "build-gate: no slot count in the slots file; run the blueprint apply with runner_up build_gate" >&2; exit 2; }
 path=${BUILD_GATE_DISK_PATH:-/sdc-disk}
 max_disk=${BUILD_GATE_DISK_PCT:-85}
 max_io=${BUILD_GATE_IO_PCT:-40}
