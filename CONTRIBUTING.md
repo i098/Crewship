@@ -334,3 +334,4 @@ Do not change published releases, including `0.4.7`.
    When the package is public, anyone can pull an exact version without a login: `docker pull ghcr.io/i098/crewship:0.4.8-rc.1`.
 
    The first push creates the package as private, and the REST API cannot change package visibility. Do this one time: on the [crewship package](https://github.com/users/i098/packages/container/package/crewship), click **Package settings**, then under **Danger Zone** click **Change visibility**, select **Public**, and confirm with the package name.
+
