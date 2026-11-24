@@ -893,6 +893,15 @@ function webSend(text: string): boolean {
   return true;
 }
 
+// Remember the bubble ID a thread reply quotes, so the next reply on that thread reaches the sending mate.
+function threadSenderSink(o: Out, bubble: Bubble, store: typeof threadSenders) {
+  if (!store || typeof bubble !== "string") return undefined;
+  return (id: string) => {
+    try { store.remember(id, o.sender ?? ""); }
+    catch (error) { log("save thread sender")(error); }
+  };
+}
+
 async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => void, store: typeof threadSenders) {
   const guid = `${o.guid}-${i}`;
   const maybe: Record<string, string> = {};
@@ -917,10 +926,7 @@ async function sendBubble(o: Out, i: number, bubble: Bubble, save: (o: Out) => v
     save((o = { ...o, maybe: Object.keys(maybe).length ? maybe : undefined }));
   }
   checkDeskDelivery(o);
-  const sentId = store && typeof bubble === "string" ? (id: string) => {
-    try { store.remember(id, o.sender ?? ""); }
-    catch (error) { log("save thread sender")(error); }
-  } : undefined;
+  const sentId = threadSenderSink(o, bubble, store);
   const since = o.since ?? Date.now();
   try {
     const via = await failover(routes(o, i, maybe, guid, sentId), bubble, (line) => console.error(`fm-imessage: outbox ${line}`));
@@ -1285,16 +1291,19 @@ const runSessionTurn = createSessionTurn<Routing>({
     guid, at: Date.now(), bubbles: parts, deskGeneration, deskSession })),
 });
 
+// Exact thread replies route by their quoted target; the session gate still covers the whole burst.
+async function routeSessionBurst(pending: Routing[], controller: AbortController, current: () => boolean): Promise<void> {
+  if (pending.some(isThreadReply)) {
+    if (!sessionMayAct(pending, { vetted: DESK_VETTED, muted, safe: deskSafe })) return handoffV2(pending);
+    pending = await relayThreadReplies(pending, current);
+    if (!pending.length || !current()) return;
+  }
+  return runSessionTurn(pending, controller, current);
+}
+
 async function runV2Turn(pending: Routing[], controller: AbortController, current: () => boolean) {
   if (!current()) return;
-  if (DESK_SESSION) {
-    if (pending.some(isThreadReply)) {
-      if (!sessionMayAct(pending, { vetted: DESK_VETTED, muted, safe: deskSafe })) return handoffV2(pending);
-      pending = await relayThreadReplies(pending, current);
-      if (!pending.length || !current()) return;
-    }
-    return runSessionTurn(pending, controller, current);
-  }
+  if (DESK_SESSION) return routeSessionBurst(pending, controller, current);
   if (muted()) return handoffV2(pending);
   if (pending.some((r) => r.mutationPath)) return handoffV2(pending);
   const target = pending.at(-1)!;
@@ -1627,22 +1636,28 @@ async function rewriteVoice(source: VoiceSource, question: string): Promise<stri
   }
 }
 
+function applyReceived(received: Received) {
+  deskGeneration++;
+  if (DESK_SESSION && !received.requestId.startsWith("web-")) ownerBubbles.add(received.ref.id);
+  routing.set(received.requestId, { ...received, route: "pending" });
+}
+
+function applyOut(ids: string[], event: { route: Routing["route"]; out?: Out; handoffNote?: string; mutationPath?: string; social?: true }) {
+  for (const id of ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
+    handoffNote: event.handoffNote, ...(event.handoffNote?.includes("may be incomplete") ? { noted: true } : {}), ...(event.social ? { social: true } : {}), ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
+}
+
 function applyRoute(event: RouteEvent) {
   if ("replyTarget" in event) return; // audit-only row: it changes no routing state on replay
   if ("deskCancelled" in event) deskGeneration++;
-  else if ("received" in event) {
-    deskGeneration++;
-    const { received } = event;
-    if (DESK_SESSION && !received.requestId.startsWith("web-")) ownerBubbles.add(received.ref.id);
-    routing.set(received.requestId, { ...received, route: "pending" });
-  } else if ("v2" in event) {
+  else if ("received" in event) applyReceived(event.received);
+  else if ("v2" in event) {
     for (const id of event.ids) routing.get(id)!.v2 = event.v2;
   } else if ("stale" in event) {
     for (const id of event.ids) routing.get(id)!.stale = true;
   } else if ("responded" in event) {
     for (const id of event.ids) routing.get(id)!.responded = event.responded;
-  } else if ("route" in event) for (const id of event.ids) Object.assign(routing.get(id)!, { route: event.route, out: event.out,
-    handoffNote: event.handoffNote, ...(event.handoffNote?.includes("may be incomplete") ? { noted: true } : {}), ...(event.social ? { social: true } : {}), ...(event.mutationPath ? { mutationPath: event.mutationPath } : {}) });
+  } else if ("route" in event) applyOut(event.ids, event);
 }
 
 function recordRoute(event: RouteEvent) {
@@ -1792,6 +1807,24 @@ async function fetchAgain(ref: Ref) {
   }
 }
 
+// Keep the newest inbound of each kind for proactive replies and startup recovery.
+function rememberInbound(line: Line, message: LineMessage, ref: Ref, at: number) {
+  if (at >= latestAt) {
+    latest = message;
+    latestRef = line.latest = ref;
+    latestAt = at;
+    recent.push(ref);
+    recent.splice(0, Math.max(0, recent.length - 10));
+    persistLatest(latestFile(line.name), `${message.space.id}\n${message.id}\n${at}\n`);
+  }
+  if (directChat.test(ref.space) && at >= proactiveAt) {
+    proactiveRef = ref;
+    strandedWake?.retry();
+    proactiveAt = at;
+    persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
+  }
+}
+
 async function handle(line: Line, message: LineMessage) {
   const { text, failed } = await noteText(message);
   if (stopping) return;
@@ -1807,20 +1840,7 @@ async function handle(line: Line, message: LineMessage) {
     downloads.add(ref);
   }
   const at = message.timestamp?.getTime() || Date.now();
-  if (at >= latestAt) {
-    latest = message;
-    latestRef = line.latest = ref;
-    latestAt = at;
-    recent.push(ref);
-    recent.splice(0, Math.max(0, recent.length - 10));
-    persistLatest(latestFile(line.name), `${message.space.id}\n${message.id}\n${at}\n`);
-  }
-  if (directChat.test(ref.space) && at >= proactiveAt) {
-    proactiveRef = ref;
-    strandedWake?.retry();
-    proactiveAt = at;
-    persistLatest(`${latestFile(line.name)}-direct`, `${ref.space}\n${ref.id}\n${at}\n`);
-  }
+  rememberInbound(line, message, ref, at);
   reads.add(ref); // the text is durable in routing: it is taken in, whichever way it is answered
   trace(message.id, "inbound-held");
   const pending = pendingRoutes();

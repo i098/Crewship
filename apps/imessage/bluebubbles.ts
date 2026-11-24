@@ -116,19 +116,22 @@ export class BlueBubbles implements AsyncIterable<Bubble> {
     const data = event?.data;
     if (event?.type === "new-message" && typeof data?.guid === "string") {
       if (!data.isFromMe) void this.accept(data.guid);
-      else if (data.isFromMe === true && typeof data.tempGuid === "string") {
-        const { tempGuid } = data;
-        const match = this.sendMatches.get(tempGuid);
-        if (match) {
-          const message = await this.read(data.guid).catch(() => undefined);
-          if (message?.guid === data.guid && message.isFromMe === true && message.chats?.some((c) => c.guid === match.chat)
-            && this.sendMatches.get(tempGuid) === match) {
-            this.recordSend(tempGuid, message.guid);
-          }
-        }
-      }
+      else await this.confirmOutbound(data);
     }
     return new Response("ok\n");
+  }
+
+  // A relay saw the bubble a send just made: keep its GUID only when the match still names this chat.
+  private async confirmOutbound(data: { guid?: unknown; isFromMe?: unknown; tempGuid?: unknown }) {
+    if (data.isFromMe !== true || typeof data.tempGuid !== "string" || typeof data.guid !== "string") return;
+    const tempGuid = data.tempGuid;
+    const match = this.sendMatches.get(tempGuid);
+    if (!match) return;
+    const message = await this.read(data.guid).catch(() => undefined);
+    if (message?.guid === data.guid && message.isFromMe === true && message.chats?.some((c) => c.guid === match.chat)
+      && this.sendMatches.get(tempGuid) === match) {
+      this.recordSend(tempGuid, message.guid);
+    }
   }
 
   // One message read whole (content and attachments) from the first relay that has it.
