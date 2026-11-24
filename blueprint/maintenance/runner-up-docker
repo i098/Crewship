@@ -7,11 +7,80 @@ set -eu
 docker=${RUNNER_UP_DOCKER:-/usr/bin/docker}
 slice=${RUNNER_UP_SLICE:-runnerup.slice}
 [ -w "${RUNNER_UP_DOCKER_SOCK:-/var/run/docker.sock}" ] || docker="sudo -n $docker"
+check_dind_host() {
+  if [ "$1:$2" != ubuntu:24.04 ]; then
+    echo 'runner-up: Docker-in-Docker requires Ubuntu 24.04 with Sysbox.' >&2
+    exit 125
+  fi
+}
+check_dind_release() {
+  release=$(cat /etc/os-release)
+  check_dind_host \
+    "$(printf '%s\n' "$release" | sed -n 's/^ID=//p' | tr -d '"')" \
+    "$(printf '%s\n' "$release" | sed -n 's/^VERSION_ID=//p' | tr -d '"')"
+}
+dind_image_file=$(dirname "$0")/dind-image
+dind_image=
+
 case "${1-}" in
-run)
-  shift
+check-dind-release)
+  check_dind_host "${2-}" "${3-}"
+  exit 0 ;;
+check-dind-storage)
+  if [ -d "$2" ] && [ -n "$3" ] &&
+    device=$(findmnt -rn -o MAJ:MIN -T "$2") &&
+    devices=$(lsblk -nr -o MAJ:MIN -- "$3") &&
+    printf '%s\n' "$devices" | grep -qxF "$device"; then
+    exit 0
+  fi
+  echo 'runner-up: runner_up.data_dir must be on runner_up.io_write_device.' >&2
+  exit 125 ;;
+run|check-dind-runtime)
+  probe=
+  network=
+  if [ "$1" = check-dind-runtime ]; then
+    probe=${2:?Specify the image to probe}
+    dind_image=$probe
+    set -- --rm --entrypoint /home/runner/run.sh "$probe" --check-dind-runtime
+  else
+    shift
+    if [ -f "$dind_image_file" ]; then
+      read -r dind_image < "$dind_image_file"
+    fi
+  fi
+  for arg do
+    [ -n "$dind_image" ] && [ "$arg" = "$dind_image" ] || continue
+    if [ -z "$probe" ] && [ -n "${RUNNER_UP_BUILD_GATE-}" ]; then
+      gate=$RUNNER_UP_BUILD_GATE
+      RUNNER_UP_BUILD_GATE='' exec "$gate" "$0" run "$@"
+    fi
+    check_dind_release
+    # shellcheck disable=SC2086
+    runtime=$($docker info --format '{{with index .Runtimes "sysbox-runc"}}{{.Path}}{{end}}')
+    version=$("$runtime" --version 2>/dev/null) || version=
+    version=$(printf '%s\n' "$version" | awk '$1 == "version:" && $2 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+(\+[^ ]+)?$/ {print $2}')
+    if [ -z "$version" ] || ! dpkg --compare-versions "${version#v}" ge 0.7.2; then
+      echo 'runner-up: Docker-in-Docker requires Sysbox 0.7.2 or later.' >&2
+      exit 125
+    fi
+    # shellcheck disable=SC2086 # $docker can include sudo -n.
+    if [ "$($docker info --format '{{.CgroupDriver}}')" != systemd ]; then
+      echo 'runner-up: Docker-in-Docker places require the systemd cgroup driver' >&2
+      exit 125
+    fi
+    # shellcheck disable=SC2086 # $docker can include sudo -n.
+    if ! $docker image inspect "$dind_image" >/dev/null 2>&1; then
+      echo 'runner-up: Docker-in-Docker image is missing. Run the runner-up image service.' >&2
+      exit 125
+    fi
+    # shellcheck disable=SC2086 # $docker can include sudo -n.
+    network=$($docker network create --driver bridge --label runner-up.dind \
+      "runner-up-dind-$(cat /proc/sys/kernel/random/uuid)") || exit 125
+    trap '$docker network rm "$network" >/dev/null' EXIT
+    break
+  done
   cache=
-  if [ -n "${RUNNER_UP_SHARED_CACHE-}" ]; then
+  if [ -z "$network" ] && [ -n "${RUNNER_UP_SHARED_CACHE-}" ]; then
     # The build cache every job of the host shares (docs/runner-up.md#shared-build-cache): the
     # compile cache, the cargo registry, the package stores, and cargo's lock files so the lock holds across jobs.
     # Never a shared target directory: a job builds in its own container.
@@ -33,6 +102,18 @@ run)
   # A job's own value of either variable still wins.
   jobs=
   [ -z "${RUNNER_UP_JOB_CPUS-}" ] || jobs="-e MOLD_JOBS=1 -e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
+  if [ -n "$network" ]; then
+    exec 8<&0
+    # shellcheck disable=SC2086 # $docker and $jobs contain separate arguments.
+    $docker run --cgroup-parent "$slice" --pids-limit 8192 --runtime=sysbox-runc \
+      --network "$network" $jobs "$@" <&8 8<&- &
+    child=$!
+    trap 'kill -TERM "$child" 2>/dev/null || :' HUP INT TERM
+    status=0
+    wait "$child" || status=$?
+    while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+    exit "$status"
+  fi
   # RUNNER_UP_BUILD_GATE names build-gate (docs/runner-up.md#build-gate): the job starts when the host has a free slot.
   # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache and $jobs hold no spaces inside a word
   exec ${RUNNER_UP_BUILD_GATE-} $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;

@@ -778,7 +778,7 @@
                     "uniqueItems": true
                   },
                   "docker": {
-                    "description": "Refused by scripts/ship.py with a clear error: runner-up has no Docker daemon in the job.",
+                    "description": "Run this entry's jobs on local places with a per-job Docker daemon.",
                     "const": "dind"
                   }
                 },
@@ -821,6 +821,18 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 10000
+            },
+            "io_write_device": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_./-]+$"
+            },
+            "io_write_mb": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "io_write_iops": {
+              "type": "integer",
+              "minimum": 1
             },
             "nice": {
               "type": "integer",

@@ -6,6 +6,10 @@ name: ci-pool-smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      dind_pool:
+        description: 'Optional runner-up pool label for a docker: dind entry'
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +20,7 @@ defaults:
 
 jobs:
   config-and-python:
+    if: inputs.dind_pool == ''
     name: configuration and python checks (runner-up)
     runs-on: crewship
     timeout-minutes: 20
@@ -63,3 +68,45 @@ jobs:
 
       - name: Validate container configuration
         run: ./ship.sh inspect --config blueprint/containers/crewship.container.yml
+
+  docker-in-docker:
+    if: inputs.dind_pool != ''
+    runs-on: ${{ inputs.dind_pool }}
+    timeout-minutes: 20
+    outputs:
+      daemon_id: ${{ steps.smoke.outputs.id }}
+      place: ${{ steps.smoke.outputs.place }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build with Buildx and run a Compose service
+        id: smoke
+        run: |
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          [[ "$RUNNER_NAME" =~ ^runner-up-(.+)-[0-9]+$ ]]
+          printf 'place=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          sh tests/runner-up-dind-smoke.sh
+
+  docker-in-docker-isolation:
+    needs: docker-in-docker
+    runs-on: ${{ inputs.dind_pool }}
+    timeout-minutes: 5
+    steps:
+      - name: Require an independent empty Docker daemon
+        env:
+          FIRST_DAEMON_ID: ${{ needs.docker-in-docker.outputs.daemon_id }}
+          FIRST_PLACE: ${{ needs.docker-in-docker.outputs.place }}
+        run: |
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test -n "$FIRST_PLACE"
+          [[ "$RUNNER_NAME" =~ ^runner-up-(.+)-[0-9]+$ ]]
+          test "${BASH_REMATCH[1]}" = "$FIRST_PLACE"
+          daemon=$(docker info --format '{{.ID}}')
+          containers=$(docker ps -aq)
+          test -n "$FIRST_DAEMON_ID"
+          test -n "$daemon"
+          test "$daemon" != "$FIRST_DAEMON_ID"
+          test -z "$containers"
+          printf 'daemon=%s\n' "$daemon"

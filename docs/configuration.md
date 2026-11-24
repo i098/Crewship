@@ -240,7 +240,7 @@ crewship:
   #   history: 256        # the defaults
   #   cap_mb: 64
   #   max_msg_kb: 64
-  # ci_pool:              # Deprecated; removed when https://github.com/i098/Crewship/issues/1179 lands. See ci-pool.md
+  # ci_pool:              # Deprecated; see ci-pool.md
   #   data_dir: /mnt/data/ci
   #   repos:
   #     - { repo: owner/name, slots: 2, labels: [my-label], docker: dind }
@@ -265,8 +265,12 @@ Keep iMessage off by omitting `imessage`; omit `imessage.cards` to keep only the
 - `firstmate` and `browser_prune.enabled` need `agents`.
 - `fleet_guards` needs `docker` and `firstmate`. Obscura is always its latest release. An older `.local/host.yml` that still sets `browsers.obscura_version` or `browsers.obscura_sha256` keeps working: both keys are deprecated, ignored, and reported in one warning on stderr. No edit is required.
 - `project_databases` needs `docker` and `firstmate`, but does not need `fleet_guards`. The old name `shared_postgres` still works as an alias and prints a note to rename it.
-- `ci_pool` (deprecated: removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands) needs `docker`, and no two `ci_pool.repos` entries may make the same unit name. An entry may set `name` to give a second slot group of one repository its own unit name.
-- `runner_up` needs `docker` and `runner_up.repos`. A `runner_up.repos` entry may not set `docker: dind`, and each entry needs a label besides `self-hosted` and `linux` for its pool. `runner_up.machines` names are unique and not `local`.
+- `ci_pool` needs `docker`, and no two `ci_pool.repos` entries can use the same unit name.
+  Set `name` to give a second slot group of one repository its own unit name.
+- `runner_up` needs `docker` and `runner_up.repos`.
+  Each entry needs a pool label that GitHub does not reserve.
+  Use a separate label for [Docker-in-Docker places](runner-up.md#docker-in-a-job).
+  Use unique `runner_up.machines` names other than `local`.
 - `cloudflare_runner` needs `repos`, and `credentials_file` unless every repository has a `kvz` block ([shared cluster](cloudflare-runner.md#fill-a-shared-cluster)); no two entries may name the same repository, and a label may not be one that every runner has or a GitHub-hosted one.
 - `imessage` needs `firstmate`, and `imessage.owner` is a phone number in E.164 form (`+` and digits). `bluebubbles` in `transports` needs the `bluebubbles` block.
 - `github_board` needs `firstmate`, `github_board.repo` is `owner/name`, and `github_board.project` is a Project number.

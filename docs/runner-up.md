@@ -1,7 +1,7 @@
 # runner-up
 
 [runner-up](https://github.com/kunchenguid/runner-up) runs GitHub Actions jobs on this host, one fresh Docker container per job.
-It replaces the [CI pool](ci-pool.md), which is deprecated: it is removed when [#1179](https://github.com/i098/Crewship/issues/1179) lands.
+It replaces the deprecated [CI pool](ci-pool.md).
 The CI pool keeps one idle runner container for every slot.
 runner-up starts a container only when a job waits, so an idle host runs one small coordinator process and no job container.
 
@@ -53,7 +53,7 @@ Every coordinator runs in `runnerup.slice` and keeps its own state in `<state di
 | `repos[].labels` | one pool for each label except `self-hosted`, `linux` and the other labels that runner-up reserves; only the entry's own places serve it |
 | `job_cpus`, `job_memory_gb` | `--cpus` and `--memory` of each place; `job_cpus` is also the default `CARGO_BUILD_JOBS` of each job, so a Rust job does not start a compile for every CPU of the host, and each job also gets `MOLD_JOBS=1` (one mold link at a time; harmless without mold). The thread count of one link stays bounded by the container `--cpus` quota, not reduced. A job's own value of either variable wins. To cap a heavy repository, give its entry fewer `slots` (for example `slots: 2`) |
 | `total_slots` | split across the coordinators by their repositories' `slots` (each share is at least 1, so with more repositories than `total_slots` the sum is a little higher). Each coordinator's machine budget is its share times the job caps; the slice caps limit all of CI together |
-| `docker: dind` | refused: runner-up has no Docker daemon in the job, so the entry stays on the CI pool (see [Not covered](#not-covered)) |
+| `repos[].docker: dind` | local places with one Docker daemon per job (see [Docker in a job](#docker-in-a-job)) |
 
 A pool is a scale set of GitHub, and it is global to its coordinator: it opens in every repository that the coordinator serves.
 That is why each repository has a coordinator of its own, with only its own labels.
@@ -105,31 +105,46 @@ A job container is removed when its job ends (`docker run --rm`), and its work d
 `runner-up-clean.timer` runs `runner-up-maintain clean` every hour:
 
 - removes stopped containers that carry the label `runner-up.place` and are older than an hour (a place that crashed left them);
+- removes unused outer bridge networks that carry the label `runner-up.dind` and are older than an hour;
 - removes untagged image layers;
 - keeps the Docker build cache under `disk_max_gb`.
 
-Each step runs alone with a time limit (`RUNNER_UP_PRUNE_TIMEOUT`, 280 s): a step that fails or hangs on a busy disk does not skip the next ones, and the unit then ends failed.
+Each step has a 210-second limit, with up to 5 more seconds for forced termination.
+Set `RUNNER_UP_PRUNE_TIMEOUT` to a positive whole number of seconds to shorten this limit.
+A failed or timed-out step does not skip the remaining steps, but the unit ends failed.
 It never touches a running container.
 
 `runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
-Below `resume_pct` (85) it starts again only the coordinators it stopped.
-`runner-up-maintain io-pause <unit...>` stops units for IO pressure (a heavy build) and records them; every manual IO pause must use it, so the unit resumes on its own.
+Below `resume_pct` (85), the guard queues starts only for the coordinators it stopped.
+The guard leaves a coordinator with an I/O pause to the I/O resume rule.
+For the other coordinators, the guard keeps each entry until the coordinator is active.
+Use `runner-up-maintain io-pause <unit...>` to pause only runner-up coordinators for I/O pressure. The guard resumes them after pressure decreases.
 The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays above 40% for 3 minutes, it io-pauses the running coordinator of `io_heavy` that started last, one per run; its running jobs keep running.
-When `full avg60` stays below 40% for 2 minutes, each guard run starts one recorded unit and removes it from the list; a spike resets the 2 minutes.
+When `full avg60` stays below 40% for 2 minutes, each guard run checks one recorded unit.
+It removes the unit if active. Otherwise, it queues a start and moves the unit to the end of the list.
+A pressure spike resets the two minutes.
 The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is the CI pool's image (`blueprint/containers/ci-runner.Dockerfile`).
 The coordinator's start builds it when it is missing.
-`runner-up-image.timer` rebuilds it every hour with `--pull --rm --force-rm` and prunes the old layers, only when `crewship.ci_pool` is absent: the CI pool's own timer builds the same image.
+`runner-up-image.timer` refreshes the base image every hour unless the CI pool builds that same image.
+A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
+Managed apply loads the systemd slice limits before it prepares the Docker-in-Docker image.
+Managed apply checks the same runtime before it publishes the config.
+Image preparation during apply, coordinator startup, and timer refresh has a one-hour deadline.
+With `start_services: false`, apply does not publish new or updated configs that contain Docker-in-Docker places.
+Run a managed apply to publish those configs and enable new coordinators.
+The runner-up image timer tests the new derived image before it replaces the image that jobs use.
 
 ## Cut over one repository
 
 Run the CI pool and runner-up side by side, and move a repository only after a real job passed on runner-up.
 No step stops a busy runner.
 
-1. Add the repository's entry to `runner_up.repos` (the same entry as in `ci_pool.repos`, without `docker`) and apply.
+1. Add the repository's entry to `runner_up.repos` and apply.
+   For a `docker: dind` entry, complete the [Docker setup](#docker-in-a-job) first and omit the CI pool's `userns` switch.
    `runner_up.repos` is the full list; every repository that already moved stays in it.
    Apply starts `runner-up@<repo>` for the new repository and leaves the other coordinators alone.
    The CI pool keeps all of its slots.
@@ -142,9 +157,11 @@ No step stops a busy runner.
    A busy slot is disabled and leaves after its job, so no job is cut.
 5. Repeat for the next repository.
 
-Keep `crewship.ci_pool` only for repositories that did not move yet and for `docker: dind` entries, until [#1179](https://github.com/i098/Crewship/issues/1179) lands.
+Keep `crewship.ci_pool` only for repositories that did not move yet.
+Keep Eagle and Iterative on the CI pool until a supported Ubuntu 24.04 runner-up host is available.
 To roll back a repository, add its entry back to `ci_pool.repos` and apply, so the CI pool starts its slots, and change `runs-on` back.
 Remove it from `runner_up.repos` once the CI pool serves its jobs again.
+Pause the runner-up guard, then stop and disable all Docker-in-Docker places and coordinators. Do this before changing Docker-in-Docker pools, `data_dir`, `io_write_device`, or slice limits.
 Removing a repository from `runner_up.repos` stops its coordinator and deletes its unit link and config; running jobs finish, and its scale sets stay idle in GitHub.
 
 ## Other machines
@@ -182,21 +199,60 @@ On Linux, keep Docker.
 Podman with its Docker socket is also a drop-in, but it would save only dockerd itself: on the Crewship host that is 141 MB of memory and 0.5% of one core while idle.
 `fleet_guards` and `project_databases` need dockerd on the same host anyway, and a rootless engine cannot put a container in the system slice that carries the caps.
 
+## Docker in a job
+
+Use Ubuntu 24.04 with [Sysbox 0.7.2 or later](https://github.com/nestybox/sysbox/releases/tag/v0.7.2).
+Register `sysbox-runc` with Docker.
+Apply and launch reject all other releases, including Ubuntu 26.04.
+Keep the host's default Docker runtime unchanged.
+Use Docker with the systemd cgroup driver.
+Check the runtime and driver with `sudo docker info --format '{{json .Runtimes}} {{.CgroupDriver}}'`.
+Set `runner_up.data_dir` to an existing directory on the block device named by `runner_up.io_write_device`.
+The disk guard monitors this directory, and `runnerup.slice` caps writes to that device.
+Set the Sysbox manager's [`--data-root`](https://github.com/nestybox/sysbox-mgr/blob/master/main.go) to a directory on the same filesystem.
+Before managed apply, drain the Sysbox containers and use `sudo systemctl edit sysbox-mgr.service`.
+In `[Service]`, reset `ExecStart=` and repeat the existing command with all its flags and the new `--data-root`.
+Reload systemd and restart `sysbox.service`.
+Apply does not move data or restart Sysbox.
+
+Set `docker: dind` on an entry in `runner_up.repos`.
+Use a separate pool label for that entry if the same repository also has plain places.
+Remote machines do not serve Docker-in-Docker pools.
+
+The job starts only after its own Docker daemon answers on a Unix socket inside its container.
+The job can use `docker`, `docker compose`, and `docker buildx`.
+The job, daemon, and nested containers stay under the job's CPU, memory, and process caps in `runnerup.slice`.
+The job does not get the host Docker socket or the shared build cache.
+Each place uses a separate outer bridge network with outbound access and no host port mappings.
+The shim removes the network when the place exits.
+Docker images and volumes inside the job go away with the place container.
+
+For a smoke test, add a dedicated Docker-in-Docker pool for Crewship with one local slot.
+Run [`ci-pool-smoke`](../.github/workflows/ci-pool-smoke.yml) manually with `dind_pool` set to that pool label.
+The first job must print `runner-up-dind-ok`. The second job must use the same place and report a different daemon ID.
+While the Compose service is active, run `sh tests/runner-up-dind-smoke.sh --host <outer-container-name>` on the host with Docker access.
+The host check must print cgroup paths under `runnerup.slice` for `dockerd` and the nested process.
+Run `sh tests/runner-up-dind-smoke.sh --host-network ~/.local/share/runner-up/shim/docker` on the host to check network isolation.
+The check launches two overlapping places and confirms that only the first can reach its published service.
+It also confirms that the shim removes both outer networks when the places exit.
+
 ## Not covered
 
-- **Docker in the job.** runner-up's Docker place is a plain container with no daemon, and no sidecar.
-  A `docker: dind` entry stays in `ci_pool.repos`; `inspect` refuses it in `runner_up.repos`.
+- **Docker in plain places.** Use a local `docker: dind` entry for workflows that need a Docker daemon.
 - **Caches between jobs.** The CI pool mounts per-slot tool, cargo, apt and bun caches.
   A runner-up job starts with the caches of the image, so `actions/cache` and `Swatinem/rust-cache` restore from GitHub, and a job that relied on a warm local cache runs slower.
-  The exception is the [shared build cache](#shared-build-cache): the docker shim mounts it into every local job.
-- **Data-disk scratch.** A container's writes go to Docker's data root, as with any container.
-  Put that root on a data disk with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
+  Plain local places use the [shared build cache](#shared-build-cache).
+- **Data-disk scratch.** Outer container writes go to the host Docker data root.
+  Set that root with `crewship.data_dir` ([Data disk](configuration.md#data-disk)).
+  Inner Docker writes go to the separate Sysbox store described above.
 - **Updates of runner-up.** An apply installs the newest release; the running coordinator keeps its version until you run `systemctl --user restart 'runner-up@*'`.
   A restart stops no job.
 
 ## Shared build cache
 
-Jobs do not build the same crate twice. Every local runner-up job shares one directory, `<data_dir>/ci-shared-cache/` (`~/.local/share/ci-shared-cache/` without a data directory). Apply never deletes it. Jobs on other [machines](#other-machines) do not get it.
+Plain local runner-up jobs share one directory, `<data_dir>/ci-shared-cache/` (`~/.local/share/ci-shared-cache/` without a data directory).
+Apply never deletes it.
+Jobs on other [machines](#other-machines) and Docker-in-Docker jobs do not get it.
 
 | Directory | Mounted at | Use |
 | --- | --- | --- |
