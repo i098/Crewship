@@ -1,9 +1,11 @@
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/check_pr_body.py"
@@ -87,6 +89,22 @@ class PRBodyTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("a merge never closes an issue", result.stderr)
+
+    def test_closing_keyword_in_a_commit_body_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                subprocess.run(
+                    ["git", "-C", directory, "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                    check=True, capture_output=True,
+                )
+
+            git("init", "-b", "main")
+            git("commit", "--allow-empty", "-m", "Base")
+            git("commit", "--allow-empty", "-m", "feat: y", "-m", "Closes #7")
+            with mock.patch.dict(os.environ, {"GIT_DIR": str(Path(directory) / ".git")}):
+                errors = checker.closing_keyword_errors(checker.commit_messages("HEAD~1"))
+        self.assertTrue(any("a merge never closes an issue" in error for error in errors), errors)
+        self.assertTrue(any("Commit: feat: y" in error for error in errors), errors)
 
     def test_indented_code_cannot_supply_the_opening_reference(self):
         for prefix in ("    ", "\t", " \t", "\n    ", "\n\t"):

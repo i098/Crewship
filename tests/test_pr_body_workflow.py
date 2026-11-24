@@ -160,6 +160,8 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     check(VALID_BODY, "a merge never closes an issue")
     git("commit", "--allow-empty", "-m", "docs: note the rule")
     check(VALID_BODY, "a merge never closes an issue", "fix: x (closes #7)")
+    git("commit", "--allow-empty", "-m", "feat: y", "-m", "Closes #7")
+    check(VALID_BODY, "a merge never closes an issue")
 
     test_source = repo / "tools/runs-tui/runs-tui.test.ts"
     test_source.write_text("test source\n")

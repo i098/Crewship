@@ -14,6 +14,10 @@ CLOSING_ERROR = (
     "Remove the closing keyword: a merge never closes an issue. "
     "Use Refs #N; close the issue only after the change is deployed and tested."
 )
+COMMIT_REMEDY = (
+    "Reword the commit with amend or rebase on the PR branch. "
+    "Write the closing keyword without an issue number when you quote it."
+)
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -180,12 +184,13 @@ def commit_messages(base, head="HEAD"):
     return [record.strip("\n") for record in records[:-1]]
 
 
-def closing_keyword_errors(messages, where="Commit"):
+def closing_keyword_errors(messages, where="Commit", remedy=""):
     errors = []
     for message in messages:
         if CLOSING_KEYWORD.search(message):
             subject = message.split("\n", 1)[0]
-            errors.append(f"{CLOSING_ERROR} {where}: {subject}")
+            detail = f"{CLOSING_ERROR} {where}: {subject}"
+            errors.append(f"{detail}. {remedy}" if remedy else detail)
     return errors
 
 
@@ -245,7 +250,11 @@ def main():
     try:
         ui = bool(args.base) and changes_ui(args.base, head=args.head)
         commit_errors = (
-            closing_keyword_errors(commit_messages(args.base, args.head)) if args.base else []
+            closing_keyword_errors(
+                commit_messages(args.base, args.head), remedy=COMMIT_REMEDY
+            )
+            if args.base
+            else []
         )
     except subprocess.CalledProcessError as error:
         print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)

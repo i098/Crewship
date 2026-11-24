@@ -106,8 +106,11 @@ def test_main_rejects_closing_keyword_in_the_title(check_pr, tmp_path, monkeypat
 def test_main_rejects_closing_keyword_in_a_commit_message(check_pr, tmp_path, monkeypatch, capsys):
     _git(tmp_path, "init", "-b", "main")
     _git(tmp_path, "commit", "--allow-empty", "-m", "Base")
-    _git(tmp_path, "commit", "--allow-empty", "-m", "feat(ci): use Refs in bodies (closes #1445)")
     body = tmp_path / "body.md"
     body.write_text(BODY)
+    _git(tmp_path, "commit", "--allow-empty", "-m", "feat(ci): use Refs in bodies (closes #1445)")
+    assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1", "--no-ui") == 1
+    assert "a merge never closes an issue" in capsys.readouterr().err
+    _git(tmp_path, "commit", "--allow-empty", "-m", "feat: y", "-m", "Closes #7")
     assert _run(check_pr, tmp_path, monkeypatch, str(body), "--base", "HEAD~1", "--no-ui") == 1
     assert "a merge never closes an issue" in capsys.readouterr().err

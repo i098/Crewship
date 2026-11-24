@@ -226,6 +226,7 @@ The script applies the form's label and rejects missing required fields or commi
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
   Use visible text in sections and reasons; comments, empty markup, link definitions, and whitespace entities alone do not count.
   Inline and fenced code can supply content.
+  A commit message that quotes a closing keyword fails the check: write the keyword without an issue number, or reword the commit with `git commit --amend` or a rebase on the PR branch.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from check_pr_body import (
+    COMMIT_REMEDY,
     changes_ui,
     check_issue_reference,
     check_screenshots,
@@ -82,7 +83,7 @@ def main():
         return 2
     errors = (
         check_commits(subjects)
-        + closing_keyword_errors(messages)
+        + closing_keyword_errors(messages, remedy=COMMIT_REMEDY)
         + closing_keyword_errors([args.title], "Title")
         + check_body(body, ui)
     )
