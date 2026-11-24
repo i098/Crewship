@@ -80,6 +80,7 @@ Every job container and image build runs in `runnerup.slice`, so these caps hold
 runner-up starts a job with a plain `docker run`, which puts the container in `system.slice`.
 The unit puts a `docker` shim first in `PATH` (`~/.local/share/runner-up/shim/docker`, from `blueprint/maintenance/runner-up-docker`).
 The shim adds `--cgroup-parent runnerup.slice` and `--pids-limit 8192` to `docker run` and `--cgroup-parent` to `docker build`, and uses `sudo -n docker` when the account is not in the `docker` group.
+Before `docker run --name X` it waits (up to `RUNNER_UP_NAME_WAIT`, 1800 s) while a container named `X` still exists, and runs `docker rm -f X` each poll: a slow `--rm` removal of the last job's container otherwise makes docker refuse the name, and the coordinator places the job again in a loop that ends in exit code 3 (`ExitUnstarted`).
 The coordinator's own processes run under `Nice=` and a low I/O priority in the user manager.
 
 Check the caps:

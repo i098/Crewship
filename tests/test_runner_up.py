@@ -646,6 +646,8 @@ def stubs(tmp_path):
             '  case "$3" in *CgroupDriver*) printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}";;\n'
             f'    *) printf "%s\\n" "{runtime}";; esac\n'
             "fi\n"
+            'if [ "$1 $2" = "inspect --type" ]; then test -f "$IMAGES/held-$4"; exit $?; fi\n'
+            'if [ "$1 $2" = "rm -f" ]; then rm -f "$IMAGES/held-$3"; fi\n'
             'if [ "$1 $2" = "image inspect" ]; then test -f "$IMAGES/$3"; exit $?; fi\n'
             'if [ "$1" = build ]; then\n'
             '  while [ "$1" != --tag ]; do shift; done\n'
@@ -705,6 +707,19 @@ def test_the_shim_puts_jobs_and_builds_in_the_slice_and_limits_job_processes(stu
 )
 def test_dind_release_policy(stubs, release, code):
     run_script("runner-up-docker", stubs, "check-dind-release", "ubuntu", release, code=code)
+
+
+def test_the_shim_waits_for_a_leftover_container_of_the_place_before_it_runs(stubs, tmp_path):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    (stubs[1].parent / "images" / "held-runner-up-p-1").touch()
+    env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_NAME_POLL": "0"}
+    calls = run_script("runner-up-docker", stubs, "run", "--name", "runner-up-p-1", "img", env=env)
+    assert calls[:2] == [
+        "docker inspect --type container runner-up-p-1",
+        "docker rm -f runner-up-p-1",
+    ]
+    assert calls[-1].startswith("docker run ")
 
 
 @pytest.mark.parametrize(
