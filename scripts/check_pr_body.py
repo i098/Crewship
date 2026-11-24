@@ -7,6 +7,17 @@ from html import unescape
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.md"
+CLOSING_KEYWORD = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+(?:[\w.-]+/[\w.-]+)?#[0-9]+", re.I
+)
+CLOSING_ERROR = (
+    "Remove the closing keyword: a merge never closes an issue. "
+    "Use Refs #N; close the issue only after the change is deployed and tested."
+)
+COMMIT_REMEDY = (
+    "Reword the commit with amend or rebase on the PR branch. "
+    "Write the closing keyword without an issue number when you quote it."
+)
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -168,11 +179,33 @@ def changes_ui(base, *, head="HEAD"):
     return bool(paths)
 
 
-def check_body(body, template, *, ui=False):
+def commit_messages(base, head="HEAD"):
+    records = git("log", "--no-merges", "--format=%B%x00", f"{base}..{head}").split("\0")
+    return [record.strip("\n") for record in records[:-1]]
+
+
+def closing_keyword_errors(messages, where="Commit", remedy=""):
+    errors = []
+    for message in messages:
+        if CLOSING_KEYWORD.search(message):
+            subject = message.split("\n", 1)[0]
+            detail = f"{CLOSING_ERROR} {where}: {subject}"
+            errors.append(f"{detail}. {remedy}" if remedy else detail)
+    return errors
+
+
+def check_issue_reference(body):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
-    if not re.fullmatch(r" {0,3}Closes #[1-9][0-9]*[ \t]*", first):
-        errors.append("Start the body with Closes # followed by a positive issue number.")
+    if not re.fullmatch(r" {0,3}Refs #[1-9][0-9]*[ \t]*", first):
+        errors.append("Start the body with Refs # followed by a positive issue number.")
+    if CLOSING_KEYWORD.search(body):
+        errors.append(CLOSING_ERROR)
+    return errors
+
+
+def check_body(body, template, *, ui=False):
+    errors = check_issue_reference(body)
 
     actual = sections(body)
     for heading, template_lines in sections(template):
@@ -211,14 +244,23 @@ def main():
     parser.add_argument("body_file", nargs="?", default="-", help="body file, or - for stdin")
     parser.add_argument("--base", help="detect UI changes against this Git revision")
     parser.add_argument("--head", default="HEAD", help="Git revision to check for UI changes")
+    parser.add_argument("--title", default="", help="pull request title to check")
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
     try:
         ui = bool(args.base) and changes_ui(args.base, head=args.head)
+        commit_errors = (
+            closing_keyword_errors(
+                commit_messages(args.base, args.head), remedy=COMMIT_REMEDY
+            )
+            if args.base
+            else []
+        )
     except subprocess.CalledProcessError as error:
         print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)
         return 2
-    errors = check_body(body, TEMPLATE.read_text(), ui=ui)
+    errors = check_body(body, TEMPLATE.read_text(), ui=ui) + commit_errors
+    errors += closing_keyword_errors([args.title], "Title")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

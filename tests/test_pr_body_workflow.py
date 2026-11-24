@@ -77,6 +77,7 @@ def test_workflow_checkout_retains_the_pr_merge_base(tmp_path):
         env={
             **os.environ,
             "PR_BODY": VALID_BODY,
+            "PR_TITLE": "docs: roll out the body checker",
             "PR_BASE": "HEAD^1",
             "PR_HEAD": "HEAD^2",
         },
@@ -117,11 +118,17 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
     after = "![After](https://github.com/user-attachments/assets/672de857-f49e-4def-95f8-b576d8290bb6)"
     heading = "\n## Review evidence\n\n"
 
-    def check(body, error=""):
+    def check(body, error="", title=""):
         result = subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
             cwd=ROOT,
-            env={**env, "PR_BODY": body, "PR_BASE": "HEAD^", "PR_HEAD": "HEAD"},
+            env={
+                **env,
+                "PR_BODY": body,
+                "PR_TITLE": title,
+                "PR_BASE": "HEAD^",
+                "PR_HEAD": "HEAD",
+            },
             text=True,
             capture_output=True,
             timeout=10,
@@ -133,7 +140,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
 
     check(VALID_BODY + f"\n$(touch {marker})\n")
     check(VALID_BODY + heading + "<!-- No UI changes. -->\n")
-    check("Closes #695\n", "Include exactly one ## Summary section.")
+    check("Refs #695\n", "Include exactly one ## Summary section.")
 
     for path in (
         "site/public/about.html",
@@ -148,6 +155,13 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
         git("add", path)
         git("commit", "-m", f"Change {path}")
         check(VALID_BODY, "Include exactly one ## Review evidence section.")
+
+    git("commit", "--allow-empty", "-m", "feat: name the issue (fixes #7)")
+    check(VALID_BODY, "a merge never closes an issue")
+    git("commit", "--allow-empty", "-m", "docs: note the rule")
+    check(VALID_BODY, "a merge never closes an issue", "fix: x (closes #7)")
+    git("commit", "--allow-empty", "-m", "feat: y", "-m", "Closes #7")
+    check(VALID_BODY, "a merge never closes an issue")
 
     test_source = repo / "tools/runs-tui/runs-tui.test.ts"
     test_source.write_text("test source\n")
