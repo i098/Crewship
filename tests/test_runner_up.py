@@ -715,7 +715,10 @@ def test_the_shim_waits_for_a_leftover_container_of_the_place_before_it_runs(stu
     (stubs[1].parent / "images" / "held-runner-up-p-1").touch()
     env = {"RUNNER_UP_DOCKER_SOCK": str(sock), "RUNNER_UP_NAME_POLL": "0"}
     calls = run_script("runner-up-docker", stubs, "run", "--name", "runner-up-p-1", "img", env=env)
-    assert calls[:2] == ["docker inspect --type container runner-up-p-1", "docker rm -f runner-up-p-1"]
+    assert calls[:2] == [
+        "docker inspect --type container runner-up-p-1",
+        "docker rm -f runner-up-p-1",
+    ]
     assert calls[-1].startswith("docker run ")
 
 
