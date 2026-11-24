@@ -1,0 +1,17 @@
+{{ ansible_managed | comment }}
+# Reports a slot that exhausted its retries (docs/imessage.md#self-healing).
+# Started only by OnFailure=; it has no [Install].
+
+[Unit]
+Description=Report a failed iMessage slot (Crewship managed)
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ crewship_imessage_dir }}
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FM_IMESSAGE_SLOT=%i
+Environment="FM_HOME={{ crewship_firstmate_dir }}"
+StateDirectory=fm-imessage
+StateDirectoryMode=0700
+UMask=0077
+ExecStart="{{ crewship_local_bin }}/bun" "{{ crewship_local_bin }}/imessage-selfheal.ts" failed

@@ -56,6 +56,7 @@ export function brief(e: unknown): string {
 // Keyed completion keeps the item in `${dir}-done/`; keyed dead letters replay `lost` after restart.
 export class Queue<T> {
   private next: number;
+  private readonly firstNew: number;
   private busy = new Set<string>();
   private laneBySeq = new Map<number, string>();
   private keys = new Set<string>();
@@ -63,7 +64,7 @@ export class Queue<T> {
   constructor(
     private dir: string,
     private name: string,
-    private deliver: (item: T, save: (item: T) => void) => Promise<void>,
+    private deliver: (item: T, save: (item: T) => void, replayed: boolean) => Promise<void>,
     private retryMs: number,
     private lost?: (item: T) => void,
     private key?: (item: T) => string | undefined,
@@ -75,6 +76,7 @@ export class Queue<T> {
       mkdirSync(`${dir}-done`, { recursive: true, mode: 0o700 });
       for (const folder of [dir, `${dir}-done`, `${dir}-dead`]) this.restoreKeys(folder, key);
     }
+    this.firstNew = this.next;
     this.drainAll();
   }
 
@@ -187,7 +189,7 @@ export class Queue<T> {
           await this.deliver(item as T, (next) => {
             this.write(seq, next);
             item = next;
-          });
+          }, seq < this.firstNew);
           if (this.key?.(item as T)) renameSync(this.file(seq), `${this.dir}-done/${seq}.json`);
           else unlinkSync(this.file(seq));
           this.laneBySeq.delete(seq);
@@ -258,27 +260,4 @@ export function sendReply<T extends Spot>(o: {
     const record = () => { if (target && !o.params.has("no-thread")) o.record(routeRow(target, o.params)); };
     return sendRecorded(o.dir, { key, sender: o.sender, text: o.text, alone: o.alone }, record, (dup) => o.queue(target, destination, dup));
   });
-}
-
-// A reply names its target by message id when a bubble was recorded with one. Otherwise the start of the text counts,
-// and only when every recent bubble with that start has one sender.
-export type SentBubble = { key: string; sender: string; id?: string };
-
-export const quoteKey = (text: string) => text.slice(0, 120).trim();
-
-export function senderOfQuoted(bubbles: SentBubble[], text: string, id?: string) {
-  const byId = id ? bubbles.find((b) => b.id === id) : undefined;
-  if (byId) return byId.sender;
-  const senders = new Set(bubbles.filter((b) => b.key === quoteKey(text)).map((b) => b.sender));
-  return senders.size === 1 ? [...senders][0] : undefined;
-}
-
-// Who sent a thread-reply target: a bubble recorded with this id is ours by id alone; the text start only matches
-// bubbles recorded without an id. The owner (a text the bridge heard) or us (a bubble the bridge sent); undefined when neither record has it.
-export function whoSent(said: { has(id: string): boolean }, bubbles: SentBubble[], id: string, text: string) {
-  if (said.has(id)) return "the owner";
-  const ours = bubbles.some((b) => b.id === id) || bubbles.some((b) => b.id === undefined && b.key === quoteKey(text));
-  if (!ours) return undefined;
-  const sender = senderOfQuoted(bubbles, text, id);
-  return `us${sender ? ` (sender ${sender})` : ""}`;
 }

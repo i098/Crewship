@@ -1,7 +1,7 @@
 {{ ansible_managed | comment }}
 # Front of the iMessage bridge (docs/imessage.md#rolling-deploys). The bridge itself runs as fm-imessage@<slot>.service;
-# this unit starts the active slot and follows it: its process exits while the active slot is gone, so `is-active` is
-# active only while a slot serves the line (activating while it restarts), and stopping it stops the slots (ExecStop skips when the process exited on its own, so a crashed slot keeps its own restart).
+# This unit starts the active slot and follows it through systemd's retries. It fails when the slot stops retrying.
+# A deliberate stop stops the slots. A front process failure does not.
 # Upgrades go through imessage-deploy, never through a restart of this unit.
 
 [Unit]
@@ -10,6 +10,7 @@ After=network-online.target
 
 [Service]
 Restart=always
+RestartPreventExitStatus=78
 RestartSec=15
 WorkingDirectory={{ crewship_imessage_dir }}
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin

@@ -1,8 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sendOnce } from "./outbox.ts";
-import { alreadySent, logSend } from "./sender-log.ts";
+import { alreadySent, logSend, openThreadSenders } from "./sender-log.ts";
 
 const dir = mkdtempSync(`${tmpdir()}/sender-log-`);
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -53,4 +54,42 @@ test("a photo caption is deduped under its key; a bare photo always sends", () =
   expect(dups).toEqual([true]);
   expect(sendOnce(dir, { key: "pic", text: "" }, () => (sends++, new Response("queued"))).status).toBe(200);
   expect(sends).toBe(1);
+});
+
+test("thread senders discard undated legacy IDs and remove the legacy file", () => {
+  const legacy = `${dir}/senders.json`;
+  writeFileSync(legacy, JSON.stringify([{ id: "sent", sender: "render" }]));
+  expect(openThreadSenders(dir).find("sent")).toBeUndefined();
+  expect(existsSync(legacy)).toBe(false);
+  writeFileSync(legacy, JSON.stringify([{ id: "old-slot", sender: "stars" }]));
+  expect(openThreadSenders(dir).find("old-slot")).toBeUndefined();
+  expect(existsSync(legacy)).toBe(false);
+});
+
+test("thread senders expire after 30 days and a write removes them from disk", () => {
+  const state = mkdtempSync(`${dir}/age-`);
+  const senders = openThreadSenders(state);
+  senders.remember("old", "render", noon);
+  senders.remember("recent", "render", noon + day);
+  expect(senders.find("old", noon + 30 * day)).toBe("render");
+  const later = noon + 30 * day + 1;
+  expect(senders.find("old", later)).toBeUndefined();
+  senders.remember("new", "render", later);
+  const reopened = openThreadSenders(state);
+  expect(reopened.find("old", noon)).toBeUndefined();
+  expect(reopened.find("recent", later)).toBe("render");
+});
+
+test("thread senders retain the latest 5000 records, even in one millisecond", () => {
+  const state = mkdtempSync(`${dir}/cap-`);
+  const senders = openThreadSenders(state);
+  const db = new Database(`${state}/thread-senders.sqlite`);
+  db.query(`WITH RECURSIVE seq(i) AS (VALUES(0) UNION ALL SELECT i + 1 FROM seq WHERE i < 4999)
+    INSERT INTO thread_sender SELECT 'sent-' || i, 'render', ? FROM seq`).run(noon);
+  db.close();
+  senders.remember("new", "atlas", noon);
+  const reopened = openThreadSenders(state);
+  expect(reopened.find("sent-0", noon)).toBeUndefined();
+  expect(reopened.find("sent-1", noon)).toBe("render");
+  expect(reopened.find("new", noon)).toBe("atlas");
 });

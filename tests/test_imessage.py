@@ -2091,9 +2091,9 @@ async function typing(chat, on) {
 }
 const lastFile = (chat) => `${dir}/last-${encodeURIComponent(chat)}`;
 function sent(line, chat) {
+  if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
   appendFileSync(`${dir}/delivery-events`, JSON.stringify({ line, chat, typing: typingByChat.get(chat) ?? false }) + "\\n");
   appendFileSync(`${dir}/sent`, `${line}\\n`);
-  if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
 }
 async function shown(content) {
   if (typeof content === "string") return content;
@@ -2123,6 +2123,7 @@ function space(id) {
         throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
       }
       if (content.type === "app") return { id: "c1", direction: "outbound", miniAppCardSession: { chatGuid: id, messageGuid: "c1", sessionId: "s1", targetMessageGuid: "c1" } };
+      if (typeof content === "string") return { id: readFileSync(lastFile(id), "utf8") };
     },
     async getMessage(mid) {
       call("getMessage");
@@ -2148,7 +2149,10 @@ function message(m) {
       call("react"); sent(`react ${m.id} ${emoji}`, m.space);
       if (existsSync(`${dir}/react-unsure`)) throw Object.assign(new Error("reaction timed out"), { grpcCode: 4 });
     },
-    async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
+    async reply(content) {
+      call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space);
+      if (typeof content === "string") return { id: readFileSync(lastFile(m.space), "utf8") };
+    },
     async read() { appendFileSync(`${dir}/read`, `${m.id}\\n`); },
   };
 }
@@ -2363,8 +2367,9 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         else:
             wait_for(lambda: f'"requestId":"photon-{mid}"' in text(state / "routing.jsonl"), f"durable ownership of {mid}")
 
-    def cli(*args, fails=False):
-        result = subprocess.run([str(SEND), *args], capture_output=True, text=True, env=env, timeout=30)
+    def cli(*args, fails=False, mate=None):
+        result = subprocess.run([str(SEND), *args], capture_output=True, text=True,
+                                env=env if mate is None else {**env, "FM_MATE_ID": mate}, timeout=30)
         if fails:
             assert result.returncode != 0
             return result.stdout + result.stderr
@@ -2493,6 +2498,40 @@ def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_legacy_photon_thread_does_not_route_directly_to_a_mate(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text("- render - Render mate (home: /srv/render; scope: render; projects: none)\n")
+    fake, state, _, _, start, inbound, cli, text = fake_bridge(tmp_path)
+    legacy_senders = state / "senders.json"
+    state.mkdir(exist_ok=True)
+    legacy_senders.write_text("{}\n")
+    deliveries = tmp_path / "deliveries"
+    sender = tmp_path / "bin" / "fm-send.sh"
+    sender.write_text(f'#!/bin/bash\nprintf "%s\\n" "$1" >> {shlex.quote(str(deliveries))}\n')
+    sender.chmod(0o755)
+    bridge = start(1)
+    try:
+        inbound("m1", text="start")
+
+        cli("--reply", "1", "Render is ready.", mate="render")
+        wait_for(lambda: "Render is ready." in text(fake / "sent"), "the render bubble")
+        target = next(fake.glob("last-*")).read_text()
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        inbound("m2", content={
+            "type": "reply", "content": {"type": "text", "text": "What is next?"},
+            "target": {"id": target, "content": {"type": "text", "text": "Render is ready."}},
+        })
+        assert not deliveries.exists()
+        assert not (state / "thread-senders.sqlite").exists()
+        assert legacy_senders.read_text() == "{}\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")

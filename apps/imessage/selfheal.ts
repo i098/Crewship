@@ -1,12 +1,14 @@
 // Self-healing for the iMessage line (docs/imessage.md#self-healing). Event driven: systemd restarts the bridge when it
 // stops sending WATCHDOG=1, and the bridge sends it only while the line is healthy (port answers, no desk turn stuck
 // past the deadline, the pi-natives .node loads). A failed start that never became healthy counts as a failed heal;
-// the second one in a row alerts the owner once. Run as `bun selfheal.ts start` from ExecStartPre, and as
-// `bun selfheal.ts failed` from the OnFailure unit.
+// the second one in a row alerts the owner once, and so does an active slot that exhausts its retries. Run as
+// `bun selfheal.ts start` from ExecStartPre, and as `bun selfheal.ts failed` from the OnFailure unit, which names the
+// slot in FM_IMESSAGE_SLOT.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, copyFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readActive } from "./ownership.ts";
 
 type Env = Record<string, string | undefined>;
 type State = { pending: boolean; fails: number; alerted: boolean };
@@ -139,15 +141,16 @@ export async function alert(env: Env, message: string) {
   return "status";
 }
 
-async function alertIfNeeded(env: Env, state: State) {
-  if (state.fails < 2 || state.alerted) return;
+async function alertIfNeeded(env: Env, state: State, exhaustedSlot?: string) {
+  if (state.alerted || (!exhaustedSlot && state.fails < 2)) return;
   // A bridge that answers is healed: send nothing and forget the failures.
   const port = Number(env.FM_IMESSAGE_PORT || 8765);
   const up = await fetch(`http://127.0.0.1:${port}/health`, { headers: { "X-Firstmate": "1" }, signal: AbortSignal.timeout(5000) }).then((r) => r.ok, () => false);
   if (up) return saveState(env, { pending: false, fails: 0, alerted: false });
   state.alerted = true;
   saveState(env, state);
-  await alert(env, `iMessage self-heal failed ${state.fails} times in a row; the bridge needs a human`);
+  await alert(env, exhaustedSlot ? `iMessage slot ${exhaustedSlot} exhausted its retries; the bridge needs a human`
+    : `iMessage self-heal failed ${state.fails} times in a row; the bridge needs a human`);
 }
 
 // ExecStartPre: count a previous start that never became healthy, then check and repair the natives.
@@ -170,16 +173,15 @@ export async function onStart(env: Env = process.env) {
   }
 }
 
-// OnFailure: systemd gave up on the unit (start limit). Count it, alert if due, and start the unit again.
-export async function onFailed(env: Env = process.env) {
+// OnFailure: count the exhausted retry budget and alert without resetting the slot's start limit.
+async function onFailed(env: Env = process.env) {
+  const slot = env.FM_IMESSAGE_SLOT;
+  if (!slot || readActive(stateDir(env)) !== slot) return;
   const state = loadState(env);
   state.fails++;
   state.pending = false;
   saveState(env, state);
-  await alertIfNeeded(env, state);
-  const unit = env.FM_IMESSAGE_UNIT || "fm-imessage.service";
-  await run(["systemctl", "--user", "reset-failed", unit], env);
-  await run(["systemctl", "--user", "start", "--no-block", unit], env);
+  await alertIfNeeded(env, state, slot);
 }
 
 // The watchdog heartbeat. Does nothing without WatchdogSec= (systemd sets WATCHDOG_USEC), so a hand run is unaffected.

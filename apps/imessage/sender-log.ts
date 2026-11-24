@@ -1,6 +1,7 @@
 // The log of every text that went to the owner: topic key, sender, content hash, time. One file in the state dir.
 // A keyed text is skipped when the same key and the same content were already sent on the same local day.
-import { appendFileSync, readFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { appendFileSync, readFileSync, rmSync } from "node:fs";
 
 export const KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 const FILE = "sent.jsonl";
@@ -31,4 +32,26 @@ export function alreadySent(dir: string, o: Send, now = Date.now()): boolean {
 // Logs a text that reached the outbox. No key: logged under "-".
 export function logSend(dir: string, o: Send, now = Date.now()): void {
   appendFileSync(`${dir}/${FILE}`, `${JSON.stringify({ key: o.key ?? "-", sender: o.sender ?? "-", hash: hashOf(o.text), at: now } satisfies Entry)}\n`, { mode: 0o600 });
+}
+
+const THREAD_MAX_AGE_MS = 30 * 86_400_000;
+
+export function openThreadSenders(dir: string) {
+  const db = new Database(`${dir}/thread-senders.sqlite`);
+  db.exec("CREATE TABLE IF NOT EXISTS thread_sender (id TEXT PRIMARY KEY, sender TEXT NOT NULL, at INTEGER NOT NULL)");
+  db.exec("CREATE INDEX IF NOT EXISTS thread_sender_at ON thread_sender (at)");
+  rmSync(`${dir}/senders.json`, { force: true });
+  const insert = db.query("INSERT OR IGNORE INTO thread_sender VALUES (?, ?, ?)");
+  const expire = db.query("DELETE FROM thread_sender WHERE at < ?");
+  const cap = db.query("DELETE FROM thread_sender WHERE rowid <= (SELECT rowid FROM thread_sender ORDER BY rowid DESC LIMIT 1 OFFSET 5000)");
+  const remember = db.transaction((id: string, sender: string, at = Date.now()) => {
+    expire.run(at - THREAD_MAX_AGE_MS);
+    insert.run(id, sender, at);
+    cap.run();
+  });
+  const lookup = db.query<{ sender: string }, [string, number]>("SELECT sender FROM thread_sender WHERE id = ? AND at >= ?");
+  return {
+    remember,
+    find(id: string, at = Date.now()) { return lookup.get(id, at - THREAD_MAX_AGE_MS)?.sender; },
+  };
 }

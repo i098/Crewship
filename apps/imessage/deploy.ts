@@ -4,9 +4,9 @@
 // outbox pass, and rolls back to the old slot on any failure.
 //   imessage-deploy            roll the build in <dir>/stage out
 //   imessage-deploy needed     exit 3 when the staged build and units differ from the last deployed ones, or no slot is recorded
-//   imessage-deploy boot       start the active slot if it is down
-//   imessage-deploy follow     the front unit's process: boot, then exit while the active slot is gone, so is-active tells the truth
+//   imessage-deploy follow     the front unit's process: boot, then follow the slot until it stops or exhausts its retries
 //   imessage-deploy stop-all   stop every slot unless a deploy is running (the front unit's ExecStop)
+//   imessage-deploy recover    reset the active slot's start limit, start it, then start the front
 // Env: FM_IMESSAGE_DIR (required), STATE_DIRECTORY, FM_IMESSAGE_PORT (8765), FM_IMESSAGE_NEXT_PORT (8766),
 // FM_DEPLOY_SYSTEMCTL (systemctl).
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -100,10 +100,10 @@ function dropProbes() {
 
 async function rollback(cur: string, target: string, why: string): Promise<never> {
   say(`FAILED: ${why}; rolling back to ${cur}`);
-  await sc("stop", unit(target));
+  await stopSlot(target);
   setActive(STATE, cur);
   dropProbes();
-  await sc("start", unit(cur));
+  if (await slotState(cur) !== "failed") await sc("start", unit(cur));
   const back = await until(BACK_MS, () => get(PORT, "/health"), cur);
   await sc("start", FRONT);
   say(back.ok ? `${cur} serves again; the failed build is ${target}` : `${cur} did not answer /health after the rollback: ${back.body}`);
@@ -113,16 +113,17 @@ async function rollback(cur: string, target: string, why: string): Promise<never
 // With no slot serving there is nothing to protect and no standby to gate: start the new slot as the owner. If it does not
 // come up, the previous slot is put back.
 async function startUngated(cur: string | undefined, prior: string | undefined, target: string) {
-  if (cur) await sc("stop", unit(cur));
+  const restore = cur && await slotState(cur) !== "failed" ? cur : undefined;
+  if (restore) await sc("stop", unit(restore));
   if (!prior) await sc("stop", FRONT);
   setActive(STATE, target);
   await sc("start", unit(target));
   const up = await until(BACK_MS, () => get(PORT, "/health"), target);
   if (up.ok) return finish(target);
-  await sc("stop", unit(target));
+  await stopSlot(target);
   if (cur) setActive(STATE, cur);
   else rmSync(`${STATE}/active`, { force: true });
-  if (cur) { await sc("reset-failed", unit(cur)); await sc("start", unit(cur)); }
+  if (restore) await sc("start", unit(restore));
   await sc("start", FRONT);
   throw new Error(`${target} did not answer /health: ${up.body}`);
 }
@@ -136,7 +137,7 @@ async function deploy() {
   const live = cur === "legacy" ? await legacyRunning() : cur ? await serving(cur) : false;
   const target = cur === "blue" ? "green" : "blue";
   if (cur === "legacy") snapshotLegacy();
-  await sc("stop", unit(target));
+  await stopSlot(target);
   install(target);
   say(`staged ${target}; serving slot: ${live ? cur : "none"}`);
 
@@ -146,7 +147,7 @@ async function deploy() {
   await sc("start", unit(target));
   const gate = await until(GATE_MS, () => get(NEXT, "/ready"), target);
   if (!gate.ok) {
-    await sc("stop", unit(target));
+    await stopSlot(target);
     say(`FAILED: health gate of ${target}: ${gate.body}; ${cur} was not touched`);
     if (prior === undefined) rmSync(`${STATE}/active`, { force: true });
     process.exit(1);
@@ -154,7 +155,7 @@ async function deploy() {
   say(`${target} passed the gate: ${gate.body}`);
 
   setActive(STATE, target); // the handover: the old slot stops, the new one takes the lock, the port and the outbox
-  await sc("stop", unit(cur!));
+  await stopSlot(cur!);
   if (cur === "legacy") await sc("stop", FRONT);
   const own = await until(OWN_MS, () => get(PORT, "/health"), target);
   if (!own.ok) return rollback(cur!, target, `${target} did not take the line: ${own.body}`);
@@ -203,32 +204,61 @@ async function follow() {
     await Bun.sleep(Number(env.FM_DEPLOY_FOLLOW_MS || 5000));
     const lock = await holdLock(`${STATE}/deploy.lock`, 0);
     if (!lock) continue; // a deploy is moving the line
-    lock.release();
-    const slot = readActive(STATE);
-    if (!slot || (await gone(unit(slot)))) throw new Error(`no slot serves the line (active: ${slot ?? "none"})`);
+    try {
+      const slot = readActive(STATE);
+      const state = slot ? await slotState(slot) : "";
+      if (!state || state === "failed" || state === "inactive") {
+        say(`no slot serves the line (active: ${slot ?? "none"})`);
+        return 78; // the front unit does not restart after a terminal slot failure
+      }
+    } finally { lock.release(); }
   }
+}
+
+async function slotState(slot: string) {
+  const { code, out } = await sc("show", unit(slot), "-p", "ActiveState", "--value");
+  if (code !== 0) throw new Error(`cannot read ${unit(slot)} state (systemctl exit ${code})`);
+  return out.split("\n", 1)[0];
+}
+
+async function stopSlot(slot: string) {
+  if (await slotState(slot) !== "failed") await sc("stop", unit(slot));
 }
 
 async function boot() {
   const slot = readActive(STATE);
   if (!slot) return;
-  const state = (await sc("show", unit(slot), "-p", "ActiveState", "--value")).out.split("\n")[0];
-  if (state !== "failed" && state !== "inactive") return;
-  if (state === "failed") await sc("reset-failed", unit(slot));
-  await sc("start", unit(slot));
+  if (await slotState(slot) === "inactive") await sc("start", unit(slot));
+}
+
+async function recover() {
+  const lock = await holdLock(`${STATE}/deploy.lock`, 10_000);
+  if (!lock) throw new Error("another imessage-deploy holds the lock");
+  try {
+    const slot = readActive(STATE);
+    if (!slot) throw new Error("no active slot to recover");
+    for (const [action, name] of [["reset-failed", unit(slot)], ["start", unit(slot)], ["start", FRONT]] as const) {
+      const { code } = await sc(action, name);
+      if (code !== 0) throw new Error(`cannot ${action} ${name} (systemctl exit ${code})`);
+    }
+  } finally { lock.release(); }
 }
 
 async function stopAll() {
   const lock = await holdLock(`${STATE}/deploy.lock`, 10_000);
   if (!lock) return; // follow holds the lock for a few ms per poll; a deploy holds it for minutes and owns the units
-  for (const slot of ["blue", "green", "legacy"]) await sc("stop", unit(slot));
-  lock.release();
+  try {
+    for (const slot of ["blue", "green", "legacy"]) await stopSlot(slot);
+  } finally { lock.release(); }
 }
 
 const mode = process.argv[2];
-if (mode === "boot") await boot();
-else if (mode === "follow") await follow().catch((e) => { say(e.message); process.exit(1); });
+if (mode === "follow") process.exit(await follow().catch((e) => { say(e.message); return 1; }));
 else if (mode === "needed") await needed();
 else if (mode === "stop-all") await stopAll();
+else if (mode === "recover") {
+  await recover();
+  process.exit(0);
+}
 else if (mode === undefined) await deploy().then(() => process.exit(0), (e) => { say(`FAILED: ${e instanceof Error ? e.message : e}`); process.exit(1); });
-else throw new Error("usage: imessage-deploy [needed|boot|follow|stop-all]");
+else throw new Error("usage: imessage-deploy [needed|follow|stop-all|recover]");
