@@ -7,6 +7,9 @@ from html import unescape
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.md"
+CLOSING_KEYWORD = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+(?:[\w.-]+/[\w.-]+)?#[0-9]+", re.I
+)
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -171,8 +174,13 @@ def changes_ui(base, *, head="HEAD"):
 def check_body(body, template, *, ui=False):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
-    if not re.fullmatch(r" {0,3}Closes #[1-9][0-9]*[ \t]*", first):
-        errors.append("Start the body with Closes # followed by a positive issue number.")
+    if not re.fullmatch(r" {0,3}Refs #[1-9][0-9]*[ \t]*", first):
+        errors.append("Start the body with Refs # followed by a positive issue number.")
+    if CLOSING_KEYWORD.search(body):
+        errors.append(
+            "Remove the closing keyword: a merge never closes an issue. "
+            "Use Refs #N; close the issue only after the change is deployed and tested."
+        )
 
     actual = sections(body)
     for heading, template_lines in sections(template):

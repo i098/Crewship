@@ -217,7 +217,7 @@ The script applies the form's label and rejects missing required fields or commi
 
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
-- The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
+- The body starts with `Refs #N` for the issue that the PR addresses. Never write a closing keyword (`Closes`, `Fixes`, `Resolves`) before an issue reference: a merge never closes an issue. An issue closes only after the change is deployed where it runs and tested there for real; the closing comment holds the deploy proof and the test proof. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
   Put the opening reference on its own line, outside a code block.
   Fill `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
   Follow the [Review evidence guide](docs/review-evidence.md) for what to capture and where to put it.
@@ -263,7 +263,7 @@ python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
 
 It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
-It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or fails the same screenshot check as CI.
+It also fails when the body does not start with `Refs #N`, has no `Review plan: <text>` line, or fails the same screenshot check as CI.
 Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
 
 ## Branch rules

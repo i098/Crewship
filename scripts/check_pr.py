@@ -16,7 +16,7 @@ from check_pr_body import changes_ui, check_screenshots, git, sections
 TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 SUBJECT = re.compile(rf"(?:{TYPES})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: \S.*")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-CLOSES = re.compile(r" {0,3}Closes #[1-9][0-9]*[ \t]*")
+REFS = re.compile(r" {0,3}Refs #[1-9][0-9]*[ \t]*")
 PLAN = re.compile(r"\s{0,3}(?:[-*] )?\**Review plan\**:\**\s*\S", re.I)
 
 
@@ -51,8 +51,8 @@ def check_body(body, ui):
     lines = prose(body)
     first = next((line for line in lines if line.strip()), "")
     errors = []
-    if not CLOSES.fullmatch(first):
-        errors.append("Start the body with Closes #N for the issue that the PR resolves.")
+    if not REFS.fullmatch(first):
+        errors.append("Start the body with Refs #N for the issue that the PR addresses.")
     if not any(PLAN.match(line) for line in lines):
         errors.append("Add a 'Review plan: <how a reviewer checks this>' line to the body.")
     if ui:

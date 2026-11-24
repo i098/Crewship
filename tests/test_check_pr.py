@@ -15,7 +15,7 @@ def check_pr(monkeypatch):
     return check_pr
 
 
-BODY = "Closes #12\n\nReview plan: run the new test.\n"
+BODY = "Refs #12\n\nReview plan: run the new test.\n"
 SHOT = (
     "\n## Review evidence\n\nBefore: none, new view\n"
     "![After](https://github.com/user-attachments/assets/672de857-f49e-4def-95f8-b576d8290bb6)\n"
@@ -38,9 +38,9 @@ def test_commit_subjects(check_pr):
 
 def test_body_needs_issue_first_and_plan(check_pr):
     assert check_pr.check_body(BODY, False) == []
-    assert len(check_pr.check_body("Summary\nCloses #12\nReview plan: x", False)) == 1
-    assert len(check_pr.check_body("Closes #12\n", False)) == 1
-    assert len(check_pr.check_body("```\nCloses #1\nReview plan: x\n```\n", False)) == 2
+    assert len(check_pr.check_body("Summary\nRefs #12\nReview plan: x", False)) == 1
+    assert len(check_pr.check_body("Refs #12\n", False)) == 1
+    assert len(check_pr.check_body("```\nRefs #1\nReview plan: x\n```\n", False)) == 2
 
 
 def test_ui_needs_hosted_image_in_review_evidence(check_pr):

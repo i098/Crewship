@@ -133,7 +133,7 @@ def test_workflow_checks_the_body_and_detects_ui_without_a_label(tmp_path):
 
     check(VALID_BODY + f"\n$(touch {marker})\n")
     check(VALID_BODY + heading + "<!-- No UI changes. -->\n")
-    check("Closes #695\n", "Include exactly one ## Summary section.")
+    check("Refs #695\n", "Include exactly one ## Summary section.")
 
     for path in (
         "site/public/about.html",

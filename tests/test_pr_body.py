@@ -11,7 +11,7 @@ SPEC = importlib.util.spec_from_file_location("check_pr_body", SCRIPT)
 checker = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(checker)
 TEMPLATE = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
-VALID_BODY = """Closes #695
+VALID_BODY = """Refs #695
 
 ## Summary
 
@@ -70,16 +70,22 @@ class PRBodyTests(unittest.TestCase):
         self.assertTrue(self.check(TEMPLATE))
 
     def test_real_opening_issue_reference_is_required(self):
-        for first in ("Closes #", "Closes #0", "Summary\nCloses #695", "<!-- Closes #695 -->"):
+        for first in ("Refs #", "Refs #0", "Summary\nRefs #695", "<!-- Refs #695 -->"):
             with self.subTest(first=first):
-                self.assertTrue(self.check(VALID_BODY.replace("Closes #695", first, 1)))
+                self.assertTrue(self.check(VALID_BODY.replace("Refs #695", first, 1)))
+
+    def test_closing_keyword_is_rejected_anywhere(self):
+        for text in ("Closes #7", "fixes #7", "Resolved: #7", "Fixed org/repo#7"):
+            with self.subTest(text=text):
+                errors = self.check(VALID_BODY + "\n" + text + "\n")
+                self.assertTrue(any("a merge never closes an issue" in e for e in errors))
 
     def test_indented_code_cannot_supply_the_opening_reference(self):
         for prefix in ("    ", "\t", " \t", "\n    ", "\n\t"):
             with self.subTest(prefix=prefix):
                 errors = self.check(prefix + VALID_BODY)
                 self.assertIn(
-                    "Start the body with Closes # followed by a positive issue number.", errors
+                    "Start the body with Refs # followed by a positive issue number.", errors
                 )
 
     def test_opening_reference_allows_blank_lines_and_prose_indentation(self):
@@ -132,7 +138,7 @@ class PRBodyTests(unittest.TestCase):
     def test_comment_and_fenced_headings_do_not_supply_required_sections(self):
         for wrapped in (f"<!--\n{VALID_BODY}\n-->", f"```markdown\n{VALID_BODY}\n```"):
             with self.subTest(wrapped=wrapped[:20]):
-                self.assertTrue(self.check("Closes #695\n" + wrapped))
+                self.assertTrue(self.check("Refs #695\n" + wrapped))
 
     def test_headings_inside_code_do_not_create_duplicate_sections(self):
         body = VALID_BODY.replace("All body-check tests passed.", "## Summary\nexample output")
@@ -243,7 +249,7 @@ class PRBodyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with tempfile.TemporaryDirectory() as directory:
             body = Path(directory) / "body.md"
-            body.write_text("Closes #695\n")
+            body.write_text("Refs #695\n")
             result = subprocess.run(
                 [sys.executable, str(SCRIPT), str(body)],
                 text=True, capture_output=True, timeout=10,
@@ -256,7 +262,7 @@ class PRBodyTests(unittest.TestCase):
             path = Path(directory) / "body.md"
             path.write_text(self.body_with_section("Summary", "<div>&nbsp;</div>"))
             for args, stdin, error in (
-                ([], "    " + VALID_BODY, "Start the body with Closes #"),
+                ([], "    " + VALID_BODY, "Start the body with Refs #"),
                 ([str(path)], None, "Fill the ## Summary section."),
             ):
                 with self.subTest(args=args):
