@@ -21,6 +21,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
 - [`credentials`](credentials/SKILL.md): search every secrets file before you call a key absent, pass a process one variable and never the whole file, verify the process environment.
+- [`downloads`](downloads/SKILL.md): resume file downloads with aria2c and save video or audio with yt-dlp.
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
