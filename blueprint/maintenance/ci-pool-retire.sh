@@ -10,5 +10,6 @@ dir="$HOME/.config/systemd/user"
 } | sort -u | while read -r unit; do
   [ -n "$unit" ] || continue
   systemctl --user disable --now "$unit" >/dev/null 2>&1 || systemctl --user stop "$unit"
+  systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
   echo "$unit"
 done
