@@ -2208,8 +2208,11 @@ export const edit = (content, target) => ({ type: "edit", content, target });
 """
 
 
+TIMEOUT_SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))  # tests/conftest.py sets it from the host load
+
+
 def wait_for(check, what, timeout=30):
-    end = time.monotonic() + timeout * 4  # hosts at load ~30 starve the bridge subprocesses
+    end = time.monotonic() + timeout * 4 * TIMEOUT_SCALE  # hosts at load ~30 starve the bridge subprocesses
     while not check():
         assert time.monotonic() < end, f"timed out waiting for {what}"
         time.sleep(0.05)
@@ -2341,6 +2344,7 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         "STATE_DIRECTORY": str(state),
         "FM_IMESSAGE_TEST_QUIET_MS": str(TEST_QUIET_MS),
         "FM_IMESSAGE_TEST_MAX_WAIT_MS": os.environ.get("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 6)),
+        "FM_IMESSAGE_TEST_VOICE_MS": os.environ.get("FM_IMESSAGE_TEST_VOICE_MS", str(round(5000 * TIMEOUT_SCALE))),
         **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
     }
     if probe:
@@ -2794,7 +2798,7 @@ mock.module("node:fs", () => ({{
     try:
         inbound("m1", text="hello")
         port = int(re.search(r"listening on 127.0.0.1:(\d+)", text(tmp_path / "out"))[1])
-        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+        connection = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         body = b"hello"
         content_type = "text/plain"
         if path == "/card":
@@ -3711,7 +3715,7 @@ def test_card_command_posts_json_text_stdin_or_a_file(tmp_path, arg):
 def http(url, method="GET", body=None):
     """One request without following redirects: (status, headers, body)."""
     u = url.split("/", 3)
-    conn = HTTPConnection(u[2], timeout=10)
+    conn = HTTPConnection(u[2], timeout=10 * TIMEOUT_SCALE)
     headers = {"Content-Type": "application/x-www-form-urlencoded"} if body is not None else {}
     conn.request(method, "/" + u[3] if len(u) > 3 else "/", body=body, headers=headers)
     r = conn.getresponse()
@@ -3814,7 +3818,7 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
     shot.write_bytes(png(40, 30))
 
     def web(path, method="GET", body=None, host=tailnet, origin=f"https://{tailnet}"):
-        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         conn.request(method, path, body=body, headers={"Host": host, **({"Origin": origin} if origin else {})})
         response = conn.getresponse()
         return response.status, response.read()
@@ -3833,7 +3837,8 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
         assert web("/send", "POST", "[test] forged", origin=None)[0] == 403
         assert web("/file/a/..%2Frouting.jsonl")[0] == 404
         assert web("/send", "POST", "[test] typed on the glasses")[0] == 200
-        assert "[web chat] [test] typed on the glasses" in text(notes).splitlines()[-1]
+        # The stub inbox logs every call, so a `status` poll can land after the note: the last note is not the last line.
+        assert "[web chat] [test] typed on the glasses" in [line for line in text(notes).splitlines() if line != "status"][-1]
         assert "forged" not in text(notes)
         messages = thread()
         assert [(m["kind"], m["text"]) for m in messages] == [
@@ -3858,7 +3863,7 @@ def test_web_chat_text_is_routed_and_retried_when_the_inbox_refuses_it(tmp_path,
     try:
         inbound("m1", text="[test] hello from the phone")
         (fake / "inbox-fail").touch()
-        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         conn.request("POST", "/send", body="[test] typed on the glasses", headers={"Host": tailnet, "Origin": f"https://{tailnet}"})
         assert conn.getresponse().status == 200
         routes = [json.loads(line) for line in text(state / "routing.jsonl").splitlines()]
