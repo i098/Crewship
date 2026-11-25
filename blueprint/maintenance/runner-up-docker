@@ -19,16 +19,51 @@ check_dind_release() {
     "$(printf '%s\n' "$release" | sed -n 's/^ID=//p' | tr -d '"')" \
     "$(printf '%s\n' "$release" | sed -n 's/^VERSION_ID=//p' | tr -d '"')"
 }
+# runner-up 0.1.12 places a job again at once when its agent ends without the job (exit 3), at any cost per round
+# (#1461). Run the container as a child and, when it ends within RUNNER_UP_EARLY_SECS of its start, count the early
+# ends of the place and hold the exit for 5 s, then 10 s, 20 s ... up to RUNNER_UP_EARLY_MAX. A longer run, a clean
+# exit or an hour without an early end clears the count. A container without --name is not counted.
+name=
+name_of() {
+  prev=
+  for a do
+    if [ "$prev" = --name ]; then printf '%s' "$a"; return; fi
+    prev=$a
+  done
+}
+run_watched() {
+  exec 8<&0
+  start=$(date +%s)
+  "$@" <&8 8<&- &
+  child=$!
+  trap 'kill -TERM "$child" 2>/dev/null || :' HUP INT TERM
+  status=0
+  wait "$child" || status=$?
+  while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+  seen=${RUNNER_UP_EARLY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-early}/${name##*/}
+  ran=$(($(date +%s) - start))
+  if [ -z "$name" ]; then
+    :
+  elif [ "$status" -ne 0 ] && [ "$ran" -lt "${RUNNER_UP_EARLY_SECS:-30}" ]; then
+    count=$(cat "$seen" 2>/dev/null | tr -dc 0-9) || count=
+    [ -z "$(find "$seen" -mmin +60 2>/dev/null)" ] || count=
+    count=$((${count:-0} + 1))
+    mkdir -p "$(dirname "$seen")" && printf '%s\n' "$count" > "$seen" || :
+    delay=$((${RUNNER_UP_EARLY_BASE:-5} << (count > 7 ? 6 : count - 1)))
+    [ "$delay" -le "${RUNNER_UP_EARLY_MAX:-300}" ] || delay=${RUNNER_UP_EARLY_MAX:-300}
+    msg="the container $name ended with exit $status after ${ran}s (early end $count); waiting ${delay}s"
+    echo "runner-up: $msg" >&2
+    logger -t runner-up-docker -- "$msg" 2>/dev/null || :
+    sleep "$delay"
+  else
+    rm -f "$seen"
+  fi
+  exit "$status"
+}
 # A job container of the place can still be going away: --rm removes a big writable layer slowly while the
 # host is busy. Docker refuses the same name until then, so the agent exits at once and the coordinator places
 # the job again in a loop (#1444). Wait for the name instead, and push the removal along with `rm -f`.
 wait_name_free() {
-  name=
-  prev=
-  for a do
-    [ "$prev" = --name ] && name=$a
-    prev=$a
-  done
   [ -n "$name" ] || return 0
   waited=0
   # shellcheck disable=SC2086 # $docker can include sudo -n.
@@ -66,7 +101,8 @@ run|check-dind-runtime)
     if [ -f "$dind_image_file" ]; then
       read -r dind_image < "$dind_image_file"
     fi
-    wait_name_free "$@"
+    name=$(name_of "$@")
+    wait_name_free
   fi
   for arg do
     [ -n "$dind_image" ] && [ "$arg" = "$dind_image" ] || continue
@@ -123,20 +159,13 @@ run|check-dind-runtime)
   jobs=
   [ -z "${RUNNER_UP_JOB_CPUS-}" ] || jobs="-e MOLD_JOBS=1 -e CARGO_BUILD_JOBS=$RUNNER_UP_JOB_CPUS"
   if [ -n "$network" ]; then
-    exec 8<&0
     # shellcheck disable=SC2086 # $docker and $jobs contain separate arguments.
-    $docker run --cgroup-parent "$slice" --pids-limit 8192 --runtime=sysbox-runc \
-      --network "$network" $jobs "$@" <&8 8<&- &
-    child=$!
-    trap 'kill -TERM "$child" 2>/dev/null || :' HUP INT TERM
-    status=0
-    wait "$child" || status=$?
-    while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
-    exit "$status"
+    run_watched $docker run --cgroup-parent "$slice" --pids-limit 8192 --runtime=sysbox-runc \
+      --network "$network" $jobs "$@"
   fi
   # RUNNER_UP_BUILD_GATE names build-gate (docs/runner-up.md#build-gate): the job starts when the host has a free slot.
   # shellcheck disable=SC2086 # $docker is a command and its arguments; $cache and $jobs hold no spaces inside a word
-  exec ${RUNNER_UP_BUILD_GATE-} $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;
+  run_watched ${RUNNER_UP_BUILD_GATE-} $docker run --cgroup-parent "$slice" --pids-limit 8192 $jobs $cache "$@" ;;
 build)
   shift
   # shellcheck disable=SC2086

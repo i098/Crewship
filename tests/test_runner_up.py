@@ -687,6 +687,31 @@ def test_the_shim_waits_for_a_leftover_container_of_the_place_before_it_runs(stu
     assert calls[-1].startswith("docker run ")
 
 
+def test_the_shim_holds_back_a_container_that_keeps_ending_at_once_with_a_growing_wait(
+    stubs, tmp_path
+):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    bin_dir, log = stubs
+    (bin_dir / "sleep").write_text(f'#!/bin/sh\necho "sleep $*" >> {log}\n')
+    (bin_dir / "sleep").chmod(0o755)
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_EARLY_BASE": "5",
+        "RUNNER_UP_EARLY_MAX": "15",
+    }
+    fail = {**env, "DOCKER_FAILS": "--pids-limit", "DOCKER_FAIL_CODE": "3"}
+    args = ("run", "--name", "runner-up-p-1", "img")
+    for _ in range(4):
+        run_script("runner-up-docker", stubs, *args, env=fail, code=3)
+    waits = [line for line in log.read_text().splitlines() if line.startswith("sleep")]
+    assert waits == ["sleep 5", "sleep 10", "sleep 15", "sleep 15"]
+    run_script("runner-up-docker", stubs, *args, env=env)
+    log.write_text("")
+    run_script("runner-up-docker", stubs, *args, env=fail, code=3)
+    assert "sleep 5" in log.read_text().splitlines()
+
+
 @pytest.mark.parametrize(
     ("version", "driver", "code"),
     [
