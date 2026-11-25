@@ -264,7 +264,7 @@ Every ship worker also runs the pre-push PR check before opening a PR:
 python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui] [--title "<PR title>"]
 ```
 
-It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
+It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period). It also accepts `no-mistakes(<step>): <text>` subjects from the no-mistakes pipeline.
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
 It also fails when the body does not start with `Refs #N`, has no `Review plan: <text>` line, fails the same screenshot check as CI, or when the body, the PR title given with `--title`, or a commit message holds a closing keyword.
 Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
