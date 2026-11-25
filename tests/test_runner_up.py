@@ -920,7 +920,9 @@ def test_clean_uses_the_shorter_prune_timeout(stubs, override, expected):
     assert [call for call in calls if not call.startswith("docker ")] == [expected] * 4
 
 
-def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None, free=9999, places=0):
+def guard(
+    stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None, free=9999, places=0
+):
     """Run `guard` with a stub `df` that reports `used` percent and `free` GB, `places` running place containers, and a `systemctl` that logs."""
     bin_dir, log = stubs
     (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use% Avail"\necho " {used}% {free}G"\n')
@@ -963,7 +965,10 @@ def test_guard_pauses_even_when_the_prune_hangs(stubs, tmp_path):
     docker.write_text("#!/bin/sh\nsleep 30\n")
     started = time.monotonic()
     calls, state = guard(
-        stubs, tmp_path, 95, env={"RUNNER_UP_GUARD_PRUNE_TIMEOUT": "1", "RUNNER_UP_GUARD_PS_TIMEOUT": "1"}
+        stubs,
+        tmp_path,
+        95,
+        env={"RUNNER_UP_GUARD_PRUNE_TIMEOUT": "1", "RUNNER_UP_GUARD_PS_TIMEOUT": "1"},
     )
     assert "systemctl --user stop runner-up@a-b.service" in calls
     assert state.read_text() == "a-b\nc-d\n"
