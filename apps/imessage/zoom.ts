@@ -8,7 +8,7 @@ import { PLACEHOLDER_RE } from "@oh-my-pi/pi-coding-agent/secrets/placeholder";
 import { mapJsonStrings } from "@oh-my-pi/pi-coding-agent/secrets/placeholder-scan";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { expandDelimitedPathEntries, expandPath, normalizePathLikeInput, parseFindPattern, resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
-import { isReadableUrlPath } from "@oh-my-pi/pi-tui/tools/read";
+import { isReadableUrlPath } from "@oh-my-pi/pi-coding-agent/tools/details/read";
 import { Budget, clip, load, ZOOM_MAX, zoom } from "./memory.ts";
 import { canonicalWritePath } from "./desk.ts";
 
