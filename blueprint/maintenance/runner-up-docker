@@ -34,12 +34,21 @@ name_of() {
 run_watched() {
   exec 8<&0
   start=$(date +%s)
-  "$@" <&8 8<&- &
+  # The stderr of the container goes on to the caller and into a file, so an early end names its cause.
+  errs=$(mktemp)
+  rm -f "$errs.fifo"
+  mkfifo "$errs.fifo"
+  tee "$errs" <"$errs.fifo" >&2 &
+  tee_pid=$!
+  "$@" <&8 8<&- 2>"$errs.fifo" &
   child=$!
   trap 'kill -TERM "$child" 2>/dev/null || :' HUP INT TERM
   status=0
   wait "$child" || status=$?
   while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
+  wait "$tee_pid" || :
+  last=$(tail -n 5 "$errs" | tr '\n' ' ')
+  rm -f "$errs" "$errs.fifo"
   seen=${RUNNER_UP_EARLY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-early}/${name##*/}
   ran=$(($(date +%s) - start))
   if [ -z "$name" ]; then
@@ -51,7 +60,7 @@ run_watched() {
     mkdir -p "$(dirname "$seen")" && printf '%s\n' "$count" > "$seen" || :
     delay=$((${RUNNER_UP_EARLY_BASE:-5} << (count > 7 ? 6 : count - 1)))
     [ "$delay" -le "${RUNNER_UP_EARLY_MAX:-300}" ] || delay=${RUNNER_UP_EARLY_MAX:-300}
-    msg="the container $name ended with exit $status after ${ran}s (early end $count); waiting ${delay}s"
+    msg="the container $name ended with exit $status after ${ran}s (early end $count); waiting ${delay}s; last stderr: ${last:-none}"
     echo "runner-up: $msg" >&2
     logger -t runner-up-docker -- "$msg" 2>/dev/null || :
     sleep "$delay"
