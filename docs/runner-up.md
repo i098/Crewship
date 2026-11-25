@@ -120,7 +120,7 @@ It never touches a running container.
 `runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
 When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (80), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
 The pause level is below the 85% level where the [build gate](#build-gate) stops all builds, so the guard acts first.
-The guard also stops the coordinators when the free space on that disk is below `job_gb` (30 GB) for each running place container (`docker ps --filter label=runner-up.place`). A large test job builds about 26 GB in its container layer, so a wave of jobs that starts below `pause_pct` cannot fill the disk.
+The guard also stops the coordinators when the free space on that disk is below `job_gb` (30 GB) for each running place container (`docker ps --filter label=runner-up.place`). A large test job builds about 26 GB in its container layer, so this rule stops new starts before a wave of jobs fills the disk. It is a soft limit; see the limits below.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
 Below `resume_pct` (75), and with room for one more `job_gb` beyond the running places, the guard queues starts only for the coordinators it stopped.
 The guard leaves a coordinator with an I/O pause to the I/O resume rule.
@@ -131,7 +131,13 @@ When `full avg60` stays below 40% for 2 minutes, each guard run checks one recor
 It removes the unit if active. Otherwise, it queues a start and moves the unit to the end of the list.
 A pressure spike resets the two minutes.
 The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above, or while the place rule holds them.
-There is no hard size limit for one job container. Docker's `overlay2` driver accepts `--storage-opt size=` only on xfs mounted with `pquota`; the CI host data disk is ext4, so the guard rules above are the limit.
+There is no hard size limit for one job container, and this change does not add one. The place rule is a soft limit:
+- One job can still write more than `job_gb` into its container layer.
+- The guard checks the place rule once for each run (every 2 minutes), so places can start between two runs.
+- A failed or timed-out `docker ps` counts as 0 places. Then only the percent rule decides.
+
+A hard cap is not possible on this host. The data disk is ext4 (`findmnt -T /sdc-disk` shows `/dev/sdc1 ext4`). Docker documents the `overlay2` option `--storage-opt size=` for xfs mounted with `pquota` only. This host also uses the containerd image store. A hard cap needs a quota-capable file system and is follow-up work.
+
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is built from `blueprint/containers/ci-runner.Dockerfile`.
 The build gives each job image the informational label `runner-up.keep=1`; nothing filters on it. The guards' unused-image step removes unused images by ID and skips an image when any of its tags is named by `RUNNER_UP_IMAGE` (default `crewship-ci-runner:latest`) and `RUNNER_UP_DIND_IMAGE` (default `crewship-ci-runner-dind:latest`), so an unlabelled or externally built image stays too.
