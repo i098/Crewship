@@ -1470,3 +1470,9 @@ def test_the_build_gate_count_covers_the_jobs_the_coordinators_can_place(home):
     placed = sum(config(home, name)["machines"][0]["cores"] // 4 for name in instances(home))
     assert placed > 6
     assert slots >= placed
+
+
+def test_the_runner_image_gives_sccache_a_longer_server_startup_timeout():
+    recipe = (ROOT / "blueprint/containers/ci-runner.Dockerfile").read_text()
+    assert "server_startup_timeout_ms = 60000" in recipe
+    assert "/home/runner/.config/sccache/config" in recipe
