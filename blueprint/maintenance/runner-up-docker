@@ -34,11 +34,11 @@ name_of() {
 run_watched() {
   exec 8<&0
   start=$(date +%s)
-  # The stderr of the container goes on to the caller and into a file, so an early end names its cause.
+  # The stderr of the container goes on to the caller, and a tail of 5 lines goes into a file, so an early end names its cause.
   errs=$(mktemp)
   rm -f "$errs.fifo"
   mkfifo "$errs.fifo"
-  tee "$errs" <"$errs.fifo" >&2 &
+  { tee /dev/fd/9 | tail -n 5 >"$errs"; } 9>&2 <"$errs.fifo" &
   tee_pid=$!
   "$@" <&8 8<&- 2>"$errs.fifo" &
   child=$!
@@ -47,7 +47,7 @@ run_watched() {
   wait "$child" || status=$?
   while kill -0 "$child" 2>/dev/null; do wait "$child" && status=0 || status=$?; done
   wait "$tee_pid" || :
-  last=$(tail -n 5 "$errs" | tr '\n' ' ')
+  last=$(tr '\n' ' ' <"$errs")
   rm -f "$errs" "$errs.fifo"
   seen=${RUNNER_UP_EARLY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-early}/${name##*/}
   ran=$(($(date +%s) - start))
