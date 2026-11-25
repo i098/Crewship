@@ -23,6 +23,8 @@ from check_pr_body import (
 
 TYPES = "build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
 SUBJECT = re.compile(rf"(?:{TYPES})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: \S.*")
+# The no-mistakes pipeline commits its fixes as "no-mistakes(<step>): <text>".
+PIPELINE = re.compile(r"no-mistakes\([a-z]+\): \S.*")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 PLAN = re.compile(r"\s{0,3}(?:[-*] )?\**Review plan\**:\**\s*\S", re.I)
 
@@ -30,6 +32,8 @@ PLAN = re.compile(r"\s{0,3}(?:[-*] )?\**Review plan\**:\**\s*\S", re.I)
 def check_commits(subjects):
     errors = []
     for subject in subjects:
+        if PIPELINE.fullmatch(subject):
+            continue
         if len(subject) > 100:
             errors.append(f"Commit subject is over 100 characters: {subject}")
         elif not SUBJECT.fullmatch(subject) or subject.endswith("."):

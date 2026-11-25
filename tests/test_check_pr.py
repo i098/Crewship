@@ -24,6 +24,7 @@ SHOT = (
 
 def test_commit_subjects(check_pr):
     assert check_pr.check_commits(["feat(ci): add x", "fix!: drop y"]) == []
+    assert check_pr.check_commits(["no-mistakes(review): Reuse CI issue-reference check"]) == []
     assert len(check_pr.check_commits(["Merge branch cleanup into utils"])) == 1
     for bad in [
         "Update thing",
@@ -31,6 +32,7 @@ def test_commit_subjects(check_pr):
         "fix: done.",
         "feat:x",
         "wip: x",
+        "no-mistakes: x",
         "fix: " + "a" * 100,
     ]:
         assert len(check_pr.check_commits([bad])) == 1, bad
