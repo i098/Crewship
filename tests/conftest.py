@@ -22,6 +22,8 @@ REFUSE.chmod(0o755)
 os.environ["PATH"] = f"{REFUSE.parent}{os.pathsep}{os.environ.get('PATH', '')}"
 for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
     os.environ.pop(name, None)
+# PYTHONSAFEPATH makes a child that runs `python script.py` drop the script's directory from sys.path.
+os.environ.pop("PYTHONSAFEPATH", None)
 
 # CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies every subprocess timeout (the 10 s and 30 s limits) on slow hosts.
 _SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))
