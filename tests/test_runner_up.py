@@ -429,8 +429,6 @@ def test_github_default_and_runner_up_reserved_labels_do_not_make_pools(home):
 # --- ship.py checks ---------------------------------------------------------
 
 
-
-
 def document(**extra):
     base = yaml.safe_load((ROOT / "blueprint/config/default.yml").read_text())
     base["crewship"]["profiles"]["docker"] = True
