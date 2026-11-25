@@ -105,6 +105,22 @@ test("parseQuotaMe gives 5h and 7d rows with epoch-second resets and nulls for m
   expect(deepseekRows(parseQuotaMe(QUOTA_ME)).map(r => [r.account, r.window, r.leftPct])).toEqual([["deepseek basic", "5h", 75], ["deepseek basic", "7d", 25], ["deepseek max", "5h", 97.5], ["deepseek max", "7d", 100], ["deepseek idle", "5h", null], ["deepseek idle", "7d", null]])
 })
 
+// Oracle: a quotaMe plan carries quotaStatus and quota.status; only available/active means the windows are usable.
+test("deepseekRows notes a plan's own status and says when there are no plans", () => {
+  const windows = { fiveHour: { limitCredits: 200, usedCredits: 0 } }
+  const cases: [unknown, string | undefined][] = [
+    [{ quotaStatus: "suspended", quota: windows }, "suspended"],
+    [{ quotaStatus: "pending" }, "pending"],
+    [{ quotaStatus: "available", quota: { ...windows, status: "expired" } }, "expired"],
+    [{ quotaStatus: "available", quota: { ...windows, status: "active" } }, undefined],
+  ]
+  for (const [plan, want] of cases) expect(deepseekRows(parseQuotaMe([plan]))[0].note).toBe(want)
+  expect(deepseekRows(parseQuotaMe([]))).toMatchObject([{ account: "deepseek plans", note: "no plans" }])
+  expect(parseQuotaMe([]).rows).toEqual([])
+  // A malformed answer is not "no plans": it keeps the n/a fallback.
+  expect(deepseekRows(parseQuotaMe("junk")).map(r => r.note)).toEqual(["n/a"])
+})
+
 test("readQuotaMe renews the login once on auth and reports failures without throwing", async () => {
   let calls = 0
   let refreshed = 0

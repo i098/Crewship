@@ -91,7 +91,7 @@ const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v 
 // ---- DeepSeek reseller: plan quota from the reseller's quotaMe call -----------------
 // The reseller (deepseekv4pro.com) reports plan credits through quotaMe, read over HTTP via api-anything with the
 // saved login, renewed from the fleet cookie jar when it expires. resets_at is epoch seconds. No browser is opened.
-export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
+export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null; status?: string }[]; noPlans?: boolean }
 
 const RESELLER = "deepseek (reseller)"
 const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
@@ -103,10 +103,12 @@ const planLabel = (plan: unknown) => {
 }
 
 export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
+  // Signed in with no subscription: say so, instead of showing nothing for the plan source.
+  if (json.noPlans) return [{ account: "deepseek plans", window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "no plans" }]
   const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
     if (!r || typeof r.window !== "string") return []
     const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
-    return [{ account: planLabel(r.plan), window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+    return [{ account: planLabel(r.plan), window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: r.status ?? (left ? undefined : "n/a") }]
   })
   return rows.length ? rows : [resellerNote("n/a")]
 }
@@ -338,20 +340,23 @@ let deepseekLast: { value?: DeepseekUsage; error?: string } = {}
 const WINDOWS: [string, string][] = [["fiveHour", "5h"], ["sevenDay", "7d"]]
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
 
-// quotaMe answers a plan list: {quota: {fiveHour|sevenDay: {usedCredits, limitCredits, resetAt (ISO)}}}.
+// quotaMe answers a plan list: {planName, quotaStatus, quota: {status, fiveHour|sevenDay: {usedCredits, limitCredits, resetAt (ISO)}}}.
+// A plan that is not "available"/"active" still has windows; its status is noted so the numbers are not read as usable.
 export function parseQuotaMe(plans: unknown): DeepseekUsage {
   const rows: NonNullable<DeepseekUsage["rows"]> = []
   for (const plan of Array.isArray(plans) ? plans : []) {
     const p = isObj(plan) ? plan : {}
     const quota = isObj(p.quota) ? p.quota : {}
+    const status = typeof p.quotaStatus === "string" && p.quotaStatus !== "available" ? p.quotaStatus : typeof quota.status === "string" && quota.status !== "active" ? quota.status : undefined
     for (const [key, window] of WINDOWS) {
       const win = quota[key]
       const w = isObj(win) ? win : {}
       const at = typeof w.resetAt === "string" ? Date.parse(w.resetAt) / 1000 : NaN
-      rows.push({ plan: typeof p.planName === "string" && p.planName ? p.planName : "plan", window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
+      rows.push({ plan: typeof p.planName === "string" && p.planName ? p.planName : "plan", window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null, ...(status && { status }) })
     }
   }
-  return { rows }
+  // Only a real empty list means "no plans"; a non-array answer is a bad read and stays n/a.
+  return { rows, ...(Array.isArray(plans) && !plans.length && { noPlans: true }) }
 }
 
 const apiAnythingEnv = () => ({ API_ANYTHING_HOME: `${HOME}/.local/state/crewship/api-anything`, API_ANYTHING_BROWSER_ROOTS: "[]", ...process.env })
