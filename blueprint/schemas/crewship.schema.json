@@ -771,6 +771,10 @@
               "minimum": 1,
               "maximum": 100
             },
+            "job_gb": {
+              "type": "integer",
+              "minimum": 1
+            },
             "machines": {
               "type": "array",
               "items": {

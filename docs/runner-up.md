@@ -26,8 +26,9 @@ crewship:
   #   io_write_mb: 120          # IOWriteBandwidthMax of the slice, in MB/s
   #   io_write_iops: 600        # IOWriteIOPSMax of the slice
   #   disk_max_gb: 50           # build cache the hourly cleanup keeps
-  #   pause_pct: 88             # data disk use at or above which no new job starts
-  #   resume_pct: 85            # data disk use below which jobs start again
+  #   pause_pct: 80             # data disk use at or above which no new job starts (below the 85% stop of the build gate)
+  #   resume_pct: 75            # data disk use below which jobs start again
+  #   job_gb: 30                # GB a running job may still write; no new job starts when the free space is below job_gb for each running place
   #   io_heavy: []              # instance names (repo lowercased, other characters to '-') the guard pauses while the io pressure stays high
   #   cache_max_gb: 150         # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
@@ -117,9 +118,11 @@ A failed or timed-out step does not skip the remaining steps, but the unit ends 
 It never touches a running container.
 
 `runner-up-guard.timer` runs `runner-up-maintain guard` every 2 minutes.
-When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (88), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
+When the disk of `data_dir` (the home when unset) is at or above `pause_pct` (80), it stops the coordinators, so no new job starts; running jobs finish, because stopping a coordinator leaves its places alone.
+The pause level is below the 85% level where the [build gate](#build-gate) stops all builds, so the guard acts first.
+The guard also stops the coordinators when the free space on that disk is below `job_gb` (30 GB) for each running place container (`docker ps --filter label=runner-up.place`). A large test job builds about 26 GB in its container layer, so this rule stops new starts before a wave of jobs fills the disk. It is a soft limit; see the limits below.
 Each run also removes every stopped place container, with the job's target directory in its layer, so a crashed place does not hold the disk for an hour; a running container stays.
-Below `resume_pct` (85), the guard queues starts only for the coordinators it stopped.
+Below `resume_pct` (75), and with room for one more `job_gb` beyond the running places, the guard queues starts only for the coordinators it stopped.
 The guard leaves a coordinator with an I/O pause to the I/O resume rule.
 For the other coordinators, the guard keeps each entry until the coordinator is active.
 Use `runner-up-maintain io-pause <unit...>` to pause only runner-up coordinators for I/O pressure. The guard resumes them after pressure decreases.
@@ -127,7 +130,14 @@ The guard also pauses by itself: when `/proc/pressure/io` `full avg60` stays abo
 When `full avg60` stays below 40% for 2 minutes, each guard run checks one recorded unit.
 It removes the unit if active. Otherwise, it queues a start and moves the unit to the end of the list.
 A pressure spike resets the two minutes.
-The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
+The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above, or while the place rule holds them.
+There is no hard size limit for one job container, and this change does not add one. The place rule is a soft limit:
+- One job can still write more than `job_gb` into its container layer.
+- The guard checks the place rule once for each run (every 2 minutes), so places can start between two runs.
+- A failed or timed-out `docker ps` counts as 0 places. Then only the percent rule decides.
+
+A hard cap is not possible on this host. The data disk is ext4 (`findmnt -T /sdc-disk` shows `/dev/sdc1 ext4`). Docker documents the `overlay2` option `--storage-opt size=` for xfs mounted with `pquota` only. This host also uses the containerd image store. A hard cap needs a quota-capable file system and is follow-up work.
+
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is built from `blueprint/containers/ci-runner.Dockerfile`.
 The build gives each job image the informational label `runner-up.keep=1`; nothing filters on it. The guards' unused-image step removes unused images by ID and skips an image when any of its tags is named by `RUNNER_UP_IMAGE` (default `crewship-ci-runner:latest`) and `RUNNER_UP_DIND_IMAGE` (default `crewship-ci-runner-dind:latest`), so an unlabelled or externally built image stays too.

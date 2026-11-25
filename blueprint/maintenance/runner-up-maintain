@@ -3,7 +3,8 @@
 #   runner-up-maintain image [--ensure]   build the job image from the latest official
 #                                         runner image; with --ensure, only when it is missing
 #   runner-up-maintain clean              remove what the jobs left on the disk
-#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
+#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above, or when less than
+#                                         RUNNER_UP_JOB_GB (30) per running place is free,
 #                                         start them again below the resume level; also start the units
 #                                         recorded by io-pause, one per run, after 2 min of calm IO
 #                                         and start a failed coordinator that no pause holds
@@ -101,16 +102,26 @@ guard)
   # Stopping a coordinator only stops new pickup: KillMode=process leaves running jobs alone.
   # Below the resume level the disk rule starts the coordinators it stopped; the heal below starts a failed one. A unit stopped by hand stays stopped.
   path=${RUNNER_UP_GUARD_PATH:-/}
-  pause=${RUNNER_UP_PAUSE_PCT:-88}
-  resume=${RUNNER_UP_RESUME_PCT:-85}
+  pause=${RUNNER_UP_PAUSE_PCT:-80}
+  resume=${RUNNER_UP_RESUME_PCT:-75}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
   io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   managed() {
     case " ${RUNNER_UP_INSTANCES-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac
   }
-  used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
+  df_line=$(df -BG --output=pcent,avail "$path" | tail -n 1)
+  used=$(echo "$df_line" | awk '{print $1}' | tr -dc 0-9)
+  free=$(echo "$df_line" | awk '{print $2}' | tr -dc 0-9)
+  # Place rule: each running place may still write RUNNER_UP_JOB_GB (a large test job builds ~26 GB in its layer).
+  # Pause when the free space is below that for every running place; resume only with room for one more job.
+  # A failed or slow count reads as 0 places, so the percent rule alone decides; a df without avail skips the place rule.
+  places=$(timeout --kill-after=1s "${RUNNER_UP_GUARD_PS_TIMEOUT:-10}" docker ps --quiet --filter label=runner-up.place 2>/dev/null | wc -l)
+  job_gb=${RUNNER_UP_JOB_GB:-30}
+  full=0 roomy=0
+  if [ "$used" -ge "$pause" ] || { [ -n "$free" ] && [ "$free" -lt $((places * job_gb)) ]; }; then full=1; fi
+  if [ "$used" -lt "$resume" ] && { [ -z "$free" ] || [ "$free" -ge $(((places + 1) * job_gb)) ]; }; then roomy=1; fi
   queue_start() { timeout --kill-after=1s 2s systemctl --user --no-block start "$@"; }
-  if [ "$used" -ge "$pause" ]; then
+  if [ "$full" = 1 ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
       unit=runner-up@$i.service
       case "$(systemctl --user is-active "$unit")" in active|reloading|activating) ;; *) continue ;; esac
@@ -118,7 +129,7 @@ guard)
         printf '%s\n' "$i" >> "$state"
       fi
     done
-  elif [ "$used" -lt "$resume" ] && [ -s "$state" ]; then
+  elif [ "$roomy" = 1 ] && [ -s "$state" ]; then
     : > "$state.new"
     set --
     while read -r i; do
@@ -144,7 +155,7 @@ guard)
     flock 8
     if ! io_below; then
       rm -f "$io_calm"
-    elif [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
+    elif [ -s "$io_state" ] && [ "$roomy" = 1 ]; then
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
       if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
         while read -r unit < "$io_state"; do
@@ -187,7 +198,7 @@ guard)
   fi
   # Heal: a coordinator in the failed state that neither the disk rule nor the IO rule holds starts again; an inactive one that a person stopped stays stopped.
   # Nothing starts at the pause level of the disk, nor while the IO pressure is high for a unit the IO rule may pause.
-  if [ "$used" -lt "$pause" ]; then
+  if [ "$full" = 0 ]; then
     set --
     for i in ${RUNNER_UP_INSTANCES-}; do
       u=runner-up@$i.service
