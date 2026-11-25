@@ -222,7 +222,7 @@ def test_crit_that_reclaim_cannot_fix_alerts_loudly_rate_limited(guard):
     guard.run(STORAGE_CRIT_REMIND_MIN="0")
     assert len(guard.alerts()) == 2
     verbs = {" ".join(c.split()[:2]) for c in guard._lines("docker.log")}
-    assert verbs <= {"info -f", "system df", "builder prune", "image prune", "image ls", "image rm"}
+    assert verbs <= {"info -f", "system df", "builder prune", "image prune", "image ls", "image rm", "ps -a"}
 
 
 def _age_crit_alert(guard, hours):

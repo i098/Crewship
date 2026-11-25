@@ -192,9 +192,10 @@ estimates() {  # -> "build dangling old" in bytes
 }
 
 prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images with no tag named as a job image.
-  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} rows keep used ref id created
+  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} rows keep ids used ref id created
   rows=$("$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}') || return
-  used=$("$@" ps -a -q | xargs -r "$@" inspect -f '{{.Image}}')
+  ids=$("$@" ps -a -q) || return
+  used=$(xargs -r "$@" inspect -f '{{.Image}}' <<<"$ids") || return
   keep=$(awk -v a="$keep1" -v b="$keep2" '$1 == a || $1 == b { printf "%s ", $2 }' <<<"$rows")
   while read -r ref id created; do
     [ -n "$id" ] || continue
