@@ -832,7 +832,6 @@ print(json.dumps({{"result": result}}))
         **{k: base[k] for k in ("crewship_tuis", "crewship_herdr_tabs", "crewship_herdr_open_tabs")},
         "crewship_cfg": {"user": getpass.getuser(), "home": str(home),
                          "herdr": {"schedules_tab": mode != "disabled",
-                                  **({"ci_pool_tab": True} if mode == "all" else {}),
                                   **({} if mode in ("all", "update") else {k: False for k in (
                                       "usage_tab", "crewboard_tab", "browsers_tab", "fleet_health_tab", "runs_tab", "lavish_tab")})}},
         "crewship_group": grp.getgrgid(os.getgid()).gr_name,

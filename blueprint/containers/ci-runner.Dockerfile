@@ -23,7 +23,7 @@ RUN apt-get update -qq \
 # clusters that the packages created are kept here and copied in when a job starts.
 # Only the newest installed package creates its main cluster, so create the 17 one when it is
 # missing. Each cluster starts on port 5432, so stop both and start neither at boot: a job
-# starts the version it needs (see docs/ci-pool.md).
+# starts the version it needs (see docs/runner-up.md).
 RUN [ -d /etc/postgresql/17/main ] || (pg_createcluster 17 main && pg_conftool 17 main set port 5432)  && for v in 17 18; do pg_ctlcluster $v main stop 2>/dev/null || true; echo manual > /etc/postgresql/$v/main/start.conf; done  && cp -a /var/lib/postgresql /opt/postgresql-seed
 # The compose plugin, for repositories whose jobs talk to their own daemon (DIND_IMAGE).
 COPY --from=docker:dind-rootless /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/

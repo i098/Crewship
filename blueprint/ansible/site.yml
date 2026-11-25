@@ -264,14 +264,12 @@
       when: crewship_cfg.profiles.docker | bool
       tags: [docker]
 
-    - name: CI pool - just-in-time GitHub Actions runners, one job per container
+    - name: Retire the CI pool - stop the units an earlier apply made
       ansible.builtin.include_tasks:
-        file: tasks/ci_pool.yml
+        file: tasks/ci_pool_retired.yml
         apply:
           tags: [ci_pool]
-      when:
-        - crewship_account_ready | bool
-        - crewship_cfg.ci_pool is defined
+      when: crewship_account_ready | bool
       tags: [ci_pool]
 
     - name: runner-up - one coordinator, one fresh container per GitHub Actions job

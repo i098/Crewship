@@ -96,7 +96,7 @@ RUNNER_UP_HOSTED_PREFIXES = ("ubuntu-", "windows-", "macos-")
 
 
 def entry_slugs(entries):
-    """Slot prefixes; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py."""
+    """Slot prefixes."""
     return [
         re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-") for e in entries
     ]
@@ -240,16 +240,6 @@ def validate_config(document):
         raise ValueError(
             "board requires the firstmate profile and the development profile (it builds with cargo)"
         )
-    if "ci_pool" in config:
-        pool = config["ci_pool"]
-        if not config["profiles"]["docker"]:
-            raise ValueError("the CI pool requires the docker profile")
-        if ".." in Path(pool["data_dir"]).parts:
-            raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        if len(set(entry_slugs(pool["repos"]))) != len(pool["repos"]):
-            raise ValueError(
-                "ci_pool.repos names a repository twice (or two that share a unit name)"
-            )
     if "runner_up" in config:
         validate_runner_up(config)
     if "cloudflare_runner" in config:
