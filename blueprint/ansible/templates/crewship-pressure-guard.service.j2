@@ -10,6 +10,8 @@ ConditionPathExists={{ crewship_fleet_doctor_dir }}/pressure-guard.sh
 [Service]
 Type=oneshot
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUNNER_UP_IMAGE={{ crewship_runner_up_image }}
+Environment=RUNNER_UP_DIND_IMAGE={{ crewship_runner_up_dind_image }}
 Environment=FM_HOME={{ crewship_firstmate_dir }}
 Environment="STORAGE_DATA_DIR={{ crewship_data_dir }}"
 Environment=PRESSURE_PCT={{ crewship_pressure_guard_pct }}

@@ -271,6 +271,14 @@
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
       when: (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos
 
+    - name: Statically enable the job image check at boot
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/runner-up-image-boot.service"
+        dest: "{{ crewship_user_units }}/default.target.wants/runner-up-image-boot.service"
+        state: link
+        force: true
+        follow: false
+
     - name: Statically enable the runner-up timers
       ansible.builtin.file:
         src: "{{ crewship_user_units }}/{{ item }}"

@@ -1240,6 +1240,18 @@ def test_the_image_is_built_with_the_build_output_removed_and_old_layers_pruned(
     for flag in ("--pull", "--rm", "--force-rm", "--tag crewship-ci-runner:latest"):
         assert flag in build
     assert calls[-1] == "docker image prune --force"
+    assert "--label runner-up.keep=1" in build
+
+
+def test_the_boot_unit_builds_a_missing_image_before_the_coordinators(home):
+    apply(home, runner(home))
+    boot = unit_sections(units(home) / "runner-up-image-boot.service")
+    assert boot["Service"]["ExecStart"][0].endswith("runner-up-maintain image --ensure")
+    assert boot["Service"]["Type"] == ["oneshot"]
+    assert (units(home) / "default.target.wants/runner-up-image-boot.service").is_symlink()
+    coordinator = unit_sections(units(home) / "runner-up@.service")["Unit"]
+    assert "runner-up-image-boot.service" in coordinator["After"][0].split()
+    assert "runner-up-image-boot.service" in coordinator["Wants"][0].split()
 
 
 def test_ensure_builds_nothing_while_the_image_exists_and_a_plain_image_run_always_builds(

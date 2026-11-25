@@ -67,13 +67,13 @@ image)
   fi
   # The CI pool refreshes the base image when both systems run on this host.
   if { [ "${2-}" != --ensure ] && [ "${RUNNER_UP_REFRESH_BASE:-1}" = 1 ]; } || ! have_image "$image"; then
-    docker build --pull --quiet --rm --force-rm --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
+    docker build --pull --quiet --rm --force-rm --label runner-up.keep=1 --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
       <"$RUNNER_UP_DOCKERFILE" >/dev/null
   fi
   if [ -n "$dind_recipe" ]; then
     candidate="$dind_image-candidate"
     trap 'docker image rm "$candidate" >/dev/null 2>&1 || :' EXIT
-    docker build --quiet --rm --force-rm --build-arg "BASE_IMAGE=$image" --tag "$candidate" - \
+    docker build --quiet --rm --force-rm --label runner-up.keep=1 --build-arg "BASE_IMAGE=$image" --tag "$candidate" - \
       <"$dind_recipe" >/dev/null
     probe_dind "$candidate"
     docker tag "$candidate" "$dind_image"
@@ -91,7 +91,7 @@ clean)
     limit=210
   fi
   failed=0
-  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || failed=1; }
+  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || { echo "runner-up: docker $1 $2 failed with status $?" >&2; failed=1; }; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
   prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force

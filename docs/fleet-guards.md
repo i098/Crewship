@@ -98,7 +98,7 @@ After notification, CRIT runs `worktree-prune.sh` separately for each [cleanup p
 Only filesystems measured at CRIT during the notification pass can start reclaim.
 Later measurements can stop reclaim but cannot make another filesystem eligible.
 `WORKTREE_PRUNE_CMD` can replace this command.
-On Docker's filesystem, it then prunes build cache, dangling images, and unused images created more than 168 hours ago.
+On Docker's filesystem, it then prunes build cache, dangling images, and unused images created more than 168 hours ago. It keeps the runner-up job images by name (`RUNNER_UP_IMAGE`, `RUNNER_UP_DIND_IMAGE`).
 It re-measures before reclaim and after each step, and stops reclaim below CRIT.
 After reclaim, the guard updates the usage sample so rapid growth from the reduced usage still triggers FILL.
 The image filter uses creation time, not last use.
@@ -147,7 +147,7 @@ remove. `tests/test_worktree_prune.py` runs it against real git repositories.
 It measures the filesystems that hold `/`, the home and Docker's data root, and RAM (`MemTotal` minus `MemAvailable`).
 When any reading exceeds `crewship_pressure_guard_pct` (default 70), it prunes only these targets:
 
-- All Docker build cache and all unused images (`docker builder prune -af`, `docker image prune -af`).
+- All Docker build cache and all unused images except the runner-up job images (`docker builder prune -af`, `docker image rm` by ID of each unused image with no tag named by `RUNNER_UP_IMAGE` or `RUNNER_UP_DIND_IMAGE`).
 - `/tmp/pytest-of-*` dirs idle for 60 minutes, with no open file under them (`lsof +D`) and no `.git` inside.
 - The uv and bun caches (`uv cache prune`, `bun pm cache rm`), only while no `uv` or `bun` process runs.
 
