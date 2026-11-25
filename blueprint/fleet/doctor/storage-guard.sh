@@ -191,18 +191,22 @@ estimates() {  # -> "build dangling old" in bytes
     | map(floor) | "\(.[0]) \(.[1]) \(.[2])"'
 }
 
-pin_job_images() {  # the guards' prune keeps images with this label: label a job image that lacks it
-  local img
-  for img in "${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}" "${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest}"; do
-    [ -n "$(timeout 60 docker image ls -q --filter "reference=$img" --filter label!=runner-up.keep=1 2>/dev/null)" ] || continue
-    printf 'FROM %s\nLABEL runner-up.keep=1\n' "$img" | timeout 120 docker build -q -t "$img" - >/dev/null 2>&1 || :
+prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images except the job images by name.
+  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} ref id created
+  "$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' | while read -r ref id created; do
+    if [ "$ref" = "$keep1" ] || [ "$ref" = "$keep2" ]; then continue; fi
+    [ -z "${AGE_H-}" ] || [ "$(date -d "${created% *}" +%s 2>/dev/null || echo 0)" -lt $(($(date +%s) - AGE_H * 3600)) ] || continue
+    case $ref in *'<none>'*) ref=$id ;; esac
+    "$@" image rm "$ref" >/dev/null 2>&1 || :
   done
 }
+export -f prune_unused_images
+export AGE_H
 
 # CRIT steps, cheapest first: "label|docker arguments".
 STEPS=("build cache|builder prune -f"
        "dangling images|image prune -f"
-       "unused images created over ${AGE_H}h ago|image prune -af --filter until=${AGE_H}h --filter label!=runner-up.keep=1")
+       "unused images created over ${AGE_H}h ago|image rm unused")
 
 if [ "$DRY" != 1 ]; then
   if [ -n "$DATA_DIR" ]; then
@@ -412,12 +416,15 @@ for m in "${mounts[@]}"; do
       done
     elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       start_used=$used freed=()
-      pin_job_images
       for s in "${STEPS[@]}"; do
         [ "$pct" -ge "$CRIT" ] || break
         before=$used
-        # shellcheck disable=SC2086  # the step's own argument words
-        out=$(timeout 300 docker ${s#*|} 2>&1 | tail -1)
+        if [ "${s#*|}" = "image rm unused" ]; then
+          out=$(timeout 300 bash -c 'prune_unused_images docker' 2>&1 | tail -1)
+        else
+          # shellcheck disable=SC2086
+          out=$(timeout 300 docker ${s#*|} 2>&1 | tail -1)
+        fi
         read -r used avail pct _ <<<"$(measure "$m")"
         log "  CRIT $m docker ${s#*|}: freed $(human $((before - used))), now ${pct}% - docker: ${out:-no output}"
         freed+=("${s%%|*} $(human $((before - used)))")
