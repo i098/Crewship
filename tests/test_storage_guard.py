@@ -38,7 +38,7 @@ else cat "$STUB/mounts" 2>/dev/null; fi
     "mountpoint": 'test "$(cat "$STUB/state-mount" 2>/dev/null)" != /',
     "docker": r"""
 echo "$*" >> "$STUB/docker.log"
-case "$*" in info*) echo discovery >> "$STUB/events" ;; *prune*|"image rm"*) echo reclaim >> "$STUB/events" ;; esac
+case "$*" in info*) echo discovery >> "$STUB/events" ;; *prune*|"image rm o1") echo reclaim >> "$STUB/events" ;; esac
 free() {
   local g m s u
   g=$(cat "$STUB/free.$1" 2>/dev/null || echo 0)
@@ -55,11 +55,11 @@ case "$*" in
   "builder prune -f") free builder ;;
   "image prune -f") free dangling ;;
   "image ls"*) printf '%s\n' "crewship-ci-runner:latest k1 2020-01-01 00:00:00 +0000 UTC" "old:1 o1 2020-01-01 00:00:00 +0000 UTC" "new:1 n1 $(date -u '+%Y-%m-%d %H:%M:%S +0000 UTC')" "crewship-ci-runner-dind:latest k2 2020-01-01 00:00:00 +0000 UTC" ;;
-  "image rm old:1") free old ;;
+  "image rm o1") free old ;;
 esac
 """,
 }
-STEPS = ["builder prune -f", "image prune -f", "image rm old:1"]
+STEPS = ["builder prune -f", "image prune -f", "image rm o1"]
 
 
 class Guard:
@@ -154,7 +154,7 @@ jq -nc --arg id "$3" --argjson announced "$announced" \
         return path.read_text().splitlines() if path.exists() else []
 
     def prunes(self) -> list[str]:
-        return [c for c in self._lines("docker.log") if "prune" in c or c.startswith("image rm")]
+        return [c for c in self._lines("docker.log") if "prune" in c or c == "image rm o1"]
 
     def alerts(self) -> list[str]:
         return [line.split("] ", 1)[-1] for line in self._lines("alerts")]

@@ -68,14 +68,19 @@ step() {  # <label> <command...>
   if [ "$DRY" = 1 ]; then echo "would: $label ($*)"; done_steps+=("$label"); return 0; fi
   if timeout 600 "$@" >/dev/null 2>&1; then done_steps+=("$label"); else echo "pressure-guard: $label failed" >&2; fi
 }
-prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images except the job images by name.
-  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} ref id created
-  "$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' | while read -r ref id created; do
-    if [ "$ref" = "$keep1" ] || [ "$ref" = "$keep2" ]; then continue; fi
+prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images with no tag named as a job image.
+  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} rows keep used ref id created
+  rows=$("$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}') || return
+  used=$("$@" ps -a -q | xargs -r "$@" inspect -f '{{.Image}}')
+  keep=$(awk -v a="$keep1" -v b="$keep2" '$1 == a || $1 == b { printf "%s ", $2 }' <<<"$rows")
+  while read -r ref id created; do
+    [ -n "$id" ] || continue
+    case " $keep " in *" $id "*) continue ;; esac
+    case $used in *"$id"*) continue ;; esac
     [ -z "${AGE_H-}" ] || [ "$(date -d "${created% *}" +%s 2>/dev/null || echo 0)" -lt $(($(date +%s) - AGE_H * 3600)) ] || continue
-    case $ref in *'<none>'*) ref=$id ;; esac
-    "$@" image rm "$ref" >/dev/null 2>&1 || :
-  done
+    while read -r ref; do "$@" image rm "$ref" >/dev/null 2>&1 || :; done < <(awk -v i="$id" '$2 == i && $1 !~ /<none>/ { print $1 }' <<<"$rows")
+    "$@" image rm "$id" >/dev/null 2>&1 || :
+  done < <(sort -u -k2,2 <<<"$rows")
 }
 export -f prune_unused_images
 have() { command -v "$1" >/dev/null 2>&1; }

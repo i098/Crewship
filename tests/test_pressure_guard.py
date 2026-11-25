@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 STUBS = {
     "df": 'case "$*" in *pcent*) echo Use%; if [ -e "$STUB/pruned" ]; then echo "${DISK_AFTER:-$DISK_PCT}%"; else echo "${DISK_PCT}%"; fi ;; *) echo Mounted; echo / ;; esac',
-    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; image) case "$2" in ls) printf "%s\\n" "crewship-ci-runner:latest k1 2020-01-01 00:00:00 +0000 UTC" "stale:1 s1 2020-01-01 00:00:00 +0000 UTC" "<none>:<none> d1 2020-01-01 00:00:00 +0000 UTC" "crewship-ci-runner-dind:latest k2 2020-01-01 00:00:00 +0000 UTC" ;; *) touch "$STUB/pruned" ;; esac ;; esac',
+    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in ps) echo c1 ;; inspect) echo sha256:u1aaaaaaaaaaaaaaaa ;; info) echo /var/lib/docker ;; image) case "$2" in ls) printf "%s\\n" "crewship-ci-runner:latest k1 2020-01-01 00:00:00 +0000 UTC" "crewship-ci-runner:old k1 2020-01-01 00:00:00 +0000 UTC" "inuse:1 u1 2020-01-01 00:00:00 +0000 UTC" "inuse:2 u1 2020-01-01 00:00:00 +0000 UTC" "stale:1 s1 2020-01-01 00:00:00 +0000 UTC" "stale:2 s1 2020-01-01 00:00:00 +0000 UTC" "<none>:<none> d1 2020-01-01 00:00:00 +0000 UTC" "crewship-ci-runner-dind:latest k2 2020-01-01 00:00:00 +0000 UTC" ;; *) touch "$STUB/pruned" ;; esac ;; esac',
     "lsof": 'case "$3" in *busy*) echo 123; exit 1 ;; *) exit 1 ;; esac',
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
@@ -85,10 +85,10 @@ def test_either_resource_over_threshold_prunes_and_alerts(run, disk, ram):
     assert "over 70%" in alerts
 
 
-def test_unlabelled_job_images_are_kept_by_name_and_other_images_removed(run):
+def test_job_images_are_kept_by_name_and_unkept_images_removed_with_all_tags(run):
     r, calls, _ = run(disk=95)
     removed = [c for c in calls.splitlines() if c.startswith("image rm")]
-    assert removed == ["image rm stale:1", "image rm d1"]
+    assert removed == ["image rm d1", "image rm stale:1", "image rm stale:2", "image rm s1"]
     assert not [c for c in calls.splitlines() if c.startswith("build ")]
 
 
