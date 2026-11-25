@@ -245,7 +245,7 @@ Jobs on other [machines](#other-machines) and Docker-in-Docker jobs do not get i
 
 | Directory | Mounted at | Use |
 | --- | --- | --- |
-| `sccache` | `/sccache` | The compile cache. The job image has `sccache` and sets `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE` and `CARGO_INCREMENTAL=0` for each job. |
+| `sccache` | `/sccache` | The compile cache. The job image has `sccache` and sets `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE` and `CARGO_INCREMENTAL=0` for each job, and its config sets a 60 s server startup timeout. |
 | `cargo-registry`, `cargo-git`, `cargo-lock`, `cargo-lock-mutate` | `~/.cargo/registry`, `~/.cargo/git`, `~/.cargo/.package-cache`, `~/.cargo/.package-cache-mutate` | One registry and git cache. The two lock files are mounted so cargo's lock holds across jobs. |
 | `bun`, `npm`, `pnpm-store` | `~/.cache/bun`, `~/.cache/npm`, `~/.cache/pnpm-store` | Package stores. |
 
