@@ -78,7 +78,8 @@ def test_below_threshold_does_nothing(run):
 @pytest.mark.parametrize("disk,ram", [(71, 10), (10, 71)])
 def test_either_resource_over_threshold_prunes_and_alerts(run, disk, ram):
     r, calls, alerts = run(disk=disk, ram=ram)
-    assert "builder prune -af" in calls and "image prune -af" in calls
+    assert "builder prune -af" in calls
+    assert "image prune -af --filter label!=runner-up.keep=1" in calls
     assert "uv cache prune" in calls and "bun pm cache rm" in calls
     assert "volume" not in calls
     assert "over 70%" in alerts

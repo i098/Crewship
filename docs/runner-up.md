@@ -128,7 +128,8 @@ A pressure spike resets the two minutes.
 The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is built from `blueprint/containers/ci-runner.Dockerfile`.
-The coordinator's start builds it when it is missing.
+The build gives each job image the label `runner-up.keep=1`. Every prune of the recipe (the guards' `image prune -af` and the hourly cleanup) skips an image with that label; the first hourly image build labels an image that an older build made.
+`runner-up-image-boot.service` runs at boot, before the coordinators, and builds a job image only when `docker image inspect` fails for it. The coordinator's start does the same check.
 `runner-up-image.timer` refreshes the base image every hour.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
 Managed apply loads the systemd slice limits before it prepares the Docker-in-Docker image.
@@ -262,6 +263,7 @@ Limits: sccache caches only builds that run `rustc` through the wrapper, with th
 | `~/.config/systemd/user/runner-up@.service` | The coordinator unit; one instance for each repository. |
 | `~/.config/systemd/user/runner-up-clean.{service,timer}` | The hourly cleanup. |
 | `~/.config/systemd/user/runner-up-image.{service,timer}` | The hourly image build. |
+| `~/.config/systemd/user/runner-up-image-boot.service` | The image check at boot. |
 | `/etc/systemd/system/runnerup.slice` | The caps. |
 | `~/.local/bin/build-gate` | The shared build gate. |
 | `~/.local/bin/cargo` | The cargo shim, with `build_gate`. |

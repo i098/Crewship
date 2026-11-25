@@ -1,8 +1,8 @@
 {{ ansible_managed | comment }}
 [Unit]
 Description=runner-up coordinator of %i: one fresh container per GitHub Actions job (Crewship managed)
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target docker.service runner-up-image-boot.service
+Wants=network-online.target runner-up-image-boot.service
 
 [Service]
 # The shim directory comes first so that every `docker run` of a job starts in {{ crewship_runner_up_slice }}.

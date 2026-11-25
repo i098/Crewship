@@ -194,7 +194,7 @@ estimates() {  # -> "build dangling old" in bytes
 # CRIT steps, cheapest first: "label|docker arguments".
 STEPS=("build cache|builder prune -f"
        "dangling images|image prune -f"
-       "unused images created over ${AGE_H}h ago|image prune -af --filter until=${AGE_H}h")
+       "unused images created over ${AGE_H}h ago|image prune -af --filter until=${AGE_H}h --filter label!=runner-up.keep=1")
 
 if [ "$DRY" != 1 ]; then
   if [ -n "$DATA_DIR" ]; then

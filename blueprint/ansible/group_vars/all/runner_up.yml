@@ -95,6 +95,6 @@ crewship_runner_up_build_image: true
 crewship_runner_up_dind_repos: "{{ crewship_runner_up_repos | selectattr('docker', 'defined') | selectattr('docker', 'equalto', 'dind') | map(attribute='repo') | map('lower') | unique | list }}"
 crewship_runner_up_dind: "{{ crewship_runner_up_dind_repos | length > 0 }}"
 crewship_runner_up_image_timer: true
-crewship_runner_up_units: [runner-up@.service, runner-up-clean.service, runner-up-clean.timer,
+crewship_runner_up_units: [runner-up@.service, runner-up-image-boot.service, runner-up-clean.service, runner-up-clean.timer,
   runner-up-guard.service, runner-up-guard.timer]
 crewship_runner_up_image_units: [runner-up-image.service, runner-up-image.timer]

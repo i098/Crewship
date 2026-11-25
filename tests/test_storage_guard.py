@@ -54,11 +54,11 @@ case "$*" in
   "system df"*) echo "Images 10GB, reclaimable 5GB (50%)" ;;
   "builder prune -f") free builder ;;
   "image prune -f") free dangling ;;
-  "image prune -af --filter until=168h") free old ;;
+  "image prune -af --filter until=168h --filter label!=runner-up.keep=1") free old ;;
 esac
 """,
 }
-STEPS = ["builder prune -f", "image prune -f", "image prune -af --filter until=168h"]
+STEPS = ["builder prune -f", "image prune -f", "image prune -af --filter until=168h --filter label!=runner-up.keep=1"]
 
 
 class Guard:
