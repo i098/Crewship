@@ -147,7 +147,7 @@ remove. `tests/test_worktree_prune.py` runs it against real git repositories.
 It measures the filesystems that hold `/`, the home and Docker's data root, and RAM (`MemTotal` minus `MemAvailable`).
 When any reading exceeds `crewship_pressure_guard_pct` (default 70), it prunes only these targets:
 
-- All Docker build cache and all unused images except the runner-up job images (`docker builder prune -af`, `docker image rm` of each unused image that is not named by `RUNNER_UP_IMAGE` or `RUNNER_UP_DIND_IMAGE`).
+- All Docker build cache and all unused images except the runner-up job images (`docker builder prune -af`, `docker image rm` by ID of each unused image with no tag named by `RUNNER_UP_IMAGE` or `RUNNER_UP_DIND_IMAGE`).
 - `/tmp/pytest-of-*` dirs idle for 60 minutes, with no open file under them (`lsof +D`) and no `.git` inside.
 - The uv and bun caches (`uv cache prune`, `bun pm cache rm`), only while no `uv` or `bun` process runs.
 

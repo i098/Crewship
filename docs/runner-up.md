@@ -128,7 +128,7 @@ A pressure spike resets the two minutes.
 The disk rule keeps its own units: no unit the disk rule stopped starts while the disk is at `resume_pct` or above.
 Each guard run also starts a coordinator in the failed state when no pause holds it (the disk is below `pause_pct`, it is not in either record, and an `io_heavy` unit waits while the IO pressure is above 40%), so a crashed coordinator comes back within about 2 minutes without a person; a unit a person stopped by hand stays stopped.
 The job image `crewship-ci-runner:latest` is built from `blueprint/containers/ci-runner.Dockerfile`.
-The build gives each job image the label `runner-up.keep=1`; the hourly cleanup skips an image with that label. The guards' unused-image step removes unused images one by one and skips the images named by `RUNNER_UP_IMAGE` (default `crewship-ci-runner:latest`) and `RUNNER_UP_DIND_IMAGE` (default `crewship-ci-runner-dind:latest`), so an unlabelled or externally built image stays too.
+The build gives each job image the informational label `runner-up.keep=1`; nothing filters on it. The guards' unused-image step removes unused images by ID and skips an image when any of its tags is named by `RUNNER_UP_IMAGE` (default `crewship-ci-runner:latest`) and `RUNNER_UP_DIND_IMAGE` (default `crewship-ci-runner-dind:latest`), so an unlabelled or externally built image stays too.
 `runner-up-image-boot.service` runs at boot, before the coordinators, and builds a job image only when `docker image inspect` fails for it. The coordinator's start does the same check.
 `runner-up-image.timer` refreshes the base image every hour.
 A coordinator that serves Docker-in-Docker places also ensures the derived image and checks that the inner daemon answers.
