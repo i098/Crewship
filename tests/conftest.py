@@ -23,8 +23,11 @@ os.environ["PATH"] = f"{REFUSE.parent}{os.pathsep}{os.environ.get('PATH', '')}"
 for name in ("HERDR_BIN_PATH", "HERDR_SESSION", "HERDR_SOCKET_PATH"):
     os.environ.pop(name, None)
 
-# CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies every subprocess timeout (the 10 s and 30 s limits) on slow hosts.
-_SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))
+# CREWSHIP_TEST_TIMEOUT_SCALE (float) multiplies every subprocess timeout (the 10 s and 30 s limits), the wait_for limits
+# and the bridge's voice-call limit. Unset, it follows the load: a host whose run queue is longer than its CPU count starves
+# every bun and python child, so each limit stretches by that ratio (at most 8). An idle host or CI keeps 1.
+_SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE") or min(8.0, max(1.0, os.getloadavg()[0] / (os.cpu_count() or 1))))
+os.environ["CREWSHIP_TEST_TIMEOUT_SCALE"] = str(_SCALE)  # xdist workers and the tests' own limits read the same value
 if _SCALE != 1:
     _communicate, _wait = subprocess.Popen.communicate, subprocess.Popen.wait
 
