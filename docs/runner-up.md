@@ -80,6 +80,8 @@ runner-up starts a job with a plain `docker run`, which puts the container in `s
 The unit puts a `docker` shim first in `PATH` (`~/.local/share/runner-up/shim/docker`, from `blueprint/maintenance/runner-up-docker`).
 The shim adds `--cgroup-parent runnerup.slice` and `--pids-limit 8192` to `docker run` and `--cgroup-parent` to `docker build`, and uses `sudo -n docker` when the account is not in the `docker` group.
 Before `docker run --name X` it waits (up to `RUNNER_UP_NAME_WAIT`, 1800 s) while a container named `X` still exists, and runs `docker rm -f X` each poll: a slow `--rm` removal of the last job's container otherwise makes docker refuse the name, and the coordinator places the job again in a loop that ends in exit code 3 (`ExitUnstarted`).
+runner-up 0.1.12 has no wait of its own: when a container ends in under `RUNNER_UP_EARLY_SECS` (30 s) with a non-zero code, it places the job again at once (#1461).
+The shim runs the container as a child and counts these early ends for each container name in `$XDG_RUNTIME_DIR/runner-up-early/` (`RUNNER_UP_EARLY_DIR`). It holds the exit for 5 s, 10 s, 20 s and so on, up to `RUNNER_UP_EARLY_MAX` (300 s), and writes each hold, with the exit code and the last 5 stderr lines of the container, to the journal as `runner-up-docker`. A container that runs longer, exits 0, or has no early end for an hour clears the count.
 The coordinator's own processes run under `Nice=` and a low I/O priority in the user manager.
 
 Check the caps:

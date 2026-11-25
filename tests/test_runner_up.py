@@ -606,7 +606,9 @@ def stubs(tmp_path):
             '      *) echo "unknown flag: $a" >&2; exit 125;; esac\n'
             "  done\n"
             "fi\n"
-            'case "$*" in *"${DOCKER_FAILS:-@none@}"*) exit "${DOCKER_FAIL_CODE:-1}";; esac\n'
+            'case "$*" in *"${DOCKER_FAILS:-@none@}"*)\n'
+            '  [ -z "${DOCKER_STDERR-}" ] || echo "$DOCKER_STDERR" >&2\n'
+            '  exit "${DOCKER_FAIL_CODE:-1}";; esac\n'
             'if [ "$1" = info ]; then\n'
             '  case "$3" in *CgroupDriver*) printf "%s\\n" "${DOCKER_CGROUP_DRIVER:-}";;\n'
             f'    *) printf "%s\\n" "{runtime}";; esac\n'
@@ -685,6 +687,37 @@ def test_the_shim_waits_for_a_leftover_container_of_the_place_before_it_runs(stu
         "docker rm -f runner-up-p-1",
     ]
     assert calls[-1].startswith("docker run ")
+
+
+def test_the_shim_holds_back_a_container_that_keeps_ending_at_once_with_a_growing_wait(
+    stubs, tmp_path
+):
+    sock = tmp_path / "docker.sock"
+    sock.touch()
+    bin_dir, log = stubs
+    (bin_dir / "sleep").write_text(f'#!/bin/sh\necho "sleep $*" >> {log}\n')
+    (bin_dir / "sleep").chmod(0o755)
+    (bin_dir / "logger").write_text(f'#!/bin/sh\necho "logger $*" >> {log}\n')
+    (bin_dir / "logger").chmod(0o755)
+    env = {
+        "RUNNER_UP_DOCKER_SOCK": str(sock),
+        "RUNNER_UP_EARLY_BASE": "5",
+        "RUNNER_UP_EARLY_MAX": "15",
+    }
+    fail = {**env, "DOCKER_FAILS": "--pids-limit", "DOCKER_FAIL_CODE": "3", "DOCKER_STDERR": "boom"}
+    args = ("run", "--name", "runner-up-p-1", "img")
+    for _ in range(4):
+        run_script("runner-up-docker", stubs, *args, env=fail, code=3)
+    waits = [line for line in log.read_text().splitlines() if line.startswith("sleep")]
+    assert waits == ["sleep 5", "sleep 10", "sleep 15", "sleep 15"]
+    assert any(
+        "exit 3 after" in line and "last stderr: boom" in line
+        for line in log.read_text().splitlines()
+    )
+    run_script("runner-up-docker", stubs, *args, env=env)
+    log.write_text("")
+    run_script("runner-up-docker", stubs, *args, env=fail, code=3)
+    assert "sleep 5" in log.read_text().splitlines()
 
 
 @pytest.mark.parametrize(
