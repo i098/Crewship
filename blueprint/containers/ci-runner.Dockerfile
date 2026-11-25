@@ -21,7 +21,7 @@ RUN apt-get update -qq \
  && install -d -o runner -g runner /home/runner/.cargo /home/runner/.cache
 # sccache waits 10 s for its server by default, which a loaded host overruns. The default config
 # path is read for the runner user whatever SCCACHE_DIR a job sets.
-RUN install -d -o runner -g runner /home/runner/.config/sccache \
+RUN install -d -o runner -g runner /home/runner/.config /home/runner/.config/sccache \
  && printf 'server_startup_timeout_ms = 60000\n' > /home/runner/.config/sccache/config \
  && chown runner:runner /home/runner/.config/sccache/config
 # Jobs mount their own directory over /var/lib/postgresql (see CONTAINER_PREP), so the
