@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 STUBS = {
     "df": 'case "$*" in *pcent*) echo Use%; if [ -e "$STUB/pruned" ]; then echo "${DISK_AFTER:-$DISK_PCT}%"; else echo "${DISK_PCT}%"; fi ;; *) echo Mounted; echo / ;; esac',
-    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; image) touch "$STUB/pruned" ;; esac',
+    "docker": 'echo "$*" >> "$STUB/calls"; case "$1" in info) echo /var/lib/docker ;; build) cat > "$STUB/recipe" ;; image) case "$2" in ls) [ -z "$UNLABELLED" ] || echo abc123 ;; *) touch "$STUB/pruned" ;; esac ;; esac',
     "lsof": 'case "$3" in *busy*) echo 123; exit 1 ;; *) exit 1 ;; esac',
     "uv": 'echo "uv $*" >> "$STUB/calls"',
     "bun": 'echo "bun $*" >> "$STUB/calls"',
@@ -83,6 +83,13 @@ def test_either_resource_over_threshold_prunes_and_alerts(run, disk, ram):
     assert "uv cache prune" in calls and "bun pm cache rm" in calls
     assert "volume" not in calls
     assert "over 70%" in alerts
+
+
+def test_unlabelled_job_image_is_labelled_before_the_prune_keeps_it(run):
+    r, calls, _ = run(disk=95, UNLABELLED=1)
+    assert "build -q -t crewship-ci-runner:latest -" in calls
+    assert calls.index("build -q -t crewship-ci-runner:latest") < calls.index("image prune -af")
+    assert (run.tmp.parent / "stub" / "recipe").read_text() == "FROM crewship-ci-runner-dind:latest\nLABEL runner-up.keep=1\n"
 
 
 def test_scratch_removal_skips_busy_recent_and_git_dirs(run):

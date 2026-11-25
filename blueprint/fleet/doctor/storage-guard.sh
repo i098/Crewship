@@ -191,6 +191,14 @@ estimates() {  # -> "build dangling old" in bytes
     | map(floor) | "\(.[0]) \(.[1]) \(.[2])"'
 }
 
+pin_job_images() {  # the guards' prune keeps images with this label: label a job image that lacks it
+  local img
+  for img in "${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}" "${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest}"; do
+    [ -n "$(timeout 60 docker image ls -q --filter "reference=$img" --filter label!=runner-up.keep=1 2>/dev/null)" ] || continue
+    printf 'FROM %s\nLABEL runner-up.keep=1\n' "$img" | timeout 120 docker build -q -t "$img" - >/dev/null 2>&1 || :
+  done
+}
+
 # CRIT steps, cheapest first: "label|docker arguments".
 STEPS=("build cache|builder prune -f"
        "dangling images|image prune -f"
@@ -404,6 +412,7 @@ for m in "${mounts[@]}"; do
       done
     elif [ -n "${reclaim_eligible[$m]+x}" ] && [ "$pct" -ge "$CRIT" ]; then
       start_used=$used freed=()
+      pin_job_images
       for s in "${STEPS[@]}"; do
         [ "$pct" -ge "$CRIT" ] || break
         before=$used

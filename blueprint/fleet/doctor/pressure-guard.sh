@@ -68,10 +68,18 @@ step() {  # <label> <command...>
   if [ "$DRY" = 1 ]; then echo "would: $label ($*)"; done_steps+=("$label"); return 0; fi
   if timeout 600 "$@" >/dev/null 2>&1; then done_steps+=("$label"); else echo "pressure-guard: $label failed" >&2; fi
 }
+pin_job_images() {  # the guards' prune keeps images with this label: label a job image that lacks it
+  local img
+  for img in "${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}" "${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest}"; do
+    [ -n "$(timeout 60 "${DOCKER[@]}" image ls -q --filter "reference=$img" --filter label!=runner-up.keep=1 2>/dev/null)" ] || continue
+    printf 'FROM %s\nLABEL runner-up.keep=1\n' "$img" | timeout 120 "${DOCKER[@]}" build -q -t "$img" - >/dev/null 2>&1 || :
+  done
+}
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if have docker; then
   step "docker builder cache" "${DOCKER[@]}" builder prune -af
+  [ "$DRY" = 1 ] || pin_job_images
   step "unused images" "${DOCKER[@]}" image prune -af --filter 'label!=runner-up.keep=1'
 fi
 
