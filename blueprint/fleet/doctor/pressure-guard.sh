@@ -2,8 +2,9 @@
 # Prune regenerable data and alert when disk or RAM use exceeds PRESSURE_PCT (70).
 # Disk: the filesystems holding /, the home and Docker's data root. RAM: used =
 # MemTotal - MemAvailable. Above the threshold, only these safe targets go:
-#   all docker builder cache and all unused images except the runner-up job images
-#   (kept by name: RUNNER_UP_IMAGE, RUNNER_UP_DIND_IMAGE; builder prune -af, image rm);
+#   docker builder cache and unused images, both only when older than 24 hours (this guard
+#   runs every 5 minutes; an unaged prune once deleted fresh CI runner images), and never the runner-up
+#   job images (kept by name: RUNNER_UP_IMAGE, RUNNER_UP_DIND_IMAGE);
 #   finished /tmp/pytest-of-* dirs (idle for
 #   PRESSURE_SCRATCH_MIN_AGE_MIN minutes, nothing holding an open file under them,
 #   no .git inside); uv cache prune and bun pm cache rm while no uv or bun process runs.
@@ -87,8 +88,8 @@ export -f prune_unused_images
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if have docker; then
-  step "docker builder cache" "${DOCKER[@]}" builder prune -af
-  step "unused images" bash -c 'prune_unused_images "$@"' _ "${DOCKER[@]}"
+  step "docker builder cache" "${DOCKER[@]}" builder prune -af --filter until=24h
+  step "unused images" bash -c 'AGE_H=24 prune_unused_images "$@"' _ "${DOCKER[@]}"
 fi
 
 if have lsof; then

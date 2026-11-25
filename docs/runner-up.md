@@ -273,6 +273,16 @@ Limits: sccache caches only builds that run `rustc` through the wrapper, with th
 | `~/.local/share/runner-up/` | The docker shim and the image recipe. |
 | `~/.local/bin/runner-up-maintain` | The image build and the cleanup. |
 
+A hand install on the host (without the playbook) copies these repository files:
+
+| Source in the repository | Target on the host |
+| --- | --- |
+| `blueprint/fleet/doctor/pressure-guard.sh` | `{{ crewship_fleet_doctor_dir }}/pressure-guard.sh` (the path in `crewship-pressure-guard.service`) |
+| `blueprint/maintenance/runner-up-maintain` | `~/.local/bin/runner-up-maintain` |
+| `blueprint/ansible/templates/runner-up-image-boot.service.j2` (render it) | `~/.config/systemd/user/runner-up-image-boot.service` |
+
+Then run `systemctl --user daemon-reload` and `systemctl --user enable runner-up-image-boot.service`. Do not edit these files on the host: a host-only change is lost, or breaks, at the next install.
+
 ## See what runs
 
 ```bash
