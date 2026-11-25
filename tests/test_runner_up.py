@@ -920,10 +920,15 @@ def test_clean_uses_the_shorter_prune_timeout(stubs, override, expected):
     assert [call for call in calls if not call.startswith("docker ")] == [expected] * 4
 
 
-def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None):
-    """Run `guard` with a stub `df` that reports `used` percent and a `systemctl` that logs."""
+def guard(stubs, tmp_path, used, *, paused="", active=True, failed=False, env=None, free=9999, places=0):
+    """Run `guard` with a stub `df` that reports `used` percent and `free` GB, `places` running place containers, and a `systemctl` that logs."""
     bin_dir, log = stubs
-    (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use%"\necho " {used}%"\n')
+    (bin_dir / "df").write_text(f'#!/bin/sh\necho "Use% Avail"\necho " {used}% {free}G"\n')
+    if places:
+        (bin_dir / "docker").write_text(
+            f'#!/bin/sh\necho "docker $*" >> {log}\n[ "$1" != ps ] || yes x | head -n {places}\n'
+        )
+        (bin_dir / "docker").chmod(0o755)
     (bin_dir / "systemctl").write_text(
         f'#!/bin/sh\necho "systemctl $*" >> {log}\n[ "$2" = show ] && {{ for a; do :; done; echo "$a" | tr -dc 0-9; exit 0; }}\n'
         + (
@@ -949,7 +954,7 @@ def test_guard_prunes_stopped_place_containers_without_the_age_filter_and_never_
 ):
     guard(stubs, tmp_path, 10)
     calls = [c for c in stubs[1].read_text().splitlines() if c.startswith("docker")]
-    assert calls[0] == "docker container prune --force --filter label=runner-up.place"
+    assert calls[1] == "docker container prune --force --filter label=runner-up.place"
     assert not any(c.startswith("docker rm") or " stop " in c for c in calls)
 
 
@@ -957,14 +962,16 @@ def test_guard_pauses_even_when_the_prune_hangs(stubs, tmp_path):
     docker = stubs[0] / "docker"
     docker.write_text("#!/bin/sh\nsleep 30\n")
     started = time.monotonic()
-    calls, state = guard(stubs, tmp_path, 95, env={"RUNNER_UP_GUARD_PRUNE_TIMEOUT": "1"})
+    calls, state = guard(
+        stubs, tmp_path, 95, env={"RUNNER_UP_GUARD_PRUNE_TIMEOUT": "1", "RUNNER_UP_GUARD_PS_TIMEOUT": "1"}
+    )
     assert "systemctl --user stop runner-up@a-b.service" in calls
     assert state.read_text() == "a-b\nc-d\n"
     assert time.monotonic() - started < 10
 
 
-def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tmp_path):
-    calls, state = guard(stubs, tmp_path, 88)
+def test_guard_stops_the_coordinators_at_80_percent_and_remembers_them(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 80)
     assert calls == [
         "systemctl --user is-active runner-up@a-b.service",
         "systemctl --user stop runner-up@a-b.service",
@@ -974,21 +981,21 @@ def test_guard_stops_the_coordinators_at_88_percent_and_remembers_them(stubs, tm
     assert state.read_text() == "a-b\nc-d\n"
 
 
-def test_guard_does_not_stop_at_87_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
-    assert not any(" stop " in c for c in guard(stubs, tmp_path, 87)[0])
+def test_guard_does_not_stop_at_79_percent_or_remember_a_unit_that_was_not_running(stubs, tmp_path):
+    assert not any(" stop " in c for c in guard(stubs, tmp_path, 79)[0])
     calls, state = guard(stubs, tmp_path, 95, active=False)
     assert not any(" stop " in c for c in calls) and not state.exists()
 
 
-def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, tmp_path):
-    calls, state = guard(stubs, tmp_path, 84, paused="a-b\nc-d\n", active=False)
+def test_guard_starts_only_the_coordinators_it_stopped_below_75_percent(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 74, paused="a-b\nc-d\n", active=False)
     assert [c for c in calls if " start " in c] == [
         "systemctl --user --no-block start runner-up@a-b.service runner-up@c-d.service",
     ]
     assert state.read_text() == "a-b\nc-d\n"
     stubs[1].write_text("")
     calls, state = guard(
-        stubs, tmp_path, 84, active=False, env={"ACTIVE_UNITS": "runner-up@c-d.service"}
+        stubs, tmp_path, 74, active=False, env={"ACTIVE_UNITS": "runner-up@c-d.service"}
     )
     assert [c for c in calls if " start " in c] == [
         "systemctl --user --no-block start runner-up@a-b.service",
@@ -996,9 +1003,32 @@ def test_guard_starts_only_the_coordinators_it_stopped_below_85_percent(stubs, t
     assert state.read_text() == "a-b\n"
 
 
-def test_guard_keeps_the_pause_between_85_and_87_percent(stubs, tmp_path):
-    calls, state = guard(stubs, tmp_path, 86, paused="a-b\n")
+def test_guard_keeps_the_pause_between_75_and_79_percent(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 78, paused="a-b\n")
     assert not any(" start " in c or " stop " in c for c in calls) and state.exists()
+
+
+def test_guard_stops_below_the_pause_level_when_the_running_places_could_fill_the_free_space(
+    stubs, tmp_path
+):
+    # 4 running places x 30 GB = 120 GB: 119 GB free pauses at 50% used, 120 GB does not.
+    calls, state = guard(stubs, tmp_path, 50, free=119, places=4)
+    assert "systemctl --user stop runner-up@a-b.service" in calls
+    assert state.read_text() == "a-b\nc-d\n"
+    stubs[1].write_text("")
+    assert not any(" stop " in c for c in guard(stubs, tmp_path, 50, free=120, places=4)[0])
+    stubs[1].write_text("")
+    calls, _ = guard(stubs, tmp_path, 50, free=119, places=4, env={"RUNNER_UP_JOB_GB": "29"})
+    assert not any(" stop " in c for c in calls)
+
+
+def test_guard_resumes_only_with_room_for_one_more_job_beyond_the_running_places(stubs, tmp_path):
+    calls, state = guard(stubs, tmp_path, 50, paused="a-b\n", active=False, free=149, places=4)
+    assert not any(" start " in c for c in calls) and state.read_text() == "a-b\n"
+    calls, _ = guard(stubs, tmp_path, 50, paused="a-b\n", active=False, free=150, places=4)
+    assert [c for c in calls if " start " in c] == [
+        "systemctl --user --no-block start runner-up@a-b.service"
+    ]
 
 
 def io_guard(
@@ -1053,7 +1083,7 @@ def test_an_io_spike_resets_the_calm_window(stubs, tmp_path):
 
 
 def test_io_resume_leaves_disk_paused_units_to_the_disk_rule(stubs, tmp_path):
-    calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=86, disk_paused="a-b\n")
+    calls, left = io_guard(stubs, tmp_path, "1.00", now=5000, calm=0, used=78, disk_paused="a-b\n")
     assert calls == [] and left == ["runner-up@a-b.service", "runner-up@c-d.service"]
 
 
@@ -1119,7 +1149,7 @@ def test_guard_leaves_a_coordinator_stopped_by_hand_alone(stubs, tmp_path):
 
 def test_guard_leaves_a_coordinator_alone_while_a_pause_holds_it(stubs, tmp_path):
     assert heal(stubs, tmp_path, 95) == []
-    assert heal(stubs, tmp_path, 86, disk_paused="a-b\n") == [
+    assert heal(stubs, tmp_path, 78, disk_paused="a-b\n") == [
         "systemctl --user --no-block start runner-up@c-d.service"
     ]
     (tmp_path / "paused").unlink()
@@ -1217,8 +1247,8 @@ def test_io_pause_rejects_the_whole_request_before_stopping_a_coordinator(stubs,
 def test_the_guard_timer_is_enabled_and_sets_the_levels(home):
     apply(home, runner(home))
     service = unit_sections(units(home) / "runner-up-guard.service")["Service"]
-    assert "RUNNER_UP_PAUSE_PCT=88" in service["Environment"]
-    assert "RUNNER_UP_RESUME_PCT=85" in service["Environment"]
+    assert "RUNNER_UP_PAUSE_PCT=80" in service["Environment"]
+    assert "RUNNER_UP_RESUME_PCT=75" in service["Environment"]
     assert (units(home) / "timers.target.wants/runner-up-guard.timer").is_symlink()
 
 
