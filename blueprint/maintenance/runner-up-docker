@@ -158,7 +158,7 @@ run|check-dind-runtime)
       -v $d/cargo-lock:/home/runner/.cargo/.package-cache -v $d/cargo-lock-mutate:/home/runner/.cargo/.package-cache-mutate
       -v $d/bun:/home/runner/.cache/bun -v $d/npm:/home/runner/.cache/npm -v $d/pnpm-store:/home/runner/.cache/pnpm-store
       -v $d/sccache:/sccache -e RUSTC_WRAPPER=sccache -e SCCACHE_DIR=/sccache
-      -e SCCACHE_CACHE_SIZE=${RUNNER_UP_CACHE_MAX_GB:-150}G -e CARGO_INCREMENTAL=0
+      -e SCCACHE_CACHE_SIZE=${RUNNER_UP_CACHE_MAX_GB:-20}G -e CARGO_INCREMENTAL=0
       -e BUN_INSTALL_CACHE_DIR=/home/runner/.cache/bun -e npm_config_cache=/home/runner/.cache/npm
       -e npm_config_store_dir=/home/runner/.cache/pnpm-store"
   fi

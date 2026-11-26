@@ -30,7 +30,7 @@ crewship:
   #   resume_pct: 75            # data disk use below which jobs start again
   #   job_gb: 30                # GB a running job may still write; no new job starts when the free space is below job_gb for each running place
   #   io_heavy: []              # instance names (repo lowercased, other characters to '-') the guard pauses while the io pressure stays high
-  #   cache_max_gb: 150         # size cap of the shared compile cache
+  #   cache_max_gb: 20          # size cap of the shared compile cache
   #   data_dir: /mnt/data/ci    # state; default is ~/.local/state/runner-up
   #   machines: []              # other machines; see "Other machines"
 ```
@@ -262,7 +262,7 @@ Jobs on other [machines](#other-machines) and Docker-in-Docker jobs do not get i
 | `cargo-registry`, `cargo-git`, `cargo-lock`, `cargo-lock-mutate` | `~/.cargo/registry`, `~/.cargo/git`, `~/.cargo/.package-cache`, `~/.cargo/.package-cache-mutate` | One registry and git cache. The two lock files are mounted so cargo's lock holds across jobs. |
 | `bun`, `npm`, `pnpm-store` | `~/.cache/bun`, `~/.cache/npm`, `~/.cache/pnpm-store` | Package stores. |
 
-`cache_max_gb` (default `150`, set under `runner_up`) caps the compile cache; sccache evicts the least recently used entries. Each job server counts its own use, so the cap holds roughly, not exactly. The directory is not shared with a live target directory: a job builds in its own checkout, and the job container, with its `target/`, goes when the job ends.
+`cache_max_gb` (default `20`, set under `runner_up`) caps the compile cache; sccache evicts the least recently used entries. Each job server counts its own use, so the cap holds roughly, not exactly. The directory is not shared with a live target directory: a job builds in its own checkout, and the job container, with its `target/`, goes when the job ends.
 
 Limits: sccache caches only builds that run `rustc` through the wrapper, with the same compiler, flags and paths, so a first build on a new toolchain still compiles everything. `Swatinem/rust-cache` deletes the registry files that its own job does not use, and with a shared registry that can fail a job that runs at the same time; re-run that job. Every repository that runner-up serves can write the cache, so list only repositories whose code you trust. The account's own worktrees use their own cache: see [Data disk](configuration.md#data-disk).
 
