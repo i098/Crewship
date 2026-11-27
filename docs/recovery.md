@@ -24,6 +24,20 @@ Do not point two machines at the same live session, task registry, browser profi
   To change the floor, edit this repository's `blueprint/config/spawn-memory-floor-mb` and rerun `./ship.sh launch`.
   Every apply rewrites the Firstmate checkout's copy, so an edit made only there is reverted.
 
+### Decision dispatch stops
+
+When the decision queue reaches its attempt limit, it saves a supervisor inbox note for the open decision.
+The next queue tick retries a failed wake without spawning another worker.
+Existing `stuck` records do not generate new wakes.
+
+Read the current decision with `bin/fm-decision-queue.sh handoff <id>`.
+If the decision is no longer open, acknowledge the inbox note without sending a question.
+Read the current findings before you use `ask <id>` to send the cause, permitted options, and your recommendation.
+Use `await <id> --timeout 0` to read a reply to that question.
+Use `resolve <id>` only with an explicit, permitted instruction.
+A deferral or an unclear reply leaves the decision open.
+The handoff does not grant a waiver or change the validation checks.
+
 ## Desktop access
 
 The desktop is opt-in, loopback-only, and password-authenticated. After the first apply installs its packages and creates `~/.vnc`, configure the credential as the operator with `tigervncpasswd ~/.vnc/passwd`, set mode `0600`, and rerun apply. Missing or unsafe credentials stop provisioning before listeners are enabled. With the default `novnc_port: 6080`, forward the port from your client:

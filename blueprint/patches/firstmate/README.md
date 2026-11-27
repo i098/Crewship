@@ -12,10 +12,12 @@ To test the board, Herdr, and decision-queue patches against an upstream checkou
 FIRSTMATE_TEST_SOURCE=/path/to/firstmate uv run pytest tests/test_firstmate_patches.py -k 'crewboard or herdr or decision_queue'
 ```
 
-The tests clone that checkout into temporary directories, put the whole patch layer on the clone with `scripts/firstmate-patch-layer.sh`, and never change the checkout.
-They check patch application, real brief generation, the supervisor output renderer that session start calls, and the patch's own shell suite `tests/fm-board-bridge.test.sh` (it needs `jq` and `python3`).
-The decision-queue test applies 0006 alone and runs its shell suite `tests/fm-decision-queue.test.sh` (it needs `jq`).
-They compare board-off output byte for byte and bind a real Unix socket for board-on output.
+The tests clone the supplied checkout into temporary directories and leave the original checkout unchanged.
+The board tests check brief generation, the supervisor output, and the shell suite `tests/fm-board-bridge.test.sh`.
+They compare board-off output byte for byte and use a Unix socket for board-on output.
+The decision-queue tests apply 0006 alone and exercise the queue, supervisor wake, and reply through the bridge with a capture transport.
+An overlay that replaces the queue scripts must carry the handoff and reply behavior without changing its dispatch policy.
+Check this before deploying an overlay.
 Without `FIRSTMATE_TEST_SOURCE`, these integration tests skip rather than fetch upstream code during the test suite.
 The Herdr tests check that the complete patch layer stays unchanged on repeat apply.
 They also check that a missing pane under a running server is not relaunched, while a stopped server remains recoverable.

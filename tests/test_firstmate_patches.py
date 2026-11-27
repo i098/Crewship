@@ -515,8 +515,9 @@ def test_crewboard_event_source_suite_passes_on_the_patched_tree(crewboard_first
     assert result.stdout.count("ok - ") == 7
 
 
-def test_decision_queue_suite_passes_on_the_patched_tree(tmp_path):
-    """0006 alone on a clone of the supplied upstream; its own shell suite drives the queue and the hook."""
+@pytest.fixture
+def decision_queue_firstmate(tmp_path):
+    """Apply the decision queue to the supplied upstream Firstmate tree."""
     source = os.environ.get("FIRSTMATE_TEST_SOURCE")
     if not source:
         pytest.skip("Set FIRSTMATE_TEST_SOURCE to an upstream Firstmate source tree")
@@ -528,13 +529,144 @@ def test_decision_queue_suite_passes_on_the_patched_tree(tmp_path):
     patches.mkdir()
     shutil.copy(next((ROOT / "blueprint/patches/firstmate").glob("0006-*.patch")), patches)
     subprocess.run(["bash", SCRIPT, "apply", checkout, target, patches], check=True, capture_output=True)
+    return checkout
+
+
+def test_decision_queue_suite_passes_on_the_patched_tree(decision_queue_firstmate):
+    """Drive the patched queue and watcher hook in their own shell suite."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("FM_")}
     result = subprocess.run(
         ["bash", "tests/fm-decision-queue.test.sh"],
-        cwd=checkout, env=env, capture_output=True, text=True, timeout=300,
+        cwd=decision_queue_firstmate, env=env, capture_output=True, text=True, timeout=300,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.count("ok - ") == 10
+    assert result.stdout.count("ok - ") == 11
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+@pytest.mark.parametrize("fallback", [True, False], ids=["supervisor", "worker"])
+def test_decision_queue_reply_uses_the_captured_message(
+    decision_queue_firstmate, tmp_path, fallback,
+):
+    from test_imessage import SEND, fake_bridge, free_port, wait_for
+
+    bin_dir = decision_queue_firstmate / "bin"
+    home = tmp_path / "supervisor"
+    state = home / "state"
+    state.mkdir(parents=True)
+    (home / "config").mkdir()
+    (home / "config/backend").write_text("tmux\n")
+    (state / "worker.meta").write_text("kind=ship\nwindow=lab:fm-worker\n")
+    status = state / "worker.status"
+    status.write_text(
+        "blocked [at=1] [key=ci-other]: Another check needs a decision.\n"
+        "needs-decision [at=2] [key=ci]: A closing issue link is missing. corr=private\n"
+    )
+    # The doorbell is not needed for the worker to read its durable steering inbox.
+    bell = tmp_path / "tmux"
+    bell.write_text("#!/bin/sh\nexit 0\n")
+    bell.chmod(0o755)
+    port = str(free_port())
+    fake, routing, _, _, start, inbound, _, text = fake_bridge(
+        tmp_path / "capture",
+        env_overrides={
+            "FM_HOME": str(home),
+            "FM_INBOX_CMD": str(bin_dir / "fm-inbox.sh"),
+            "FM_IMESSAGE_PORT": port,
+        },
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FM_")}
+    env.update(
+        FM_HOME=str(home),
+        FM_DQ_ATTEMPTS="1",
+        FM_DQ_BRIEF=str(tmp_path / "brief"),
+        FM_DQ_SPAWN="/bin/false" if fallback else "/bin/true",
+        FM_DQ_IMESSAGE=str(SEND),
+        FM_IMESSAGE_PORT=port,
+        FM_DQ_REPLY_LOG=str(routing / "routing.jsonl"),
+        PATH=f"{tmp_path}:{env['PATH']}",
+    )
+    brief = tmp_path / "brief"
+    brief.write_text(
+        '#!/bin/sh\nmkdir -p "$FM_HOME/data/$1"\n'
+        'printf "%s\\n" "{TASK}" "{FIRSTMATE_SPEC}" > "$FM_HOME/data/$1/brief.md"\n'
+    )
+    brief.chmod(0o755)
+
+    def run(script, *args, check=True):
+        return subprocess.run(
+            [bin_dir / script, *args], env=env, text=True, capture_output=True,
+            check=check, timeout=15,
+        )
+
+    def dq(*args, check=True):
+        return run("fm-decision-queue.sh", *args, check=check)
+
+    origin = "worker+ci"
+    dq("enqueue", "worker", "ci", "needs-decision", "A closing issue link is missing. corr=private")
+    dq("dispatch")
+    wake = run("fm-wake-drain.sh", check=False)
+    inbox = run("fm-inbox.sh", "list").stdout
+    if fallback:
+        assert "Decision queue needs supervisor review" in wake.stdout
+        assert f"handoff {origin}" in inbox
+        assert "A closing issue link is missing." in dq("handoff", origin).stdout
+    else:
+        assert dq("list", "dispatched").stdout.strip() == origin
+        assert "Decision queue needs supervisor review" not in wake.stdout
+        assert f"handoff {origin}" not in inbox
+
+    bridge = start(1)
+    try:
+        inbound("seed", wait_note=False, text="Ready for a question.")
+        question = (
+            "CI requires a closing issue link. Keep the original issue open. "
+            "1) Link the approved child issue and rerun CI. 2) Keep CI paused. I recommend 1."
+        )
+        dq("ask", origin, question)
+        wait_for(lambda: question in text(fake / "sent"), "the question in the capture transport")
+        sent = text(fake / "sent").removeprefix("send ").strip()
+        assert "corr=private" not in sent
+        assert sent.startswith("Decision ")
+        assert question in sent
+        target = next(fake.glob("last-*")).read_text()
+        inbound("unrelated", wait_note=False, text="Approve an unrelated change.")
+        assert dq("await", origin, "--timeout", "0", check=False).returncode == 3
+
+        def reply(mid, answer):
+            inbound(mid, wait_note=False, content={
+                "type": "reply", "content": {"type": "text", "text": answer},
+                "target": {"id": target, "content": {"type": "text", "text": sent}},
+            })
+            assert dq("await", origin, "--timeout", "0").stdout.strip() == answer
+
+        reply("defer", "2. Keep CI paused.")
+        assert "resolved" not in status.read_text()
+        assert dq("list", "stuck" if fallback else "dispatched").stdout.strip() == origin
+        answer = "1. Link the approved child issue and rerun CI."
+        reply("choose", answer)
+        if fallback:
+            dq("resolve", origin, answer)
+        else:
+            run("fm-send.sh", "worker", "--resolve-key", "ci", f"Owner instruction: {answer}")
+            dq("close", origin, "answered")
+        assert f"Owner instruction: {answer}" in (state / "worker.inbox/001.msg").read_text()
+        resolutions = [line for line in status.read_text().splitlines() if line.startswith("resolved ")]
+        assert len(resolutions) == 1
+        assert "[key=ci]" in resolutions[0]
+        assert dq("list", "closed").stdout.strip() == origin
+        assert dq("resolve", origin, answer, check=False).returncode != 0
+        assert not (state / "worker.inbox/002.msg").exists()
+        if fallback:
+            print(next(line for line in wake.stdout.splitlines() if "Decision queue needs supervisor review" in line))
+        else:
+            print("The spawn stub succeeded. The queue did not wake the supervisor.")
+        print(f"Captured question: {sent}")
+        print("Captured deferral: 2. Keep CI paused. The decision stayed open.")
+        print(f"Captured answer: {answer} The worker inbox received it. Only ci closed.")
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 def test_webhook_events_suite_passes_on_the_patched_tree(tmp_path):
