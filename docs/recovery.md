@@ -33,6 +33,8 @@ Existing `stuck` records do not generate new wakes.
 Read the current decision with `bin/fm-decision-queue.sh handoff <id>`.
 If the decision is no longer open, acknowledge the inbox note without sending a question.
 Read the current findings before you use `ask <id>` to send the cause, permitted options, and your recommendation.
+Keep lines short. Separate the reason and each numbered option with a blank line.
+The bridge sends each paragraph as a separate bubble. Reply to the last bubble.
 Use `await <id> --timeout 0` to read a reply to that question.
 Use `resolve <id>` only with an explicit, permitted instruction.
 A deferral or an unclear reply leaves the decision open.

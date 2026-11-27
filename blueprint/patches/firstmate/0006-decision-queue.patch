@@ -15,17 +15,17 @@ After the final failed attempt, the queue hands the exact open decision to
 the supervisor through the durable inbox. It does not text the raw record.
 ---
  bin/fm-decision-queue-lib.sh    | 157 ++++++++++++++++++++++
- bin/fm-decision-queue.sh        | 258 ++++++++++++++++++++++++++++++++++++
+ bin/fm-decision-queue.sh        | 262 ++++++++++++++++++++++++++++++++++++
  bin/fm-watch.sh                 |  10 +-
- tests/fm-decision-queue.test.sh | 271 ++++++++++++++++++++++++++++++++++++++
- 4 files changed, 695 insertions(+), 1 deletion(-)
+ tests/fm-decision-queue.test.sh | 272 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 700 insertions(+), 1 deletion(-)
  create mode 100755 bin/fm-decision-queue-lib.sh
  create mode 100755 bin/fm-decision-queue.sh
  create mode 100755 tests/fm-decision-queue.test.sh
 
 diff --git a/bin/fm-decision-queue-lib.sh b/bin/fm-decision-queue-lib.sh
 new file mode 100755
-index 00000000..15706741
+index 00000000..0108607d
 --- /dev/null
 +++ b/bin/fm-decision-queue-lib.sh
 @@ -0,0 +1,157 @@
@@ -121,7 +121,7 @@ index 00000000..15706741
 +    if FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$FM_ROOT/bin/fm-inbox.sh" note \
 +      --request-id "decision-queue:$request" -- "Decision queue needs supervisor review.
 +Run bin/fm-decision-queue.sh handoff $id. If it is closed or stale, acknowledge this inbox note without sending anything.
-+Read the current findings and check who can decide. Use ask with the same record to send plain prose with the cause, permitted options, and a recommendation.
++Read the current findings and check who can decide. Use ask with the same record to send plain prose with the cause, permitted options, and a recommendation. Keep lines short. Separate the reason and each numbered option with a blank line.
 +Do not send raw status text or identifiers. Use await to read the matching reply. Do not send the question again if it is already queued.
 +Use resolve only for an explicit, permitted instruction for this decision. Leave the decision open on a deferral or an unclear reply. Do not waive validation." >/dev/null; then
 +      dq_set "$id" state stuck
@@ -188,10 +188,10 @@ index 00000000..15706741
 +}
 diff --git a/bin/fm-decision-queue.sh b/bin/fm-decision-queue.sh
 new file mode 100755
-index 00000000..1e0d08ac
+index 00000000..38189043
 --- /dev/null
 +++ b/bin/fm-decision-queue.sh
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,262 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue.sh - keep needs-decision and blocked lines out of chat.
 +#
@@ -293,7 +293,7 @@ index 00000000..1e0d08ac
 +  local cid=$1 id=$2 intent spec
 +  intent="A second mate or crewmate (origin $(dq_get "$id" origin)) opened a decision that is still unanswered, key $(dq_get "$id" key). The owner has to answer it. It must not sit in the main chat."
 +  spec="Handle this one decision. Task record id: $id. Held line: $(dq_get "$id" verb): $(dq_get "$id" note)
-+1. Read state/$(dq_get "$id" origin).status and data/$(dq_get "$id" origin)/ for context. Write a short question with the cause, permitted options, and your recommendation. Do not send raw status text.
++1. Read state/$(dq_get "$id" origin).status and data/$(dq_get "$id" origin)/ for context. Write a short question with the cause, permitted options, and your recommendation. Keep lines short. Separate the reason and each numbered option with a blank line. Do not send raw status text.
 +2. Send it: $SCRIPT_DIR/fm-decision-queue.sh ask $id '<question, options, recommendation>'. The text carries a reply code. Never write a phone number anywhere.
 +3. Wait: $SCRIPT_DIR/fm-decision-queue.sh await $id. Exit 3 means no reply: ask once more, then append paused to your status file and stop.
 +4. Relay: $SCRIPT_DIR/fm-send.sh $(dq_get "$id" origin) --resolve-key $(dq_get "$id" key) '<the owner answer, verbatim>'. Leave the decision open on a deferral or unclear reply. Do not waive validation.
@@ -374,7 +374,11 @@ index 00000000..1e0d08ac
 +  code=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 +  [ "${#code}" = 16 ] || die "could not generate a reply code"
 +  sent=$(dq_now)
-+  dq_say "Decision $code: $* Reply to this message, or start your reply with Decision $code:" || die "text not sent"
++  dq_say "Decision $code:
++$*
++
++Decision $code:
++Reply to this bubble, or start a new text with the line above." || die "text not sent"
 +  dq_set "$id" question "$sent $code"
 +}
 +
@@ -487,10 +491,10 @@ index 98869602520a..206be626a115 100755
  $pending
 diff --git a/tests/fm-decision-queue.test.sh b/tests/fm-decision-queue.test.sh
 new file mode 100755
-index 00000000..014f8a4e
+index 00000000..e701f6f8
 --- /dev/null
 +++ b/tests/fm-decision-queue.test.sh
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,272 @@
 +#!/usr/bin/env bash
 +# Behavior tests for bin/fm-decision-queue.sh and its watcher hook.
 +# Cases drive the real script against a scratch home with stub spawn, brief, and text senders.
@@ -612,7 +616,8 @@ index 00000000..014f8a4e
 +  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
 +  dq "$h" enqueue w k1 needs-decision q >/dev/null
 +  dq "$h" ask w+k1 'Ship A or B? I recommend A.'
-+  prefix=$(cut -d: -f1 "$h/texts.log"):
++  IFS=: read -r prefix _ < "$h/texts.log"
++  prefix=$prefix:
 +  assert_contains "$prefix" "Decision " "the question carries a visible reply code"
 +  now=$(($(date +%s) * 1000))
 +  printf '%s\n' \

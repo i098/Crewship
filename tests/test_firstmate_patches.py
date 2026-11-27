@@ -619,16 +619,24 @@ def test_decision_queue_reply_uses_the_captured_message(
     bridge = start(1)
     try:
         inbound("seed", wait_note=False, text="Ready for a question.")
-        question = (
-            "CI requires a closing issue link. Keep the original issue open. "
-            "1) Link the approved child issue and rerun CI. 2) Keep CI paused. I recommend 1."
-        )
-        dq("ask", origin, question)
-        wait_for(lambda: question in text(fake / "sent"), "the question in the capture transport")
-        sent = text(fake / "sent").removeprefix("send ").strip()
-        assert "corr=private" not in sent
-        assert sent.startswith("Decision ")
-        assert question in sent
+        paragraphs = [
+            "CI needs a closing issue link.\nKeep the original issue open.",
+            "1. Link the approved child issue.\nRerun CI.",
+            "2. Keep CI paused.",
+            "I recommend option 1.",
+        ]
+        reply_prompt = "Reply to this bubble, or start a new text with the line above."
+        dq("ask", origin, "\n\n".join(paragraphs))
+        wait_for(lambda: reply_prompt in text(fake / "sent"), "the reply bubble in the capture transport")
+        bubbles = [
+            json.loads(line)["line"].removeprefix("send ")
+            for line in text(fake / "delivery-events").splitlines()
+        ]
+        header, _, reason = bubbles[0].partition("\n")
+        assert header.startswith("Decision ")
+        assert [reason, *bubbles[1:-1]] == paragraphs
+        assert bubbles[-1] == f"{header}\n{reply_prompt}"
+        assert "corr=private" not in "\n".join(bubbles)
         target = next(fake.glob("last-*")).read_text()
         inbound("unrelated", wait_note=False, text="Approve an unrelated change.")
         assert dq("await", origin, "--timeout", "0", check=False).returncode == 3
@@ -636,7 +644,7 @@ def test_decision_queue_reply_uses_the_captured_message(
         def reply(mid, answer):
             inbound(mid, wait_note=False, content={
                 "type": "reply", "content": {"type": "text", "text": answer},
-                "target": {"id": target, "content": {"type": "text", "text": sent}},
+                "target": {"id": target, "content": {"type": "text", "text": bubbles[-1]}},
             })
             assert dq("await", origin, "--timeout", "0").stdout.strip() == answer
 
@@ -661,7 +669,7 @@ def test_decision_queue_reply_uses_the_captured_message(
             print(next(line for line in wake.stdout.splitlines() if "Decision queue needs supervisor review" in line))
         else:
             print("The spawn stub succeeded. The queue did not wake the supervisor.")
-        print(f"Captured question: {sent}")
+        print("Captured question bubbles:\n" + "\n\n".join(bubbles))
         print("Captured deferral: 2. Keep CI paused. The decision stayed open.")
         print(f"Captured answer: {answer} The worker inbox received it. Only ci closed.")
     finally:
