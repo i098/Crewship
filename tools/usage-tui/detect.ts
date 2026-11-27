@@ -5,8 +5,9 @@
 import { Database } from "bun:sqlite"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
+import { onSite, RESELLERS, type ResellerConfig } from "./resellers.ts"
 
-export type QuotaSource = "omp-usage" | "zai" | "mercury-tokens" | "deepseek" | "rtk-gain" | "none"
+export type QuotaSource = "omp-usage" | "zai" | "mercury-tokens" | "rtk-gain" | "none" | (string & {}) // a string is a ResellerConfig.id
 export type DetectedProvider = { id: string; label: string; accounts: number; source: QuotaSource; found: string[] }
 export type ProviderList = { version: 1; providers: DetectedProvider[] }
 
@@ -48,11 +49,11 @@ function ompAccounts(e: Env): Record<string, number> {
   }
 }
 
-// The reseller quota reads the fleet cookie jar, so only a deepseekv4pro.com session there counts. Values are never read out.
-function resellerSession(e: Env): boolean {
+// A reseller quota reads the fleet cookie jar, so only a session for the reseller's site there counts. Values are never read out.
+function resellerSession(e: Env, cfg: ResellerConfig): boolean {
   try {
     const jar = JSON.parse(readFileSync(`${e.home}/.fleet-browser/cookies.json`, "utf8")) as Record<string, { domain?: unknown } | null>
-    return Object.values(jar).some(c => /^\.?([a-z0-9-]+\.)*deepseekv4pro\.com$/.test(String(c?.domain ?? "")))
+    return Object.values(jar).some(c => onSite(cfg, c?.domain))
   } catch {
     return false
   }
@@ -84,7 +85,7 @@ export function detect(e: Env, probeRtk = true): ProviderList {
   // The GLM quota call reads its key from the zai-glm provider in models.yml; only the block's presence counts here.
   const models = `${e.home}/.omp/agent/models.yml`
   if (existsSync(models) && /^\s*zai-glm:/m.test(readFileSync(models, "utf8"))) add("zai", 1, "models.yml", "zai")
-  if (resellerSession(e)) add("deepseek", 1, "fleet-cookies", "deepseek")
+  for (const r of RESELLERS) if (resellerSession(e, r)) add(r.providerId, 1, "fleet-cookies", r.id)
   if (probeRtk && rtkWorks(e)) add("rtk", 1, "rtk-cli", "rtk-gain")
   const providers = [...found.values()].sort((a, b) => a.id.localeCompare(b.id))
   return { version: 1, providers }

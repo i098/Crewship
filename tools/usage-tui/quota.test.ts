@@ -3,7 +3,12 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, s
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { theme } from "../tui-theme/theme.ts"
-import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, deepseekRows, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe, parseZai, readGithub, readQuotaMe, quotaText, relReset, rtkRows, saveSnapshot, type QuotaInput } from "./quota.ts"
+import { ACCOUNT_W, AuthExpired, fitName, buildRows, cells, clockAt, leftColor, leftOf, mercuryRows, parseOmp, parseQuotaMe as parseWith, parseZai, readGithub, readQuotaMe, quotaText, relReset, resellerRows, rtkRows, saveSnapshot, type QuotaInput, type ResellerUsage } from "./quota.ts"
+import { RESELLERS, type ResellerConfig } from "./resellers.ts"
+
+const DS = RESELLERS[0]
+const deepseekRows = (j: ResellerUsage) => resellerRows(DS, j)
+const parseQuotaMe = (p: unknown) => parseWith(DS, p)
 
 const NOW = Date.UTC(2026, 0, 10, 12, 0, 0)
 const MIN = 60_000
@@ -24,7 +29,7 @@ const FIXTURE: QuotaInput = {
   },
   zai: { data: { limits: [{ unit: 3, number: 5, usage: 1000, remaining: 250, nextResetTime: NOW + 60 * MIN }, { unit: 6, number: 1, usage: 8000, remaining: 8000, nextResetTime: NOW + 6 * 1440 * MIN }] } },
   mercury: { keyIds: [9, 4], tokens: { 4: 25_000_000, 9: 150_000_000 } },
-  deepseek: { rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: (NOW + 90 * MIN) / 1000 }] },
+  resellers: { deepseek: { value: { rows: [{ plan: "Basic", window: "5h", used: 25, limit: 100, resets_at: (NOW + 90 * MIN) / 1000 }] } } },
 }
 
 test("leftOf computes percent left and clamps overuse", () => {
@@ -126,15 +131,47 @@ test("readQuotaMe renews the login once on auth and reports failures without thr
   let refreshed = 0
   const refresh = async () => { refreshed++ }
   const expired = async () => { if (calls++ === 0) throw new AuthExpired("auth"); return QUOTA_ME }
-  expect((await readQuotaMe(expired, refresh)).value?.rows?.length).toBe(6)
+  expect((await readQuotaMe(DS, expired, refresh)).value?.rows?.length).toBe(6)
   expect(refreshed).toBe(1)
-  expect(await readQuotaMe(async () => { throw new AuthExpired("auth") }, async () => { throw new Error("signed out") })).toEqual({ error: "signed out" })
-  expect(await readQuotaMe(async () => { throw new Error("rate-limited") }, refresh)).toEqual({ error: "rate-limited" })
+  expect(await readQuotaMe(DS, async () => { throw new AuthExpired("auth") }, async () => { throw new Error("signed out") })).toEqual({ error: "signed out" })
+  expect(await readQuotaMe(DS, async () => { throw new Error("rate-limited") }, refresh)).toEqual({ error: "rate-limited" })
 })
 
 test("buildRows has one reseller row, n/a with the reason when the quota call fails", () => {
   expect(buildRows({}).filter(r => r.account.startsWith("deepseek")).map(r => [r.account, r.note])).toEqual([["deepseek (reseller)", "n/a"]])
-  expect(buildRows({ deepseekError: "signed out" }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: signed out")
+  expect(buildRows({ resellers: { deepseek: { error: "signed out" } } }).find(r => r.account === "deepseek (reseller)")?.note).toBe("n/a: signed out")
+})
+
+// A second reseller with other window keys, field names and plan words, as sanitized data: the same code reads it.
+const ACME: ResellerConfig = {
+  id: "acme", providerId: "acme", label: "acme", account: "acme (reseller)", noPlansAccount: "acme plans", planWords: ["acme", "plan"],
+  site: "acme.example", operation: "plans", clerk: { host: "auth.acme.example", apiVersion: "1" },
+  windows: [["hourly", "1h"], ["monthly", "30d"]],
+  fields: { plan: "name", planStatus: "state", planStatusOk: "ok", quota: "limits", quotaStatus: "phase", quotaStatusOk: "live", used: "spent", limit: "cap", resetAt: "renews" },
+}
+const ACME_ANSWER = [
+  { name: "Acme Plan Pro", state: "ok", limits: { phase: "live", hourly: { spent: 5, cap: 20, renews: "2026-01-10T13:00:00Z" }, monthly: { spent: 50, cap: 100 } } },
+  { name: "Trial", state: "frozen", limits: { hourly: { spent: 0, cap: 10 } } },
+]
+
+test("a second reseller needs only a config entry: parse, rows and buildRows follow it", () => {
+  const parsed = parseWith(ACME, ACME_ANSWER)
+  expect(resellerRows(ACME, parsed).map(r => [r.account, r.window, r.leftPct, r.resetsAt, r.note])).toEqual([
+    ["acme pro", "1h", 75, Date.UTC(2026, 0, 10, 13, 0), undefined],
+    ["acme pro", "30d", 50, null, undefined],
+    ["acme trial", "1h", 100, null, "frozen"],
+    ["acme trial", "30d", null, null, "frozen"],
+  ])
+  expect(resellerRows(ACME, parseWith(ACME, []))).toMatchObject([{ account: "acme plans", note: "no plans" }])
+  RESELLERS.push(ACME)
+  try {
+    const providers = [{ id: "acme", label: "acme", accounts: 1, source: "acme", found: ["fleet-cookies"] }]
+    expect(buildRows({ providers, resellers: { acme: { value: parsed } } }).map(r => r.account)).toEqual(["acme pro", "acme pro", "acme trial", "acme trial"])
+    expect(buildRows({ providers, resellers: { acme: { error: "auth expired" } } })[0]).toMatchObject({ account: "acme (reseller)", note: "n/a: auth expired" })
+    expect(buildRows({ providers: [] })).toEqual([])
+  } finally {
+    RESELLERS.pop()
+  }
 })
 
 test("buildRows shows an error row when Mercury fails to load", () => {
