@@ -178,25 +178,38 @@ A new host gets its own key; never copy `~/.ssh/id_ed25519_mac` from the old hos
 
 ### Reach a Mac without SSH (Rex)
 
-Use this recipe when the Mac has no SSH and no Aside Pro Remote Control. The host then runs commands on the signed-in Aside CLI of the Mac.
+Use Rex to run the Mac's local Aside CLI without SSH or Aside Pro Remote Control.
+Install Rex on both machines and sign in to Aside on the Mac as the macOS user that runs Rex.
+Use a tailnet with [MagicDNS and HTTPS enabled](https://tailscale.com/docs/how-to/set-up-https-certificates).
+Tailscale publishes certificate names in a public log, so choose a device name that contains no private details.
 
-1. On the host, run `tailscale up` to join the tailnet of the Mac.
-2. On the Mac, turn on the built-in Tailscale support of Rex: `rex server tailscale on --hostname <mac-device>`. By default only the owner's own account can connect. Do not pass `--allow-tailnet-members`.
-3. On the host, add the Mac:
+1. On the host, run `tailscale up` to join the tailnet.
+2. On the Mac, start Rex with `rex server start`.
+   Enable its built-in Tailscale service with `rex server tailscale on --hostname '<mac-device>'`.
+   Replace `<mac-device>` with the device name you chose.
+   On first use, get the sign-in URL from `rex server status`.
+   Sign in with the same Tailscale account as on the host.
+   Only the Rex node's owner can connect by default. Do not pass `--allow-tailnet-members`.
+   This setting does not persist after a Rex server restart.
+3. On the host, replace the placeholders with the Rex node's DNS name and add it:
 
    ```bash
-   rex hosts add mac https://<mac-device>.<tailnet>.ts.net
+   rex hosts add mac 'https://<mac-device>.<tailnet>.ts.net'
    ```
 
-4. In a Rex session on `mac`, run commands with `send`, `send-key` and `capture`:
+4. On the host, create a new Rex session on `mac`.
+   Run a read-only Aside command and capture its output:
 
    ```bash
-   rex -S mac send -s <session> 'aside --help'
-   rex -S mac send-key -s <session> Enter
-   rex -S mac capture -s <session>
+   rex -S mac new aside-check
+   rex -S mac send -s aside-check 'aside --help'
+   rex -S mac send-key -s aside-check enter
+   rex -S mac capture -s aside-check
    ```
 
-Note: the output of `rex run --wait` vanishes with its block. Use `capture` to keep the output.
+Run `capture` again if the command has not finished.
+`rex run --wait` reports the exit status, but the terminal output goes away when its block closes.
+Use `capture` in the open session to read the output.
 
 ### From a Mac to the host
 
