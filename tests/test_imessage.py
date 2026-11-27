@@ -2289,7 +2289,7 @@ def require_bridge():
     pytest.skip(reason)
 
 
-def fake_bridge(tmp_path, test_mode=True, probe=False):
+def fake_bridge(tmp_path, test_mode=True, probe=False, *, env_overrides=None):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
     timer overrides and uses the production burst timing."""
@@ -2346,6 +2346,7 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         "FM_IMESSAGE_TEST_MAX_WAIT_MS": os.environ.get("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 6)),
         "FM_IMESSAGE_TEST_VOICE_MS": os.environ.get("FM_IMESSAGE_TEST_VOICE_MS", str(round(5000 * TIMEOUT_SCALE))),
         **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
+        **(env_overrides or {}),
     }
     if probe:
         env.pop("BUN_OPTIONS", None)  # the probe is shared by every test: a test's preload must not decide it
