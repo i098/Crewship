@@ -43,5 +43,7 @@ export const RESELLERS: ResellerConfig[] = [
 ]
 
 // True for the site's own domain and its subdomains, as a cookie `domain` value.
-export const onSite = (cfg: ResellerConfig, domain: unknown) =>
-  new RegExp(`^\\.?([a-z0-9-]+\\.)*${cfg.site.replace(/\./g, "\\.")}$`).test(String(domain ?? ""))
+export const onSite = (cfg: ResellerConfig, domain: unknown) => {
+  const d = String(domain ?? "").replace(/^\./, "")
+  return d === cfg.site || d.endsWith(`.${cfg.site}`)
+}
