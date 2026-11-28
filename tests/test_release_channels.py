@@ -165,38 +165,34 @@ def test_bootstrap_runs_only_the_selected_checked_installer(tmp_path, tag, legac
         assert all("-rc." not in url for url in urls)
 
 
-@pytest.mark.parametrize(
-    ("event_name", "event", "expected"),
-    [
-        ("push", {"ref": "refs/heads/main"}, True),
-        ("workflow_dispatch", {}, True),
-        ("release", {"action": "published", "release": {"prerelease": False}}, True),
-        ("release", {"action": "published", "release": {"prerelease": True}}, False),
-    ],
-)
-def test_website_deploy_event_selection(event_name, event, expected):
+def test_website_deploy_event_selection():
     workflow = yaml.safe_load((ROOT / ".github/workflows/harbor.yml").read_text())
     events = workflow.get("on", workflow.get(True))
-    if event_name == "push":
-        assert "main" in events["push"]["branches"]
-    elif event_name == "release":
-        assert event["action"] in events["release"]["types"]
-    else:
-        assert event_name in events
+    assert "main" in events["push"]["branches"]
+    assert "workflow_dispatch" in events
+    assert "published" in events["release"]["types"]
+    cases = [
+        ({"event_name": "push", "event": {"ref": "refs/heads/main"}}, True),
+        ({"event_name": "workflow_dispatch", "event": {}}, True),
+        ({"event_name": "release", "event": {"action": "published", "release": {"prerelease": False}}}, True),
+        ({"event_name": "release", "event": {"action": "published", "release": {"prerelease": True}}}, False),
+    ]
     condition = workflow["jobs"]["deploy"].get("if", "true")
     condition = condition.removeprefix("${{").removesuffix("}}").strip()
     result = subprocess.run(
         [
             "node",
             "-e",
-            "const github = JSON.parse(process.argv[2]);"
-            "console.log(Boolean(new Function('github', `return (${process.argv[1]})`)(github)));",
+            "const deploy = new Function('github', `return (${process.argv[1]})`);"
+            "const events = JSON.parse(process.argv[2]);"
+            "console.log(JSON.stringify(events.map(github => Boolean(deploy(github)))));",
             condition,
-            json.dumps({"event_name": event_name, "event": event}),
+            json.dumps([github for github, _ in cases]),
         ],
         capture_output=True,
         text=True,
         check=True,
-        timeout=10,
+        timeout=30,
     )
-    assert json.loads(result.stdout) is expected
+    for (github, expected), actual in zip(cases, json.loads(result.stdout), strict=True):
+        assert actual is expected, github
