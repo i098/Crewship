@@ -11,7 +11,7 @@ These defaults are what the project owner personally runs. Change any of them in
 - **Opt-in profiles:** `development`, `sgrep`, `docker`, `tailscale`, `desktop`, `fleet_guards`, `project_databases`, `jj`, `fdu`, `vphone`, `fleet_browsers`, `chat`, `gateway`, `forgejo`
 - **New hosts:** `./ship.sh dock` writes the core only: `agents` and `firstmate`. Pick more with the checklist `bunx crewship` shows, or `--with NAMES` ([Configuration](configuration.md)). A host config made before this keeps its own values.
 - **Firstmate backend:** see [Firstmate backend](configuration.md#firstmate-backend) for the default, alternatives, and existing-checkout behavior.
-- **Opt-in settings:** `data_dir`, `usage`, `token_suggestions`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `ci_pool`, `runner_up`, `cloudflare_runner`, `signal`
+- **Opt-in settings:** `data_dir`, `usage`, `token_suggestions`, `firstmate.checklist`, `mac_ssh`, `imessage`, `github_board`, `board`, `board.github_sink`, `runner_up`, `cloudflare_runner`, `signal`
 - **Full lists:** [`blueprint/config/default.yml`](../blueprint/config/default.yml), [`blueprint/config/omp.yml`](../blueprint/config/omp.yml), and the [wiki](https://github.com/i098/Crewship/wiki).
 
 ## Optimizations in the default
@@ -29,5 +29,4 @@ Each line names the real setting. Details are in the linked pages.
 - **Idle browsers:** `browser_prune` stops idle AXI browsers after 7200 s (checked every 300 s), and `browsers.idle_timeout_min` is 30.
 - **Docker:** `docker.init: true`, `docker.live_restore: true`, and `fleet.docker_guard.stopped_hours: 24` ([Fleet guards](fleet-guards.md)).
 - **Disk:** the storage guard warns at 85% and prunes at 92% ([Capacity](capacity.md)). Package caches go to `<data_dir>/cache/<tool>` when `data_dir` is set ([Configuration](configuration.md#data-disk)).
-- **CI pool:** `job_memory_gb: 8` caps each job, and `nice` can lower CI CPU priority; its default is `0` ([CI pool](ci-pool.md#cpu-priority)).
 - **Terminal UI:** `tui.tight`, `tui.vimMode`, a borderless composer with `composer.tokenRate`, and a transparent powerline status line ([omp](omp.md#other-seeded-preferences)).

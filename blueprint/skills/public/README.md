@@ -21,6 +21,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`code-clarity`](code-clarity/SKILL.md): write, review and simplify code by its naming, flow, state and abstractions (MIT, credited in [CREDITS.md](../../../CREDITS.md)).
 - [`code-navigation`](code-navigation/SKILL.md): use CodeGraph and tokensave before grep or reading files.
 - [`credentials`](credentials/SKILL.md): search every secrets file before you call a key absent, pass a process one variable and never the whole file, verify the process environment.
+- [`downloads`](downloads/SKILL.md): resume file downloads with aria2c and save video or audio with yt-dlp.
 - [`engineering-standards`](engineering-standards/SKILL.md): weigh quality over cost, reproduce bugs end to end, fix lint, test and UI faults you see.
 - [`eta-timeline`](eta-timeline/SKILL.md): answer an ETA question with a dark timeline PNG (operator's local time, one bar per item, done dots, moved amber, now line) rendered by headless Chrome, sendable with `fm-imessage --image`.
 - [`fleet-browser`](fleet-browser/SKILL.md): the Obscura, Chrome and VNC browser ladder with one shared cookie jar, and when to use each tier.
@@ -30,6 +31,7 @@ Skills that ship with Crewship. Put each skill in `blueprint/skills/public/<name
 - [`mate-archive`](mate-archive/SKILL.md): search and zoom the full text of past omp chat with `mate-archive`, for detail a compact removed from the live context.
 - [`manim`](manim/SKILL.md): explain math and diagrams with a Manim Community scene rendered to mp4 or gif in a 1-day-pruned cache, gif sendable with `fm-imessage --image`.
 - [`floorplan`](floorplan/SKILL.md): a third-party plugin that maps and explains a codebase, supports onboarding, and shows what a change touched.
+- [`pick-crewmate-work`](pick-crewmate-work/SKILL.md): recommend work for available crewmates without dispatching it.
 - [`git-and-prs`](git-and-prs/SKILL.md): commit messages, generated files, and PR size and splits checked with `ponytail-review`.
 - [`mobile-app-first-build`](mobile-app-first-build/SKILL.md): validate an idea with a mobile web prototype, choose a platform, map flows, write requirements, build, test, and release (credits u/olenami's Reddit guide).
 - [`observability`](observability/SKILL.md): walk seven levels of logs, metrics, traces, correlation, alerts, SLOs and cardinality, and review a service against them.

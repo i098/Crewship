@@ -101,7 +101,7 @@ uv run pytest -n auto --dist worksteal
 
 # Only the tests that your change affects (pytest-testmon; the validation step runs this in cf-sandbox).
 # The first run on a host has no data and runs everything. A change that touches any other non-.py file
-# (compared with the merge base, untracked files included; changelog.d/ does not count, and apps/imessage/ changes also run its bun tests and tests/test_imessage*.py), or an unknown merge base, also runs everything. CREWSHIP_TEST_TIMEOUT_SCALE multiplies test subprocess timeouts on slow hosts. Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon/<hash of the checkout path> (one database per checkout, so parallel runs do not collide; a new checkout starts from a seed copied from the last fully passing run, and checkout dirs unused for 14 days are deleted).
+# (compared with the merge base, untracked files included; changelog.d/ does not count, and apps/imessage/ changes also run its bun tests and tests/test_imessage*.py), or an unknown merge base, also runs everything. CREWSHIP_TEST_TIMEOUT_SCALE multiplies test subprocess and wait timeouts on slow hosts; unset, it follows the host load (load average per CPU, 1 to 8). Data: $CF_TESTMON_DIR, default ~/.cache/crewship-testmon/<hash of the checkout path> (one database per checkout, so parallel runs do not collide; a new checkout starts from a seed copied from the last fully passing run, and checkout dirs unused for 14 days are deleted).
 scripts/test-affected
 
 # Ansible syntax check
@@ -217,14 +217,16 @@ The script applies the form's label and rejects missing required fields or commi
 
 - One concern per PR.
 - The title uses the commit format, for example `docs(contributing): add git conventions and branch rules`.
-- The body starts with `Closes #N` for the issue that the PR resolves. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
+- The body starts with `Refs #N` for the issue that the PR addresses. Never write a closing keyword (`Closes`, `Fixes`, `Resolves`) with an issue reference in the body, the PR title, or a commit message on the branch: a merge never closes an issue. An issue closes only after the change is deployed where it runs and tested there for real; the closing comment holds the deploy proof and the test proof. The [PR template](.github/PULL_REQUEST_TEMPLATE.md) fills in the other sections.
   Put the opening reference on its own line, outside a code block.
-  Fill all four template sections: `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Fill `Summary`, `What changed and why`, `Test evidence`, and `Checklist`.
+  Follow the [Review evidence guide](docs/review-evidence.md) for what to capture and where to put it.
   Name the commands you ran and their results under `Test evidence`; do not claim checks you did not run.
   Keep each checklist item and mark completed items with `[x]`.
   Leave an inapplicable item unchecked and explain why beside it, such as `Not applicable: no Ansible files changed`.
   Use visible text in sections and reasons; comments, empty markup, link definitions, and whitespace entities alone do not count.
   Inline and fenced code can supply content.
+  A commit message that quotes a closing keyword fails the check: write the keyword without an issue number, or reword the commit with `git commit --amend` or a rebase on the PR branch.
 - Tests pass (`uv run pytest`).
 - Lint clean (`uv run ruff check`).
 - Ansible syntax clean (`--syntax-check`).
@@ -240,6 +242,8 @@ It omits generated intent and puts validation evidence in a collapsed section af
 The pipeline reads these settings from the default branch.
 
 The required `pull request body` check validates the opening issue reference, filled sections, and completed or explained checklist items.
+It rejects a closing keyword in the body, the PR title, or a commit message on the branch.
+It also runs the [automatic screenshot check](docs/review-evidence.md#automatic-screenshot-checks).
 It runs for every PR, including Dependabot and release PRs.
 Body edits rerun this small check without restarting the full build.
 Check a body file before publication:
@@ -248,19 +252,22 @@ Check a body file before publication:
 python3 scripts/check_pr_body.py /tmp/pr-body.md
 ```
 
+Pass `--base origin/main` to enable the screenshot check and the commit-message check for the current branch.
+Pass `--head <revision>` with `--base` to check a revision other than `HEAD`.
+Pass `--title "<PR title>"` to check the PR title.
+
 Match the template headings and checklist text exactly, and run the body checker before each PR publication or body edit.
 
 Every ship worker also runs the pre-push PR check before opening a PR:
 
 ```bash
-python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui]
+python3 scripts/check_pr.py /tmp/pr-body.md [--base origin/main] [--no-ui] [--title "<PR title>"]
 ```
 
-It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period).
+It fails when a commit subject in `base..HEAD` is not Conventional Commits (`<type>[(<scope>)][!]: <text>`, 100 characters at most, no final period). It also accepts `no-mistakes(<step>): <text>` subjects from the no-mistakes pipeline.
 The allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
-It also fails when the body does not start with `Closes #N`, has no `Review plan: <text>` line, or lacks a hosted `https` image while the diff changes UI files.
-UI files are `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, and `.html` files, `site/`, and `apps/<app>/web`, `apps/<app>/src/components`, and `apps/<app>/public`.
-Use `--ui` or `--no-ui` to override the UI detection.
+It also fails when the body does not start with `Refs #N`, has no `Review plan: <text>` line, fails the same screenshot check as CI, or when the body, the PR title given with `--title`, or a commit message holds a closing keyword.
+Use `--ui` or `--no-ui` to override UI detection for the local pre-push check only.
 
 ## Branch rules
 

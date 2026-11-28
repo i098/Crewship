@@ -3,7 +3,8 @@
 #   runner-up-maintain image [--ensure]   build the job image from the latest official
 #                                         runner image; with --ensure, only when it is missing
 #   runner-up-maintain clean              remove what the jobs left on the disk
-#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above,
+#   runner-up-maintain guard              stop the coordinators at the pause level of the disk or above, or when less than
+#                                         RUNNER_UP_JOB_GB (30) per running place is free,
 #                                         start them again below the resume level; also start the units
 #                                         recorded by io-pause, one per run, after 2 min of calm IO
 #                                         and start a failed coordinator that no pause holds
@@ -13,19 +14,72 @@ set -eu
 image=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest}
 lock=${RUNNER_UP_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-image.lock}
 
-have_image() { docker image inspect "$image" >/dev/null 2>&1; }
+dind_recipe=${RUNNER_UP_DIND_DOCKERFILE-}
+if [ -n "$dind_recipe" ]; then
+  read -r dind_image < "$(dirname "$(command -v docker)")/dind-image"
+  : "${dind_image:?The installed dind-image tag is empty}"
+fi
+have_image() { docker image inspect "$1" >/dev/null 2>&1; }
+have_images() { have_image "$image" && { [ -z "$dind_recipe" ] || have_image "$dind_image"; }; }
+probe_dind() {
+  expected=$(stat -Lc %d "${RUNNER_UP_GUARD_PATH:?}")
+  actual=$(timeout --kill-after=10s 90s docker check-dind-runtime "$1")
+  if [ "$actual" != "$expected" ]; then
+    echo "runner-up: Set the Sysbox data root on the filesystem of $RUNNER_UP_GUARD_PATH." >&2
+    return 125
+  fi
+}
+
+io_paused() {
+  grep -qxF -e "$1" -e "${1%.service}" "$io_state" 2>/dev/null
+}
 
 case "${1-}" in
+start)
+  : "${2:?Specify the coordinator config}"
+  if [ -n "$dind_recipe" ]; then
+    needs_dind=$(python3 -c '
+import json, sys
+
+with open(sys.argv[1]) as source:
+    config = json.load(source)
+print(any(place.get("provider") == "docker" and place.get("image") == sys.argv[2]
+          for machine in config["machines"] if machine["name"] == "local"
+          for place in machine["places"]))
+' "$2" "$dind_image")
+    if [ "$needs_dind" = True ]; then
+      exec "$0" image --ensure
+    fi
+  fi
+  unset RUNNER_UP_DIND_DOCKERFILE
+  exec "$0" image --ensure ;;
 image)
-  [ "${2-}" = --ensure ] && have_image && exit 0
+  if [ "${2-}" = --ensure ] && have_images; then
+    [ -z "$dind_recipe" ] || probe_dind "$dind_image"
+    exit 0
+  fi
   : "${RUNNER_UP_DOCKERFILE:?}"
   exec 9>"$lock"
   flock 9
   # Another start may have built it while this one waited for the lock.
-  [ "${2-}" = --ensure ] && have_image && exit 0
-  # --rm and --force-rm drop the build's intermediate containers, success or not.
-  docker build --pull --quiet --rm --force-rm --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
-    <"$RUNNER_UP_DOCKERFILE" >/dev/null
+  if [ "${2-}" = --ensure ] && have_images; then
+    [ -z "$dind_recipe" ] || probe_dind "$dind_image"
+    exit 0
+  fi
+  # The CI pool refreshes the base image when both systems run on this host.
+  if { [ "${2-}" != --ensure ] && [ "${RUNNER_UP_REFRESH_BASE:-1}" = 1 ]; } || ! have_image "$image"; then
+    docker build --pull --quiet --rm --force-rm --label runner-up.keep=1 --build-arg "REFRESH=$(date +%F)" --tag "$image" - \
+      <"$RUNNER_UP_DOCKERFILE" >/dev/null
+  fi
+  if [ -n "$dind_recipe" ]; then
+    candidate="$dind_image-candidate"
+    trap 'docker image rm "$candidate" >/dev/null 2>&1 || :' EXIT
+    docker build --quiet --rm --force-rm --label runner-up.keep=1 --build-arg "BASE_IMAGE=$image" --tag "$candidate" - \
+      <"$dind_recipe" >/dev/null
+    probe_dind "$candidate"
+    docker tag "$candidate" "$dind_image"
+    printf '%s\n' 'Built the runner-up Docker-in-Docker image.'
+  fi
   # The untagged layers of the previous build; images that a container uses stay.
   docker image prune --force >/dev/null ;;
 clean)
@@ -33,10 +87,14 @@ clean)
   # so one that is left here belongs to a place that crashed.
   # Each step runs on its own, with a time limit: a prune that fails (another prune runs) or hangs on a
   # busy disk must not skip the others, or the build cache grows past its cap. The unit still fails.
-  limit=${RUNNER_UP_PRUNE_TIMEOUT:-280}
+  limit=${RUNNER_UP_PRUNE_TIMEOUT:-210}
+  if ! [ "$limit" -gt 0 ] 2>/dev/null || ! [ "$limit" -lt 210 ]; then
+    limit=210
+  fi
   failed=0
-  prune() { timeout "$limit" docker "$@" >/dev/null || failed=1; }
+  prune() { timeout --kill-after=5s "$limit" docker "$@" >/dev/null || { echo "runner-up: docker $1 $2 failed with status $?" >&2; failed=1; }; }
   prune container prune --force --filter label=runner-up.place --filter until=1h
+  prune network prune --force --filter label=runner-up.dind --filter until=1h
   prune image prune --force
   prune builder prune --force --keep-storage "${RUNNER_UP_DISK_MAX_GB:-50}GB"
   exit "$failed" ;;
@@ -44,45 +102,81 @@ guard)
   # Stopping a coordinator only stops new pickup: KillMode=process leaves running jobs alone.
   # Below the resume level the disk rule starts the coordinators it stopped; the heal below starts a failed one. A unit stopped by hand stays stopped.
   path=${RUNNER_UP_GUARD_PATH:-/}
-  pause=${RUNNER_UP_PAUSE_PCT:-88}
-  resume=${RUNNER_UP_RESUME_PCT:-85}
+  pause=${RUNNER_UP_PAUSE_PCT:-80}
+  resume=${RUNNER_UP_RESUME_PCT:-75}
   state=${RUNNER_UP_GUARD_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-guard.paused}
-  used=$(df --output=pcent "$path" | tail -n 1 | tr -dc 0-9)
-  if [ "$used" -ge "$pause" ]; then
+  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
+  managed() {
+    case " ${RUNNER_UP_INSTANCES-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+  }
+  df_line=$(df -BG --output=pcent,avail "$path" | tail -n 1)
+  used=$(echo "$df_line" | awk '{print $1}' | tr -dc 0-9)
+  free=$(echo "$df_line" | awk '{print $2}' | tr -dc 0-9)
+  # Place rule: each running place may still write RUNNER_UP_JOB_GB (a large test job builds ~26 GB in its layer).
+  # Pause when the free space is below that for every running place; resume only with room for one more job.
+  # A failed or slow count reads as 0 places, so the percent rule alone decides; a df without avail skips the place rule.
+  places=$(timeout --kill-after=1s "${RUNNER_UP_GUARD_PS_TIMEOUT:-10}" docker ps --quiet --filter label=runner-up.place 2>/dev/null | wc -l)
+  job_gb=${RUNNER_UP_JOB_GB:-30}
+  full=0 roomy=0
+  if [ "$used" -ge "$pause" ] || { [ -n "$free" ] && [ "$free" -lt $((places * job_gb)) ]; }; then full=1; fi
+  if [ "$used" -lt "$resume" ] && { [ -z "$free" ] || [ "$free" -ge $(((places + 1) * job_gb)) ]; }; then roomy=1; fi
+  queue_start() { timeout --kill-after=1s 2s systemctl --user --no-block start "$@"; }
+  if [ "$full" = 1 ]; then
     for i in ${RUNNER_UP_INSTANCES-}; do
-      systemctl --user is-active --quiet "runner-up@$i.service" || continue
-      systemctl --user stop "runner-up@$i.service" && echo "$i" >> "$state"
+      unit=runner-up@$i.service
+      case "$(systemctl --user is-active "$unit")" in active|reloading|activating) ;; *) continue ;; esac
+      if systemctl --user stop "$unit" && ! grep -qxF "$i" "$state" 2>/dev/null; then
+        printf '%s\n' "$i" >> "$state"
+      fi
     done
-  elif [ "$used" -lt "$resume" ] && [ -s "$state" ]; then
-    while read -r i; do systemctl --user start "runner-up@$i.service"; done < "$state"
-    rm -f "$state"
+  elif [ "$roomy" = 1 ] && [ -s "$state" ]; then
+    : > "$state.new"
+    set --
+    while read -r i; do
+      managed "$i" || continue
+      unit=runner-up@$i.service
+      systemctl --user is-active --quiet "$unit" && continue
+      io_paused "$unit" && continue
+      printf '%s\n' "$i" >> "$state.new"
+      set -- "$@" "$unit"
+    done < "$state"
+    if [ -s "$state.new" ]; then mv "$state.new" "$state"; else rm -f "$state.new" "$state"; fi
+    [ "$#" -eq 0 ] || queue_start "$@" || :
   fi
   # IO resume: /proc/pressure/io "full avg60" below the level for the whole window, then one unit per run.
   # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
-  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   io_calm=$io_state.calm
   io_hot=$io_state.hot
   now=${RUNNER_UP_NOW:-$(date +%s)}
   avg=$(awk '$1 == "full" { sub("avg60=", "", $3); print $3 }' "${RUNNER_UP_PRESSURE_FILE:-/proc/pressure/io}" 2>/dev/null) || avg=
   io_above() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a > m) }'; }
   io_below() { [ -n "$avg" ] && awk -v a="$avg" -v m="${RUNNER_UP_IO_PCT:-40}" 'BEGIN { exit !(a < m) }'; }
-  # IO resume: below the level for the whole window, then one unit per run.
-  # The disk rule owns a unit it stopped: no unit the disk rule stopped starts while the disk is at the resume level or above.
-  if [ -s "$io_state" ] && [ "$used" -lt "$resume" ]; then
-    if io_below; then
+  (
+    flock 8
+    if ! io_below; then
+      rm -f "$io_calm"
+    elif [ -s "$io_state" ] && [ "$roomy" = 1 ]; then
       [ -s "$io_calm" ] || echo "$now" > "$io_calm"
       if [ $((now - $(cat "$io_calm"))) -ge "${RUNNER_UP_IO_CALM_SECS:-120}" ]; then
-        read -r unit < "$io_state"
-        if systemctl --user start "$unit"; then
-          grep -vxF "$unit" "$io_state" > "$io_state.new" || true
+        while read -r unit < "$io_state"; do
+          i=${unit#runner-up@}
+          i=${i%.service}
+          tail -n +2 "$io_state" > "$io_state.new"
+          if [ "${unit%.service}" = "runner-up@$i" ] && managed "$i"; then
+            unit=runner-up@$i.service
+            if ! systemctl --user is-active --quiet "$unit"; then
+              printf '%s\n' "$unit" >> "$io_state.new"
+              queue_start "$unit" || :
+            fi
+            mv "$io_state.new" "$io_state"
+            break
+          fi
           mv "$io_state.new" "$io_state"
-          [ -s "$io_state" ] || rm -f "$io_calm"
-        fi
+        done
+        [ -s "$io_state" ] || rm -f "$io_calm"
       fi
-    else
-      rm -f "$io_calm"
     fi
-  fi
+  ) 8>"$io_state.lock"
   # IO pause: above the level for the whole window, then the newest running heavy coordinator, one per window.
   # Jobs that run keep running; the unit comes back through the IO resume above.
   if io_above; then
@@ -104,28 +198,42 @@ guard)
   fi
   # Heal: a coordinator in the failed state that neither the disk rule nor the IO rule holds starts again; an inactive one that a person stopped stays stopped.
   # Nothing starts at the pause level of the disk, nor while the IO pressure is high for a unit the IO rule may pause.
-  if [ "$used" -lt "$pause" ]; then
+  if [ "$full" = 0 ]; then
+    set --
     for i in ${RUNNER_UP_INSTANCES-}; do
       u=runner-up@$i.service
       systemctl --user is-failed --quiet "$u" || continue
       grep -qxF "$i" "$state" 2>/dev/null && continue
-      grep -qxF "$u" "$io_state" 2>/dev/null && continue
+      io_paused "$u" && continue
       case " ${RUNNER_UP_IO_HEAVY-} " in *" $i "*) ! io_above || continue ;; esac
-      systemctl --user start "$u" || true
+      set -- "$@" "$u"
     done
+    [ "$#" -eq 0 ] || queue_start "$@" || :
   fi
   # A stopped place container holds its job's target directory in its layer; prune never removes a running one.
   timeout "${RUNNER_UP_GUARD_PRUNE_TIMEOUT:-40}" docker container prune --force --filter label=runner-up.place >/dev/null || true ;;
 io-pause)
   shift
   [ "$#" -gt 0 ] || { echo "usage: runner-up-maintain io-pause <unit...>" >&2; exit 2; }
-  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
   for u in "$@"; do
+    case "${u%.service}" in
+      runner-up@?*)
+        i=${u#runner-up@}
+        case "${i%.service}" in *[!a-z0-9-]*) ;; *) continue ;; esac ;;
+    esac
+    echo 'io-pause accepts only runner-up coordinator units.' >&2
+    exit 2
+  done
+  io_state=${RUNNER_UP_IO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/runner-up-io.paused}
+  exec 8>"$io_state.lock"
+  flock 8
+  for u in "$@"; do
+    u=${u%.service}.service
     systemctl --user stop "$u" || continue
-    grep -qxF "$u" "$io_state" 2>/dev/null || echo "$u" >> "$io_state"
+    io_paused "$u" || echo "$u" >> "$io_state"
   done
   rm -f "$io_state.calm" ;;
 *)
-  echo "usage: runner-up-maintain image [--ensure] | clean | guard | io-pause <unit...>" >&2
+  echo "usage: runner-up-maintain start <config> | image [--ensure] | clean | guard | io-pause <unit...>" >&2
   exit 2 ;;
 esac

@@ -86,8 +86,9 @@ def test_pr_parts():
 
 @needs_bun
 def test_issue_sources():
-    assert ts('m.closingIssue("Adds X.\\n\\nFixes #1529 and closes #7")') == "1529"
-    assert ts('m.closingIssue("See #12")') == ""
+    assert ts('m.bodyIssue("Refs #1445\\n\\nSummary")') == "1445"
+    assert ts('m.bodyIssue("Adds X.\\n\\nFixes #1529 and closes #7")') == "1529"
+    assert ts('m.bodyIssue("See #12")') == ""
     record = [
         "- [ ] fix-login - app: fix login (repo: app) (kind: ship)",
         "Implement https://github.com/o/app/issues/1383 in full. Split #1229 first.",

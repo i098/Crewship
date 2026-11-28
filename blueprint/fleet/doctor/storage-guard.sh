@@ -191,10 +191,28 @@ estimates() {  # -> "build dangling old" in bytes
     | map(floor) | "\(.[0]) \(.[1]) \(.[2])"'
 }
 
+prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images with no tag named as a job image.
+  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} rows keep ids used ref id created
+  rows=$("$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}') || return
+  ids=$("$@" ps -a -q) || return
+  used=$(xargs -r "$@" inspect -f '{{.Image}}' <<<"$ids") || return
+  keep=$(awk -v a="$keep1" -v b="$keep2" '$1 == a || $1 == b { printf "%s ", $2 }' <<<"$rows")
+  while read -r ref id created; do
+    [ -n "$id" ] || continue
+    case " $keep " in *" $id "*) continue ;; esac
+    case $used in *"$id"*) continue ;; esac
+    [ -z "${AGE_H-}" ] || [ "$(date -d "${created% *}" +%s 2>/dev/null || echo 0)" -lt $(($(date +%s) - AGE_H * 3600)) ] || continue
+    while read -r ref; do "$@" image rm "$ref" >/dev/null 2>&1 || :; done < <(awk -v i="$id" '$2 == i && $1 !~ /<none>/ { print $1 }' <<<"$rows")
+    "$@" image rm "$id" >/dev/null 2>&1 || :
+  done < <(sort -u -k2,2 <<<"$rows")
+}
+export -f prune_unused_images
+export AGE_H
+
 # CRIT steps, cheapest first: "label|docker arguments".
 STEPS=("build cache|builder prune -f"
        "dangling images|image prune -f"
-       "unused images created over ${AGE_H}h ago|image prune -af --filter until=${AGE_H}h")
+       "unused images created over ${AGE_H}h ago|image rm unused")
 
 if [ "$DRY" != 1 ]; then
   if [ -n "$DATA_DIR" ]; then
@@ -407,8 +425,12 @@ for m in "${mounts[@]}"; do
       for s in "${STEPS[@]}"; do
         [ "$pct" -ge "$CRIT" ] || break
         before=$used
-        # shellcheck disable=SC2086  # the step's own argument words
-        out=$(timeout 300 docker ${s#*|} 2>&1 | tail -1)
+        if [ "${s#*|}" = "image rm unused" ]; then
+          out=$(timeout 300 bash -c 'prune_unused_images docker' 2>&1 | tail -1)
+        else
+          # shellcheck disable=SC2086
+          out=$(timeout 300 docker ${s#*|} 2>&1 | tail -1)
+        fi
         read -r used avail pct _ <<<"$(measure "$m")"
         log "  CRIT $m docker ${s#*|}: freed $(human $((before - used))), now ${pct}% - docker: ${out:-no output}"
         freed+=("${s%%|*} $(human $((before - used)))")

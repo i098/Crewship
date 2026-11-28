@@ -536,9 +536,9 @@ for (const z of [-4, 9]) {
   box(world, 6.24, 4.2, z - 0.14, 6.72, 4.65, z + 0.3, "l");
 }
 const ribs = (x, y, z, nx, ny, nz) => (Math.sin((Math.abs(nz) > 0.5 ? x : z) * 10) > 0.45 ? "-" : null);
-box(world, 9, 1.2, 16, 15, 3.8, 18.5, "r", { spot: "containers", tex: ribs });
-box(world, 9.4, 3.8, 16.2, 15.4, 6.4, 18.7, "b", { spot: "containers", tex: ribs });
-box(world, 16.2, 1.2, 15.6, 22.2, 3.8, 18.1, "b", { spot: "containers", tex: ribs });
+box(world, 9, 1.2, 16, 15, 3.8, 18.5, "r", { tex: ribs });
+box(world, 9.4, 3.8, 16.2, 15.4, 6.4, 18.7, "b", { tex: ribs });
+box(world, 16.2, 1.2, 15.6, 22.2, 3.8, 18.1, "b", { tex: ribs });
 const officeText = painted("HARBOR", -7.6, -2.4, 4.15, 5.05);
 // The house windows, shared by its outside walls and the room inside (buildRoom): spans along x on the front and the
 // back, along z down each side, and the panes' height.
@@ -2635,7 +2635,7 @@ const INTRO_NOISE = Array.from({ length: 64 }, (_, c) => {
   const seed = (c * 37) % 97;
   return seed % 3 ? " " : RAMP[1 + seed % (RAMP.length - 1)];
 });
-const RANGE = { lighthouse: 400, nest: 30, office: 40, antenna: 50, containers: 40, lifeboat: 25, tender: 25 };
+const RANGE = { lighthouse: 400, nest: 30, office: 40, antenna: 50, lifeboat: 25, tender: 25 };
 const MOON = (() => { const v = [0.2, 0.3, 0.93], l = Math.hypot(...v); return v.map((c) => c / l); })();
 // Objects whose feature is not in the page's list are scenery.
 for (const s of [...world, ...ship]) if (s.spot && !spots[s.spot]) s.spot = null;

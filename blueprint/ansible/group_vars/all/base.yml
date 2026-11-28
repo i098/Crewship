@@ -93,7 +93,7 @@ crewship_docker_data_root: "{{ (crewship_data_dir ~ '/docker') if crewship_data_
 crewship_sccache_env:
   RUSTC_WRAPPER: sccache
   SCCACHE_DIR: "{{ crewship_data_dir }}/cache/sccache"
-  SCCACHE_CACHE_SIZE: 150G
+  SCCACHE_CACHE_SIZE: 20G
   CARGO_INCREMENTAL: "0"
 crewship_data_cache_env: >-
   {{ {'DENO_DIR': crewship_data_dir ~ '/cache/deno',

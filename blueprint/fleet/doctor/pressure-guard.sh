@@ -2,8 +2,10 @@
 # Prune regenerable data and alert when disk or RAM use exceeds PRESSURE_PCT (70).
 # Disk: the filesystems holding /, the home and Docker's data root. RAM: used =
 # MemTotal - MemAvailable. Above the threshold, only these safe targets go:
-#   all docker builder cache and all unused images (builder prune -af, image
-#   prune -af); finished /tmp/pytest-of-* dirs (idle for
+#   docker builder cache and unused images, both only when older than 24 hours (this guard
+#   runs every 5 minutes; an unaged prune once deleted fresh CI runner images), and never the runner-up
+#   job images (kept by name: RUNNER_UP_IMAGE, RUNNER_UP_DIND_IMAGE);
+#   finished /tmp/pytest-of-* dirs (idle for
 #   PRESSURE_SCRATCH_MIN_AGE_MIN minutes, nothing holding an open file under them,
 #   no .git inside); uv cache prune and bun pm cache rm while no uv or bun process runs.
 # Never: docker volume prune, worktrees, git checkouts, anything with an open fd.
@@ -67,11 +69,27 @@ step() {  # <label> <command...>
   if [ "$DRY" = 1 ]; then echo "would: $label ($*)"; done_steps+=("$label"); return 0; fi
   if timeout 600 "$@" >/dev/null 2>&1; then done_steps+=("$label"); else echo "pressure-guard: $label failed" >&2; fi
 }
+prune_unused_images() {  # <docker command...>; env AGE_H limits by age. Removes unused images with no tag named as a job image.
+  local keep1=${RUNNER_UP_IMAGE:-crewship-ci-runner:latest} keep2=${RUNNER_UP_DIND_IMAGE:-crewship-ci-runner-dind:latest} rows keep ids used ref id created
+  rows=$("$@" image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}') || return
+  ids=$("$@" ps -a -q) || return
+  used=$(xargs -r "$@" inspect -f '{{.Image}}' <<<"$ids") || return
+  keep=$(awk -v a="$keep1" -v b="$keep2" '$1 == a || $1 == b { printf "%s ", $2 }' <<<"$rows")
+  while read -r ref id created; do
+    [ -n "$id" ] || continue
+    case " $keep " in *" $id "*) continue ;; esac
+    case $used in *"$id"*) continue ;; esac
+    [ -z "${AGE_H-}" ] || [ "$(date -d "${created% *}" +%s 2>/dev/null || echo 0)" -lt $(($(date +%s) - AGE_H * 3600)) ] || continue
+    while read -r ref; do "$@" image rm "$ref" >/dev/null 2>&1 || :; done < <(awk -v i="$id" '$2 == i && $1 !~ /<none>/ { print $1 }' <<<"$rows")
+    "$@" image rm "$id" >/dev/null 2>&1 || :
+  done < <(sort -u -k2,2 <<<"$rows")
+}
+export -f prune_unused_images
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if have docker; then
-  step "docker builder cache" "${DOCKER[@]}" builder prune -af
-  step "unused images" "${DOCKER[@]}" image prune -af
+  step "docker builder cache" "${DOCKER[@]}" builder prune -af --filter until=24h
+  step "unused images" bash -c 'AGE_H=24 prune_unused_images "$@"' _ "${DOCKER[@]}"
 fi
 
 if have lsof; then

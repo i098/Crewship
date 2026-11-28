@@ -6,8 +6,9 @@ import { Database } from "bun:sqlite"
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { theme } from "../tui-theme/theme.ts"
 import { readProviders, type DetectedProvider, type QuotaSource } from "./detect.ts"
+import { onSite, RESELLERS, type ResellerConfig } from "./resellers.ts"
+import { theme } from "../tui-theme/theme.ts"
 
 export const MERCURY_LIMIT = 100_000_000
 export const QUOTA_MIN_MS = 60_000
@@ -88,27 +89,29 @@ export function mercuryRows(keyIds: number[], tokens: Record<string, number>): Q
 }
 const compactTokens = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(v))
 
-// ---- DeepSeek reseller: plan quota from the reseller's quotaMe call -----------------
-// The reseller (deepseekv4pro.com) reports plan credits through quotaMe, read over HTTP via api-anything with the
-// saved login, renewed from the fleet cookie jar when it expires. resets_at is epoch seconds. No browser is opened.
-export type DeepseekUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null }[] }
+// ---- Reseller plan quota: one config entry per reseller (resellers.ts) ----------------
+// Plan credits come from the reseller's plan-list operation, read over HTTP via api-anything with the saved login,
+// renewed from the fleet cookie jar when it expires. resets_at is epoch seconds. No browser is opened.
+export type ResellerUsage = { rows?: { plan?: string; window?: string; used?: number | null; limit?: number | null; resets_at?: number | null; status?: string }[]; noPlans?: boolean }
+export type ResellerRead = { value?: ResellerUsage; error?: string }
 
-const RESELLER = "deepseek (reseller)"
-const resellerNote = (note: string): QuotaRow => ({ account: RESELLER, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
+const resellerNote = (cfg: ResellerConfig, note: string): QuotaRow => ({ account: cfg.account, window: "-", usedPct: null, leftPct: null, resetsAt: null, note })
 
 // "DeepSeek Coding Plan Max" -> "deepseek max": drop the words every plan shares.
-const planLabel = (plan: unknown) => {
-  const rest = typeof plan === "string" ? plan.replace(/\b(deepseek|coding|plan)\b/gi, "").trim().toLowerCase().replace(/\s+/g, " ") : ""
-  return `deepseek ${rest}`.trim()
+const planLabel = (cfg: ResellerConfig, plan: unknown) => {
+  const rest = typeof plan === "string" ? plan.replace(new RegExp(`\\b(${cfg.planWords.join("|")})\\b`, "gi"), "").trim().toLowerCase().replace(/\s+/g, " ") : ""
+  return `${cfg.label} ${rest}`.trim()
 }
 
-export function deepseekRows(json: DeepseekUsage): QuotaRow[] {
+export function resellerRows(cfg: ResellerConfig, json: ResellerUsage): QuotaRow[] {
+  // Signed in with no subscription: say so, instead of showing nothing for the plan source.
+  if (json.noPlans) return [{ account: cfg.noPlansAccount, window: "-", usedPct: null, leftPct: null, resetsAt: null, note: "no plans" }]
   const rows = (Array.isArray(json.rows) ? json.rows : []).flatMap(r => {
     if (!r || typeof r.window !== "string") return []
     const left = finite(r.used) && finite(r.limit) ? leftOf(r.used, r.limit) : null
-    return [{ account: planLabel(r.plan), window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: left ? undefined : "n/a" }]
+    return [{ account: planLabel(cfg, r.plan), window: r.window, usedPct: left?.usedPct ?? null, leftPct: left?.leftPct ?? null, resetsAt: finite(r.resets_at) ? r.resets_at * 1000 : null, note: r.status ?? (left ? undefined : "n/a") }]
   })
-  return rows.length ? rows : [resellerNote("n/a")]
+  return rows.length ? rows : [resellerNote(cfg, "n/a")]
 }
 
 // ---- rtk ----------------------------------------------------------------------
@@ -148,7 +151,7 @@ export function githubRows(g: GithubRate, topCaller?: string): QuotaRow[] {
 // A provider shows only with a key in use and some use in the last ACTIVE_DAYS; ALWAYS_SHOW labels always show.
 // rtk has no key, so the rule does not apply to it.
 const ACTIVE_DAYS = 7
-const ALWAYS_SHOW = ["claude", "codex", "deepseek", "mercury", "glm"]
+const ALWAYS_SHOW = ["claude", "codex", "mercury", "glm", ...RESELLERS.map(r => r.label)]
 
 // `active`: provider ids with use in the window; undefined means usage is unknown, so nothing is hidden.
 function visibleProviders(providers: DetectedProvider[], active?: string[]): DetectedProvider[] {
@@ -167,8 +170,7 @@ export type QuotaInput = {
   zaiError?: string
   mercury?: { keyIds: number[]; tokens: Record<string, number> }
   mercuryError?: string
-  deepseek?: DeepseekUsage
-  deepseekError?: string
+  resellers?: Record<string, ResellerRead> // by ResellerConfig.id
   rtk?: RtkGain
   rtkError?: string
   github?: GithubRate
@@ -190,7 +192,11 @@ export function buildRows(inp: QuotaInput): QuotaRow[] {
     if (inp.mercury) rows.push(...mercuryRows(inp.mercury.keyIds, inp.mercury.tokens))
     else if (inp.mercuryError) rows.push(note("mercury", `unavailable: ${inp.mercuryError}`))
   }
-  if (on("deepseek")) rows.push(...(inp.deepseek ? deepseekRows(inp.deepseek) : [resellerNote(inp.deepseekError ? `n/a: ${inp.deepseekError}` : "n/a")]))
+  for (const r of RESELLERS) {
+    if (!on(r.id)) continue
+    const read = inp.resellers?.[r.id]
+    rows.push(...(read?.value ? resellerRows(r, read.value) : [resellerNote(r, read?.error ? `n/a: ${read.error}` : "n/a")]))
+  }
   // rtk is never assumed: without a provider list it shows only when a reading was supplied.
   if (providers ? on("rtk-gain") : inp.rtk) rows.push(...(inp.rtk ? rtkRows(inp.rtk) : [note("rtk", inp.rtkError ?? "not reported")]))
   if (inp.github) rows.push(...githubRows(inp.github, inp.githubTop))
@@ -331,27 +337,34 @@ export async function readGithub(call = () => run(["gh", "api", "rate_limit"]), 
   return { github, githubTop: top || undefined }
 }
 
-const DEEPSEEK_MIN_MS = 10 * 60_000
-let deepseekAt = 0
-let deepseekLast: { value?: DeepseekUsage; error?: string } = {}
+const RESELLER_MIN_MS = 10 * 60_000
+const resellerCache = new Map<string, { at: number; read: ResellerRead }>()
 
-const WINDOWS: [string, string][] = [["fiveHour", "5h"], ["sevenDay", "7d"]]
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
 
-// quotaMe answers a plan list: {quota: {fiveHour|sevenDay: {usedCredits, limitCredits, resetAt (ISO)}}}.
-export function parseQuotaMe(plans: unknown): DeepseekUsage {
-  const rows: NonNullable<DeepseekUsage["rows"]> = []
+// The answer is a plan list; the names of its fields come from the reseller's config.
+// A plan that is not in its OK status still has windows; its status is noted so the numbers are not read as usable.
+export function parseQuotaMe(cfg: ResellerConfig, plans: unknown): ResellerUsage {
+  const f = cfg.fields
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+  const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {})
+  const num = (v: unknown) => (finite(v) ? v : null)
+  const rows: NonNullable<ResellerUsage["rows"]> = []
   for (const plan of Array.isArray(plans) ? plans : []) {
-    const p = isObj(plan) ? plan : {}
-    const quota = isObj(p.quota) ? p.quota : {}
-    for (const [key, window] of WINDOWS) {
-      const win = quota[key]
-      const w = isObj(win) ? win : {}
-      const at = typeof w.resetAt === "string" ? Date.parse(w.resetAt) / 1000 : NaN
-      rows.push({ plan: typeof p.planName === "string" && p.planName ? p.planName : "plan", window, used: finite(w.usedCredits) ? w.usedCredits : null, limit: finite(w.limitCredits) ? w.limitCredits : null, resets_at: Number.isFinite(at) ? at : null })
+    const p = obj(plan)
+    const quota = obj(p[f.quota])
+    const ps = str(p[f.planStatus])
+    const qs = str(quota[f.quotaStatus])
+    const status = ps && ps !== f.planStatusOk ? ps : qs && qs !== f.quotaStatusOk ? qs : undefined
+    for (const [key, window] of cfg.windows) {
+      const w = obj(quota[key])
+      const resetAt = str(w[f.resetAt])
+      const at = resetAt ? Date.parse(resetAt) / 1000 : NaN
+      rows.push({ plan: str(p[f.plan]) || "plan", window, used: num(w[f.used]), limit: num(w[f.limit]), resets_at: Number.isFinite(at) ? at : null, ...(status && { status }) })
     }
   }
-  return { rows }
+  // Only a real empty list means "no plans"; a non-array answer is a bad read and stays n/a.
+  return { rows, ...(Array.isArray(plans) && !plans.length && { noPlans: true }) }
 }
 
 const apiAnythingEnv = () => ({ API_ANYTHING_HOME: `${HOME}/.local/state/crewship/api-anything`, API_ANYTHING_BROWSER_ROOTS: "[]", ...process.env })
@@ -364,10 +377,10 @@ async function apiAnything(args: string[]): Promise<{ out: string; code: number 
 
 export class AuthExpired extends Error {}
 
-async function callQuotaMe(): Promise<unknown> {
+async function callQuotaMe(cfg: ResellerConfig): Promise<unknown> {
   let answer: unknown
   try {
-    answer = JSON.parse((await apiAnything(["call", "deepseekv4pro.com", "quotaMe"])).out.trim().split("\n").pop() ?? "")
+    answer = JSON.parse((await apiAnything(["call", cfg.site, cfg.operation])).out.trim().split("\n").pop() ?? "")
   } catch {
     throw new Error("no answer from api-anything")
   }
@@ -378,18 +391,18 @@ async function callQuotaMe(): Promise<unknown> {
 }
 
 // The site's session JWT lives 60 s. Mint a new one from the long-lived Clerk client cookie in the fleet jar and
-// save the jar's deepseekv4pro cookies as api-anything's login. Cookie values stay in locals and a 0600 temp file.
-async function refreshSession(): Promise<void> {
+// save the jar's cookies for the site as api-anything's login. Cookie values stay in locals and a 0600 temp file.
+async function refreshSession(cfg: ResellerConfig): Promise<void> {
   let cookies: { name: string; value: string; domain?: string }[]
   let jwt: string
   try {
     const jar = JSON.parse(await Bun.file(`${HOME}/.fleet-browser/cookies.json`).text())
-    cookies = Object.values(jar as Record<string, { name: string; value: string; domain?: string }>).filter(c => /^\.?([a-z0-9-]+\.)*deepseekv4pro\.com$/.test(String(c?.domain ?? "")))
+    cookies = Object.values(jar as Record<string, { name: string; value: string; domain?: string }>).filter(c => onSite(cfg, c?.domain))
     const sid = cookies.find(c => c.name === "clerk_active_context")!.value.split(":")[0]
     const cookie = cookies.filter(c => String(c.domain).includes("clerk") || c.name.startsWith("__client")).map(c => `${c.name}=${c.value}`).join("; ")
-    const res = await fetch(`https://clerk.deepseekv4pro.com/v1/client/sessions/${sid}/tokens?__clerk_api_version=2026-08-20`, {
+    const res = await fetch(`https://${cfg.clerk.host}/v1/client/sessions/${sid}/tokens?__clerk_api_version=${cfg.clerk.apiVersion}`, {
       method: "POST",
-      headers: { Cookie: cookie, Origin: "https://deepseekv4pro.com", "User-Agent": "Mozilla/5.0" },
+      headers: { Cookie: cookie, Origin: `https://${cfg.site}`, "User-Agent": "Mozilla/5.0" },
       signal: AbortSignal.timeout(20_000),
     })
     if (!res.ok) throw new Error("clerk")
@@ -403,21 +416,21 @@ async function refreshSession(): Promise<void> {
   try {
     const file = join(dir, "cookies.json")
     writeFileSync(file, JSON.stringify({ cookies }), { mode: 0o600 })
-    if ((await apiAnything(["login", "deepseekv4pro.com", "--cookies", file])).code !== 0) throw new Error("login save failed")
+    if ((await apiAnything(["login", cfg.site, "--cookies", file])).code !== 0) throw new Error("login save failed")
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
 // `call` and `refresh` are injectable so tests run without network or login.
-export async function readQuotaMe(call: () => Promise<unknown> = callQuotaMe, refresh: () => Promise<void> = refreshSession): Promise<{ value?: DeepseekUsage; error?: string }> {
+export async function readQuotaMe(cfg: ResellerConfig, call: () => Promise<unknown> = () => callQuotaMe(cfg), refresh: () => Promise<void> = () => refreshSession(cfg)): Promise<ResellerRead> {
   try {
     try {
-      return { value: parseQuotaMe(await call()) }
+      return { value: parseQuotaMe(cfg, await call()) }
     } catch (e) {
       if (!(e instanceof AuthExpired)) throw e
       await refresh()
-      return { value: parseQuotaMe(await call()) }
+      return { value: parseQuotaMe(cfg, await call()) }
     }
   } catch (e) {
     return { error: e instanceof AuthExpired ? "auth expired" : (e as Error).message }
@@ -425,10 +438,13 @@ export async function readQuotaMe(call: () => Promise<unknown> = callQuotaMe, re
 }
 
 // Any result holds for 10 minutes, so a slow or failing call is not repeated every refresh.
-export async function deepseek(): Promise<{ value?: DeepseekUsage; error?: string }> {
-  if (deepseekAt && Date.now() - deepseekAt < DEEPSEEK_MIN_MS) return deepseekLast
-  deepseekAt = Date.now()
-  return (deepseekLast = await readQuotaMe())
+export async function reseller(cfg: ResellerConfig): Promise<ResellerRead> {
+  const hit = resellerCache.get(cfg.id)
+  if (hit && Date.now() - hit.at < RESELLER_MIN_MS) return hit.read
+  resellerCache.set(cfg.id, { at: Date.now(), read: hit?.read ?? {} })
+  const read = await readQuotaMe(cfg)
+  resellerCache.set(cfg.id, { at: Date.now(), read })
+  return read
 }
 
 export async function loadQuota(): Promise<QuotaInput> {
@@ -436,11 +452,11 @@ export async function loadQuota(): Promise<QuotaInput> {
   const providers = readProviders({ home: HOME, env: process.env }).providers
   const on = (s: QuotaSource) => providers.some(p => p.source === s)
   const off = Promise.resolve(undefined)
-  const [omp, zai, mercury, ds, rtk, gh, active] = await Promise.allSettled([
+  const [omp, zai, mercury, resellers, rtk, gh, active] = await Promise.allSettled([
     on("omp-usage") ? run(["omp", "usage", "--json"]).then(t => JSON.parse(t) as OmpUsage) : off,
     on("zai") ? fetchZai() : off,
     on("mercury-tokens") ? mercuryTokens().then(t => ({ keyIds: mercuryKeyIds(), tokens: t })) : off,
-    on("deepseek") ? deepseek() : off,
+    Promise.all(RESELLERS.filter(r => on(r.id)).map(async r => [r.id, await reseller(r)] as const)).then(Object.fromEntries),
     on("rtk-gain") ? run(["rtk", "gain", "-f", "json"]).then(t => JSON.parse(t) as RtkGain) : off,
     Bun.which("gh") ? readGithub() : off, // no gh on the host means no row
     Promise.resolve().then(activeProviders),
@@ -454,8 +470,7 @@ export async function loadQuota(): Promise<QuotaInput> {
     zaiError: zai.status === "rejected" ? `unavailable: ${msg(zai.reason)}` : undefined,
     mercury: mercury.status === "fulfilled" ? mercury.value : undefined,
     mercuryError: mercury.status === "rejected" ? msg(mercury.reason) : undefined,
-    deepseek: ds.status === "fulfilled" ? ds.value?.value : undefined,
-    deepseekError: ds.status === "rejected" ? msg(ds.reason) : ds.value?.error,
+    resellers: resellers.status === "fulfilled" ? resellers.value : undefined,
     rtk: rtk.status === "fulfilled" ? rtk.value : undefined,
     rtkError: rtk.status === "rejected" ? msg(rtk.reason) : undefined,
     ...(gh.status === "fulfilled" ? gh.value : { githubError: msg(gh.reason) }),

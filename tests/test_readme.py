@@ -40,7 +40,6 @@ FEATURES = {
     "crewship.github_board": "docs/github-board.md",
     "crewship.board": "docs/board.md",
     "crewship.board.github_sink": "docs/board.md#copy-messages-to-github",
-    "crewship.ci_pool": "docs/ci-pool.md",
     "crewship.runner_up": "docs/runner-up.md",
     "crewship.cloudflare_runner": "docs/cloudflare-runner.md",
     "crewship.signal": "apps/signal/README.md",

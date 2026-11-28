@@ -2091,9 +2091,9 @@ async function typing(chat, on) {
 }
 const lastFile = (chat) => `${dir}/last-${encodeURIComponent(chat)}`;
 function sent(line, chat) {
+  if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
   appendFileSync(`${dir}/delivery-events`, JSON.stringify({ line, chat, typing: typingByChat.get(chat) ?? false }) + "\\n");
   appendFileSync(`${dir}/sent`, `${line}\\n`);
-  if (chat) writeFileSync(lastFile(chat), crypto.randomUUID());
 }
 async function shown(content) {
   if (typeof content === "string") return content;
@@ -2123,6 +2123,7 @@ function space(id) {
         throw Object.assign(new Error("write timed out"), { grpcCode: 4 });
       }
       if (content.type === "app") return { id: "c1", direction: "outbound", miniAppCardSession: { chatGuid: id, messageGuid: "c1", sessionId: "s1", targetMessageGuid: "c1" } };
+      if (typeof content === "string") return { id: readFileSync(lastFile(id), "utf8") };
     },
     async getMessage(mid) {
       call("getMessage");
@@ -2148,7 +2149,10 @@ function message(m) {
       call("react"); sent(`react ${m.id} ${emoji}`, m.space);
       if (existsSync(`${dir}/react-unsure`)) throw Object.assign(new Error("reaction timed out"), { grpcCode: 4 });
     },
-    async reply(content) { call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space); },
+    async reply(content) {
+      call("reply"); sent(`reply ${m.id} ${await shown(content)}`, m.space);
+      if (typeof content === "string") return { id: readFileSync(lastFile(m.space), "utf8") };
+    },
     async read() { appendFileSync(`${dir}/read`, `${m.id}\\n`); },
   };
 }
@@ -2204,8 +2208,11 @@ export const edit = (content, target) => ({ type: "edit", content, target });
 """
 
 
+TIMEOUT_SCALE = float(os.environ.get("CREWSHIP_TEST_TIMEOUT_SCALE", "1"))  # tests/conftest.py sets it from the host load
+
+
 def wait_for(check, what, timeout=30):
-    end = time.monotonic() + timeout * 4  # hosts at load ~30 starve the bridge subprocesses
+    end = time.monotonic() + timeout * 4 * TIMEOUT_SCALE  # hosts at load ~30 starve the bridge subprocesses
     while not check():
         assert time.monotonic() < end, f"timed out waiting for {what}"
         time.sleep(0.05)
@@ -2282,7 +2289,7 @@ def require_bridge():
     pytest.skip(reason)
 
 
-def fake_bridge(tmp_path, test_mode=True, probe=False):
+def fake_bridge(tmp_path, test_mode=True, probe=False, *, env_overrides=None):
     """bridge.ts against the fake spectrum-ts: the fake's directory, the state directory, the notes file, and
     start(n), inbound(mid, ...), cli(*args) and text(path) helpers. Without test_mode the bridge ignores
     timer overrides and uses the production burst timing."""
@@ -2337,7 +2344,9 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         "STATE_DIRECTORY": str(state),
         "FM_IMESSAGE_TEST_QUIET_MS": str(TEST_QUIET_MS),
         "FM_IMESSAGE_TEST_MAX_WAIT_MS": os.environ.get("FM_IMESSAGE_TEST_MAX_WAIT_MS", str(TEST_QUIET_MS * 6)),
+        "FM_IMESSAGE_TEST_VOICE_MS": os.environ.get("FM_IMESSAGE_TEST_VOICE_MS", str(round(5000 * TIMEOUT_SCALE))),
         **({"FM_IMESSAGE_TEST": "1"} if test_mode else {}),
+        **(env_overrides or {}),
     }
     if probe:
         env.pop("BUN_OPTIONS", None)  # the probe is shared by every test: a test's preload must not decide it
@@ -2363,8 +2372,9 @@ def fake_bridge(tmp_path, test_mode=True, probe=False):
         else:
             wait_for(lambda: f'"requestId":"photon-{mid}"' in text(state / "routing.jsonl"), f"durable ownership of {mid}")
 
-    def cli(*args, fails=False):
-        result = subprocess.run([str(SEND), *args], capture_output=True, text=True, env=env, timeout=30)
+    def cli(*args, fails=False, mate=None):
+        result = subprocess.run([str(SEND), *args], capture_output=True, text=True,
+                                env=env if mate is None else {**env, "FM_MATE_ID": mate}, timeout=30)
         if fails:
             assert result.returncode != 0
             return result.stdout + result.stderr
@@ -2493,6 +2503,40 @@ def test_bridge_stops_running_omp(tmp_path, mode, stop_signal, ignore_term):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+@pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
+def test_legacy_photon_thread_does_not_route_directly_to_a_mate(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/secondmates.md").write_text("- render - Render mate (home: /srv/render; scope: render; projects: none)\n")
+    fake, state, _, _, start, inbound, cli, text = fake_bridge(tmp_path)
+    legacy_senders = state / "senders.json"
+    state.mkdir(exist_ok=True)
+    legacy_senders.write_text("{}\n")
+    deliveries = tmp_path / "deliveries"
+    sender = tmp_path / "bin" / "fm-send.sh"
+    sender.write_text(f'#!/bin/bash\nprintf "%s\\n" "$1" >> {shlex.quote(str(deliveries))}\n')
+    sender.chmod(0o755)
+    bridge = start(1)
+    try:
+        inbound("m1", text="start")
+
+        cli("--reply", "1", "Render is ready.", mate="render")
+        wait_for(lambda: "Render is ready." in text(fake / "sent"), "the render bubble")
+        target = next(fake.glob("last-*")).read_text()
+        bridge.terminate()
+        bridge.wait(10)
+        bridge = start(2)
+        inbound("m2", content={
+            "type": "reply", "content": {"type": "text", "text": "What is next?"},
+            "target": {"id": target, "content": {"type": "text", "text": "Render is ready."}},
+        })
+        assert not deliveries.exists()
+        assert not (state / "thread-senders.sqlite").exists()
+        assert legacy_senders.read_text() == "{}\n"
+    finally:
+        bridge.terminate()
+        bridge.wait(10)
 
 
 @pytest.mark.skipif(not (shutil.which("bun") and shutil.which("curl")), reason="needs bun and curl")
@@ -2755,7 +2799,7 @@ mock.module("node:fs", () => ({{
     try:
         inbound("m1", text="hello")
         port = int(re.search(r"listening on 127.0.0.1:(\d+)", text(tmp_path / "out"))[1])
-        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+        connection = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         body = b"hello"
         content_type = "text/plain"
         if path == "/card":
@@ -3672,7 +3716,7 @@ def test_card_command_posts_json_text_stdin_or_a_file(tmp_path, arg):
 def http(url, method="GET", body=None):
     """One request without following redirects: (status, headers, body)."""
     u = url.split("/", 3)
-    conn = HTTPConnection(u[2], timeout=10)
+    conn = HTTPConnection(u[2], timeout=10 * TIMEOUT_SCALE)
     headers = {"Content-Type": "application/x-www-form-urlencoded"} if body is not None else {}
     conn.request(method, "/" + u[3] if len(u) > 3 else "/", body=body, headers=headers)
     r = conn.getresponse()
@@ -3775,7 +3819,7 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
     shot.write_bytes(png(40, 30))
 
     def web(path, method="GET", body=None, host=tailnet, origin=f"https://{tailnet}"):
-        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         conn.request(method, path, body=body, headers={"Host": host, **({"Origin": origin} if origin else {})})
         response = conn.getresponse()
         return response.status, response.read()
@@ -3794,7 +3838,8 @@ def test_web_chat_shows_the_thread_and_files_a_typed_text_as_a_marked_note(tmp_p
         assert web("/send", "POST", "[test] forged", origin=None)[0] == 403
         assert web("/file/a/..%2Frouting.jsonl")[0] == 404
         assert web("/send", "POST", "[test] typed on the glasses")[0] == 200
-        assert "[web chat] [test] typed on the glasses" in text(notes).splitlines()[-1]
+        # The stub inbox logs every call, so a `status` poll can land after the note: the last note is not the last line.
+        assert "[web chat] [test] typed on the glasses" in [line for line in text(notes).splitlines() if line != "status"][-1]
         assert "forged" not in text(notes)
         messages = thread()
         assert [(m["kind"], m["text"]) for m in messages] == [
@@ -3819,7 +3864,7 @@ def test_web_chat_text_is_routed_and_retried_when_the_inbox_refuses_it(tmp_path,
     try:
         inbound("m1", text="[test] hello from the phone")
         (fake / "inbox-fail").touch()
-        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn = HTTPConnection("127.0.0.1", port, timeout=10 * TIMEOUT_SCALE)
         conn.request("POST", "/send", body="[test] typed on the glasses", headers={"Host": tailnet, "Origin": f"https://{tailnet}"})
         assert conn.getresponse().status == 200
         routes = [json.loads(line) for line in text(state / "routing.jsonl").splitlines()]

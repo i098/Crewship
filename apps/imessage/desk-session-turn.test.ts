@@ -196,22 +196,3 @@ test("an owner instruction is still handed to Firstmate when the ack cannot be q
   const { events } = await ownerInstruction(() => { throw new Error("queue write failed"); });
   expect(events).toEqual([["handoff"]]);
 });
-
-test("a thread reply to a mate's bubble is relayed to that mate with no model turn;", async () => {
-  const dir = mkdtempSync(join(process.env.TMPDIR || "/tmp", "desk-turn-"));
-  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
-  mkdirSync(join(dir, "data"));
-  writeFileSync(join(dir, "data/secondmates.md"), "- engram - Engram mate (home: /srv/engram; scope: engram work; projects: none)\n");
-  const relayed: string[] = [];
-  const turn = createSessionTurn<TurnRequest>({ sent: () => false, record: () => {}, message: async () => true,
-    env: { PATH: process.env.PATH }, provider: "omp", model: "claude-haiku-5-5", reasoning: "off", supervisorModel: "", vetted: true,
-    stateDir: dir, memoryDir: join(dir, "memory"), fmHome: dir, memory: { msgs: [], render: () => "" } as never,
-    memoryIndex: () => 0, safe: (text) => text, muted: () => false, track: (proc) => { cleanup.push(() => proc.kill()); return proc; },
-    log: () => () => {}, handoff: () => relayed.push("handoff"), answer: () => {}, react: () => {},
-    relay: async (items, mate) => { relayed.push(`${mate.id}:${items.map((r) => r.requestId)}`); }, inbox: async () => ({ status: "", statusOk: true }),
-    stopping: () => false, listed: () => true, send: async () => true, report: () => {}, notice: () => {}, roots: { write: [], read: [] }, claim: () => true, sendImage: async () => {}, canSend: () => true,
-  });
-  const reply = (id: string): TurnRequest => ({ requestId: id, text: "thanks", mateEligible: true, firstmate: false, memoryId: 0, route: "pending", threadMate: "engram" });
-  await turn([reply("r1")], new AbortController(), () => true);
-  expect(relayed).toEqual(["engram:r1"]);
-});

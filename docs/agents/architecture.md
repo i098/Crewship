@@ -183,6 +183,7 @@ Job-level conditions let skipped required checks report instead of remaining pen
 The `changelog fragment` job lives in `changelog.yml`, so label changes re-run only that workflow; `ci.yml` ignores `labeled`/`unlabeled`. It runs on PRs unless they have the `no changelog` label.
 The required `pull request body` job lives in `pr-body.yml` and runs on opened, edited, synchronized, and reopened PRs.
 It uses Python's standard library, runs its focused checker tests, and validates the body against the repository template.
+It rejects a closing keyword in the body, the PR title, and the commits.
 It has no path, label, author, or release exemption.
 Body edits do not restart the main build workflow.
 The required `configuration and python checks` name stays unchanged.

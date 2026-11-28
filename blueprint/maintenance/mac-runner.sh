@@ -8,7 +8,7 @@
 #   mac-runner.sh remove                  stop every agent, delete its plist and this folder
 #
 # Put the script in ~/actions-runner-<name>/ first. Jobs get labels self-hosted, macOS,
-# ARM64 and mac-<NAME>. docs/ci-pool.md#macos-runner has the operator guide.
+# ARM64 and mac-<NAME>. docs/runner-up.md#macos-runner has the operator guide.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")" && pwd)

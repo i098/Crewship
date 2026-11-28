@@ -1,6 +1,7 @@
 {{ ansible_managed | comment }}
 # Triggered by runner-up-guard.timer. At or above {{ crewship_runner_up_pause_pct }}% on the disk of the build data it stops the
 # coordinators, so no new job starts; below {{ crewship_runner_up_resume_pct }}% it starts the ones it stopped. A running job is never stopped.
+# It also stops them while less than {{ crewship_runner_up_job_gb }} GB per running place is free.
 [Unit]
 Description=runner-up disk guard (Crewship managed)
 
@@ -8,9 +9,10 @@ Description=runner-up disk guard (Crewship managed)
 Type=oneshot
 Environment=PATH={{ crewship_runner_up_shim_dir }}:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUNNER_UP_SLICE={{ crewship_runner_up_slice }}
-Environment=RUNNER_UP_GUARD_PATH={{ crewship_runner_up_data_dir | default(crewship_cfg.home, true) }}
+Environment="RUNNER_UP_GUARD_PATH={{ crewship_runner_up_guard_path }}"
 Environment=RUNNER_UP_PAUSE_PCT={{ crewship_runner_up_pause_pct }}
 Environment=RUNNER_UP_RESUME_PCT={{ crewship_runner_up_resume_pct }}
+Environment=RUNNER_UP_JOB_GB={{ crewship_runner_up_job_gb }}
 Environment="RUNNER_UP_INSTANCES={{ crewship_runner_up_instances | join(' ') }}"
 Environment="RUNNER_UP_IO_HEAVY={{ crewship_runner_up_io_heavy | join(' ') }}"
 ExecStart={{ crewship_runner_up_maintain }} guard

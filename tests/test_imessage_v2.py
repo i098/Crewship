@@ -90,7 +90,7 @@ def v2_rig(tmp_path, front, inception=None, **extra):
     rig = FallbackRig(
         tmp_path,
         FM_IMESSAGE_TEST="1",
-        FM_IMESSAGE_TEST_QUIET_MS="30",
+        FM_IMESSAGE_TEST_QUIET_MS=extra.pop("FM_IMESSAGE_TEST_QUIET_MS", "30"),
         FM_IMESSAGE_DESK_V2="true",
         INCEPTION_API_KEY="test-key",
         FM_DESK_INCEPTION_URL=url,

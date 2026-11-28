@@ -40,7 +40,7 @@
     remote_src: true
   notify: deploy fm-imessage
 
-- name: Install the iMessage rolling deploy command
+- name: Install the iMessage deploy command
   ansible.builtin.copy:
     src: "{{ crewship_repo }}/apps/imessage/{{ item.src }}"
     dest: "{{ crewship_local_bin }}/{{ item.dest }}"
@@ -50,6 +50,13 @@
     - { src: deploy.ts, dest: imessage-deploy.ts }
     - { src: ownership.ts, dest: ownership.ts }
   notify: deploy fm-imessage
+
+- name: Install the iMessage failure report command
+  ansible.builtin.copy:
+    src: "{{ crewship_repo }}/apps/imessage/selfheal.ts"
+    dest: "{{ crewship_local_bin }}/imessage-selfheal.ts"
+    mode: "0755"
+    remote_src: true
 
 - name: Install the iMessage commands
   ansible.builtin.copy:
@@ -130,8 +137,8 @@
 
 - name: Render the iMessage self-heal unit
   ansible.builtin.template:
-    src: fm-imessage-heal.service.j2
-    dest: "{{ crewship_user_units }}/fm-imessage-heal.service"
+    src: fm-imessage-heal@.service.j2
+    dest: "{{ crewship_user_units }}/fm-imessage-heal@.service"
     mode: "0600"
   notify: reload user systemd
 

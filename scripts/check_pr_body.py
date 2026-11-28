@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
 import argparse
 import re
+import subprocess
 import sys
 from html import unescape
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parents[1] / ".github/PULL_REQUEST_TEMPLATE.md"
+CLOSING_KEYWORD = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+(?:[\w.-]+/[\w.-]+)?#[0-9]+", re.I
+)
+CLOSING_ERROR = (
+    "Remove the closing keyword: a merge never closes an issue. "
+    "Use Refs #N; close the issue only after the change is deployed and tested."
+)
+COMMIT_REMEDY = (
+    "Reword the commit with amend or rebase on the PR branch. "
+    "Write the closing keyword without an issue number when you quote it."
+)
 HEADING = re.compile(r"^##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 CHECKBOX = re.compile(r"^ {0,3}[-*] \[([ xX])\] (.+)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+LITERAL_HTML = re.compile(r"^ {0,3}<(pre|script|style|textarea)(?=[ \t>]|$)", re.I)
+RAW_HTML = re.compile(r"^ {0,3}<(?:[!?/]|[A-Za-z][A-Za-z0-9-]*(?=[ \t]|/?>|$))")
 CODE_SPAN = r"(?<!`)(`+)(?!`)(.*?)\1(?!`)"
 COMMENT_TOKEN = re.compile(CODE_SPAN + r"|<!--")
+HTML_COMMENT = re.compile(r"<!--")
 MARKUP = re.compile(CODE_SPAN + r"|</?[A-Za-z][\w-]*(?:\s+[^<>]*)?\s*/?>")
 LINK_DEFINITION = re.compile(
     r"^ {0,3}\[(?:\\.|[^\[\]\\\n])+\]:[ \t]*(?:\n[ \t]*)?"
@@ -18,9 +33,24 @@ LINK_DEFINITION = re.compile(
     r"""(?:[ \t]*(?:\n[ \t]*)?(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*(?=\n|$)""",
     re.M,
 )
+UI_GLOBS = (
+    "site/public/**/*.html",
+    "site/public/**/*.css",
+    "site/public/**/*.js",
+    "site/build.py",
+    "tools/*-tui/**/*.ts",
+    "tools/fleet-health/**/*.ts",
+    "tools/tui-theme/**/*.ts",
+)
+UI_EXCLUDES = ("site/public/google2a77445d3f9ccb0e.html", "tools/**/*.test.ts")
+SCREENSHOT = re.compile(
+    r" {0,3}!\[(Before|After)\]\(https://github\.com/user-attachments/assets/"
+    r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\)[ \t]*"
+)
+NEW_VIEW = re.compile(r" {0,3}Before: none, new view[ \t]*")
 
 
-def strip_comments(line, comment):
+def strip_comments(line, comment, *, token_pattern=COMMENT_TOKEN):
     output = []
     while line:
         if comment:
@@ -29,12 +59,12 @@ def strip_comments(line, comment):
                 break
             comment = False
             continue
-        token = COMMENT_TOKEN.search(line)
+        token = token_pattern.search(line)
         if not token:
             output.append(line)
             break
         output.append(line[:token.start()])
-        if token[1]:
+        if token[0] != "<!--":
             output.append(token[0])
         else:
             comment = True
@@ -42,33 +72,62 @@ def strip_comments(line, comment):
     return "".join(output), comment
 
 
+def literal_html_lines(tag, line, lines):
+    end = re.compile(rf"</{tag}>", re.I)
+    comment = False
+    strip_pre_comments = tag.lower() == "pre"
+    while line is not None:
+        if strip_pre_comments:
+            line, comment = strip_comments(line, comment, token_pattern=HTML_COMMENT)
+        yield line, "html"
+        if end.search(line):
+            return comment
+        line = next(lines, None)
+    return comment
+
+
+def fenced_lines(fence, lines):
+    end = re.compile(rf"^ {{0,3}}{fence[0]}{{{len(fence)},}}\s*$")
+    for line in lines:
+        if end.fullmatch(line):
+            break
+        yield line, "code"
+
+
+def body_lines(markdown):
+    lines = iter(markdown.splitlines())
+    comment = False
+    for raw in lines:
+        if not comment and (opening := LITERAL_HTML.match(raw)):
+            comment = yield from literal_html_lines(opening[1], raw, lines)
+            continue
+        raw_html = comment or RAW_HTML.match(raw)
+        line, comment = strip_comments(raw, comment)
+        if raw_html:
+            yield line, "html"
+        elif marker := FENCE.match(line):
+            yield from fenced_lines(marker[1], lines)
+        else:
+            yield line, ""
+
+
 def sections(markdown):
     result = [("", [])]
-    fence = ""
-    comment = False
-    for line in markdown.splitlines():
-        if not fence:
-            line, comment = strip_comments(line, comment)
-        marker = FENCE.match(line)
-        in_code = bool(fence or marker)
-        if fence:
-            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
-                if not marker[2].strip():
-                    fence = ""
-        elif marker:
-            fence = marker[1]
+    for line, in_code in body_lines(markdown):
         heading = HEADING.fullmatch(line) if not in_code else None
         if heading:
             result.append((heading[1], []))
-        elif not marker:
+        else:
             result[-1][1].append((line, in_code))
     return result
 
 
 def has_content(lines):
-    if any(code and re.search(r"\w", line) for line, code in lines):
+    if any(kind == "code" and re.search(r"\w", line) for line, kind in lines):
         return True
-    text = LINK_DEFINITION.sub("", "\n".join(line if not code else "" for line, code in lines))
+    text = LINK_DEFINITION.sub(
+        "", "\n".join(line if kind != "code" else "" for line, kind in lines)
+    )
     if any(
         line.startswith(("    ", "\t")) and re.search(r"\w", line) for line in text.splitlines()
     ):
@@ -78,15 +137,79 @@ def has_content(lines):
     return bool(re.search(r"\w", unescape(MARKUP.sub("", text))))
 
 
-def check_body(body, template):
+def check_screenshots(actual):
+    matches = [lines for name, lines in actual if name == "Review evidence"]
+    if len(matches) != 1:
+        return ["Include exactly one ## Review evidence section."]
+    images = {"Before": set(), "After": set()}
+    new_view = False
+    for line, code in matches[0]:
+        if code:
+            continue
+        if image := SCREENSHOT.fullmatch(line):
+            images[image[1]].add(image[2].lower())
+        elif NEW_VIEW.fullmatch(line):
+            new_view = True
+    before, after = images["Before"], images["After"]
+    if after and (new_view != bool(before)) and before.isdisjoint(after):
+        return []
+    return [
+        "Embed distinct GitHub Before and After screenshots in ## Review evidence. "
+        "For a new view, replace the Before screenshot with: Before: none, new view"
+    ]
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def changes_ui(base, *, head="HEAD"):
+    paths = git(
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--no-relative",
+        f"{base}...{head}",
+        "--",
+        *(f":(top,icase,glob){pattern}" for pattern in UI_GLOBS),
+        *(f":(top,exclude,icase,glob){pattern}" for pattern in UI_EXCLUDES),
+    )
+    return bool(paths)
+
+
+def commit_messages(base, head="HEAD"):
+    records = git("log", "--no-merges", "--format=%B%x00", f"{base}..{head}").split("\0")
+    return [record.strip("\n") for record in records[:-1]]
+
+
+def closing_keyword_errors(messages, where="Commit", remedy=""):
+    errors = []
+    for message in messages:
+        if CLOSING_KEYWORD.search(message):
+            subject = message.split("\n", 1)[0]
+            detail = f"{CLOSING_ERROR} {where}: {subject}"
+            errors.append(f"{detail}. {remedy}" if remedy else detail)
+    return errors
+
+
+def check_issue_reference(body):
     errors = []
     first = next((line for line in body.splitlines() if line.strip()), "")
-    if not re.fullmatch(r" {0,3}Closes #[1-9][0-9]*[ \t]*", first):
-        errors.append("Start the body with Closes # followed by a positive issue number.")
+    if not re.fullmatch(r" {0,3}Refs #[1-9][0-9]*[ \t]*", first):
+        errors.append("Start the body with Refs # followed by a positive issue number.")
+    if CLOSING_KEYWORD.search(body):
+        errors.append(CLOSING_ERROR)
+    return errors
+
+
+def check_body(body, template, *, ui=False):
+    errors = check_issue_reference(body)
 
     actual = sections(body)
     for heading, template_lines in sections(template):
-        if not heading:
+        if not heading or heading == "Review evidence":
             continue
         matches = [lines for name, lines in actual if name == heading]
         if len(matches) != 1:
@@ -111,15 +234,33 @@ def check_body(body, template):
                 )
                 if not reason or not has_content([(reason[1].strip(), False)]):
                     errors.append(f"Check the completed item or add Not applicable: <reason>: {label}")
+    if ui:
+        errors.extend(check_screenshots(actual))
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description="Check a PR body against the repository template.")
     parser.add_argument("body_file", nargs="?", default="-", help="body file, or - for stdin")
+    parser.add_argument("--base", help="detect UI changes against this Git revision")
+    parser.add_argument("--head", default="HEAD", help="Git revision to check for UI changes")
+    parser.add_argument("--title", default="", help="pull request title to check")
     args = parser.parse_args()
     body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
-    errors = check_body(body, TEMPLATE.read_text())
+    try:
+        ui = bool(args.base) and changes_ui(args.base, head=args.head)
+        commit_errors = (
+            closing_keyword_errors(
+                commit_messages(args.base, args.head), remedy=COMMIT_REMEDY
+            )
+            if args.base
+            else []
+        )
+    except subprocess.CalledProcessError as error:
+        print(error.stderr.strip() or f"git failed for base {args.base}", file=sys.stderr)
+        return 2
+    errors = check_body(body, TEMPLATE.read_text(), ui=ui) + commit_errors
+    errors += closing_keyword_errors([args.title], "Title")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -10,6 +10,41 @@
 #
 # Check-mode safe. Idempotent: every file is a copy or a template of a repository source.
 
+- name: Validate the runner-up settings before configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - "import json, runpy, sys; runpy.run_path(sys.argv[1])['validate_runner_up_apply'](json.load(sys.stdin))"
+      - "{{ crewship_repo }}/scripts/ship.py"
+    stdin: "{{ crewship_runner_up | to_json }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+
+- name: Require a supported Docker-in-Docker host
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
+      - check-dind-release
+      - "{{ ansible_facts.distribution | lower }}"
+      - "{{ ansible_facts.distribution_version }}"
+  check_mode: false
+  changed_when: false
+  when: crewship_runner_up_dind | bool
+
+- name: Require the Docker-in-Docker data directory on the capped device
+  ansible.builtin.command:
+    argv:
+      - "{{ crewship_blueprint }}/maintenance/runner-up-docker"
+      - check-dind-storage
+      - "{{ crewship_runner_up_data_dir }}"
+      - "{{ crewship_runner_up_io_write_device }}"
+  check_mode: false
+  changed_when: false
+  when: crewship_runner_up_dind | bool
+
 - name: Cap CI jobs in a systemd slice
   become: true
   block:
@@ -19,6 +54,14 @@
         dest: "{{ crewship_runner_up_slice_dir }}/{{ crewship_runner_up_slice }}"
         mode: "0644"
       notify: reload system systemd
+
+    - name: Load runner-up slice limits before Docker-in-Docker preparation
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when:
+        - crewship_runner_up_dind | bool
+        - crewship_manage_services | bool
+        - not ansible_check_mode
 
 - name: Install runner-up for the account
   become: "{{ crewship_become_target | bool }}"
@@ -65,6 +108,11 @@
             state: directory
             mode: "1777"
 
+        - name: Check that the slot count covers every job runner-up places
+          ansible.builtin.assert:
+            that: crewship_build_gate_slots | int >= crewship_runner_up_total_slots | int + crewship_runner_up_repos | length
+            fail_msg: build_gate_slots is below runner_up total_slots plus one per repos entry; build-gate would starve placed runners
+
         - name: Write the host-wide slot count
           ansible.builtin.copy:
             content: "{{ crewship_build_gate_slots }}\n"
@@ -78,12 +126,46 @@
             mode: "0755"
             remote_src: true
 
-    - name: Install the job image recipe
+    - name: Install the job image recipes
       ansible.builtin.copy:
-        src: "{{ crewship_blueprint }}/containers/ci-runner.Dockerfile"
-        dest: "{{ crewship_runner_up_dockerfile }}"
+        src: "{{ crewship_blueprint }}/containers/{{ item }}"
+        dest: "{{ crewship_runner_up_dir }}/{{ item }}"
         mode: "0644"
         remote_src: true
+      loop: "{{ ['ci-runner.Dockerfile'] + (['runner-up-dind.Dockerfile'] if crewship_runner_up_dind | bool else []) }}"
+
+    - name: Install the Docker-in-Docker image tag for the shim and builder
+      ansible.builtin.copy:
+        content: "{{ crewship_runner_up_dind_image }}\n"
+        dest: "{{ crewship_runner_up_shim_dir }}/dind-image"
+        mode: "0644"
+      when: crewship_runner_up_dind | bool
+
+    - name: Prepare Docker-in-Docker before publishing the runner config
+      when:
+        - crewship_runner_up_dind | bool
+        - crewship_manage_services | bool
+        - not ansible_check_mode
+      block:
+        - name: Build the initial Docker-in-Docker image
+          ansible.builtin.command:
+            argv:
+              - timeout
+              - --kill-after=10s
+              - "{{ crewship_runner_up_image_timeout }}s"
+              - "{{ crewship_runner_up_maintain }}"
+              - image
+              - --ensure
+          environment:
+            PATH: "{{ crewship_runner_up_shim_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            RUNNER_UP_IMAGE: "{{ crewship_runner_up_image }}"
+            RUNNER_UP_DOCKERFILE: "{{ crewship_runner_up_dockerfile }}"
+            RUNNER_UP_GUARD_PATH: "{{ crewship_runner_up_guard_path }}"
+            RUNNER_UP_DIND_DOCKERFILE: "{{ crewship_runner_up_dind_dockerfile }}"
+            RUNNER_UP_SLICE: "{{ crewship_runner_up_slice }}"
+            XDG_RUNTIME_DIR: "{{ crewship_user_runtime_dir }}"
+          register: crewship_runner_up_dind_build
+          changed_when: "'Built the runner-up Docker-in-Docker image.' in crewship_runner_up_dind_build.stdout"
 
     - name: Check that each repository has its own instance name
       ansible.builtin.assert:
@@ -100,6 +182,7 @@
         crewship_runner_up_repo: "{{ item.0 }}"
         crewship_runner_up_instance: "{{ item.1 }}"
       loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+      when: (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos
 
     - name: Stop and disable the single coordinator of the earlier layout
       ansible.builtin.systemd_service:
@@ -164,15 +247,15 @@
         src: "{{ item }}.j2"
         dest: "{{ crewship_user_units }}/{{ item }}"
         mode: "0644"
-      loop: "{{ crewship_runner_up_units + (crewship_runner_up_image_units if crewship_runner_up_build_image | bool else []) }}"
+      loop: "{{ crewship_runner_up_units + (crewship_runner_up_image_units if crewship_runner_up_image_timer | bool else []) }}"
       notify: reload user systemd
 
-    - name: Remove the image timer while the CI pool builds the image
+    - name: Remove the image timer when the CI pool owns all image builds
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop: >-
-        {{ [] if crewship_runner_up_build_image | bool else
+        {{ [] if crewship_runner_up_image_timer | bool else
            [crewship_user_units ~ '/runner-up-image.service',
             crewship_user_units ~ '/runner-up-image.timer',
             crewship_user_units ~ '/timers.target.wants/runner-up-image.timer'] }}
@@ -181,11 +264,20 @@
     - name: Statically enable the coordinator of each repository
       ansible.builtin.file:
         src: "{{ crewship_user_units }}/runner-up@.service"
-        dest: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item }}.service"
+        dest: "{{ crewship_user_units }}/default.target.wants/runner-up@{{ item.1 }}.service"
         state: link
         force: true
         follow: false
-      loop: "{{ crewship_runner_up_instances }}"
+      loop: "{{ crewship_runner_up_repo_names | zip(crewship_runner_up_instances) | list }}"
+      when: (crewship_manage_services | bool) or item.0 not in crewship_runner_up_dind_repos
+
+    - name: Statically enable the job image check at boot
+      ansible.builtin.file:
+        src: "{{ crewship_user_units }}/runner-up-image-boot.service"
+        dest: "{{ crewship_user_units }}/default.target.wants/runner-up-image-boot.service"
+        state: link
+        force: true
+        follow: false
 
     - name: Statically enable the runner-up timers
       ansible.builtin.file:
@@ -196,7 +288,7 @@
         follow: false
       loop: >-
         {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
-           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
+           + (['runner-up-image.timer'] if crewship_runner_up_image_timer | bool else []) }}
 
     - name: Check for the installed runner-up unit
       ansible.builtin.stat:
@@ -224,7 +316,7 @@
         state: started
       loop: >-
         {{ ['runner-up-clean.timer', 'runner-up-guard.timer']
-           + (['runner-up-image.timer'] if crewship_runner_up_build_image | bool else []) }}
+           + (['runner-up-image.timer'] if crewship_runner_up_image_timer | bool else []) }}
       environment: "{{ crewship_user_systemd_env }}"
       when:
         - crewship_manage_services | bool

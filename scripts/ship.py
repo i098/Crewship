@@ -50,10 +50,24 @@ OPT_IN = {
 }
 # The files agent_instructions writes (scripts/instructions.py TARGETS), under the home.
 INSTRUCTION_FILES = (".claude/CLAUDE.md", ".omp/agent/AGENTS.md", ".codex/AGENTS.md")
-INSTRUCTION_MODES = {"skip": "leave them as they are", "overwrite": "replace them, after a timestamped .bak", "append": "add one marked block"}
+INSTRUCTION_MODES = {
+    "skip": "leave them as they are",
+    "overwrite": "replace them, after a timestamped .bak",
+    "append": "add one marked block",
+}
 # A container worker image has no Docker, no user services, no desktop and no Firstmate.
 NOT_IN_CONTAINER = {
-    "docker", "chat", "gateway", "fleet_guards", "project_databases", "tailscale", "desktop", "board", "koncreet", "forgejo", "vphone",
+    "docker",
+    "chat",
+    "gateway",
+    "fleet_guards",
+    "project_databases",
+    "tailscale",
+    "desktop",
+    "board",
+    "koncreet",
+    "forgejo",
+    "vphone",
 }
 
 
@@ -68,13 +82,24 @@ def validate_document(document, schema_name):
 
 
 # Pool labels runner-up refuses: internal/config checkLabel in kunchenguid/runner-up.
-RUNNER_UP_RESERVED_LABELS = ("self-hosted", "linux", "windows", "macos", "x64", "arm64", "arm", "x86")
+RUNNER_UP_RESERVED_LABELS = (
+    "self-hosted",
+    "linux",
+    "windows",
+    "macos",
+    "x64",
+    "arm64",
+    "arm",
+    "x86",
+)
 RUNNER_UP_HOSTED_PREFIXES = ("ubuntu-", "windows-", "macos-")
 
 
 def entry_slugs(entries):
-    """Slot prefixes; the same rule as entry_slug() in blueprint/maintenance/ci-pool.py."""
-    return [re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-") for e in entries]
+    """Slot prefixes."""
+    return [
+        re.sub(r"[^a-z0-9]+", "-", (e.get("name") or e["repo"]).lower()).strip("-") for e in entries
+    ]
 
 
 def validate_runner_up(config):
@@ -88,12 +113,15 @@ def validate_runner_up(config):
         raise ValueError("runner_up needs repos: the repositories it runs jobs for")
     if len(set(entry_slugs(entries))) != len(entries):
         raise ValueError("runner_up.repos names a repository twice (or two that share a slot name)")
+    validate_runner_up_pools(entries)
+    names = [m["name"] for m in runner.get("machines", [])]
+    if len(set(names)) != len(names) or "local" in names:
+        raise ValueError("runner_up.machines names must be unique and not `local`")
+
+
+def validate_runner_up_pools(entries):
+    pool_modes = {}
     for entry in entries:
-        if "docker" in entry:
-            raise ValueError(
-                f"{entry['repo']}: runner-up has no Docker daemon in the job (docker: dind);"
-                " keep this repository on ci_pool"
-            )
         pools = [
             label for label in entry["labels"] if label.lower() not in RUNNER_UP_RESERVED_LABELS
         ]
@@ -104,16 +132,36 @@ def validate_runner_up(config):
             )
         for label in pools:
             if label.lower().startswith(RUNNER_UP_HOSTED_PREFIXES):
-                raise ValueError(f"{entry['repo']}: label {label} looks like a GitHub-hosted runner")
-    names = [m["name"] for m in runner.get("machines", [])]
-    if len(set(names)) != len(names) or "local" in names:
-        raise ValueError("runner_up.machines names must be unique and not `local`")
+                raise ValueError(
+                    f"{entry['repo']}: label {label} looks like a GitHub-hosted runner"
+                )
+            key = (entry["repo"].lower(), label.lower())
+            mode = entry.get("docker")
+            if pool_modes.setdefault(key, mode) != mode:
+                raise ValueError(
+                    f"{entry['repo']}: pool {label} serves both plain and Docker-in-Docker places"
+                )
+
+
+def validate_runner_up_apply(runner):
+    schema = json.loads((ROOT / "blueprint/schemas/crewship.schema.json").read_text())
+    fields = schema["properties"]["crewship"]["properties"]["runner_up"]["properties"]
+    docker = fields["repos"]["items"]["properties"]["docker"]
+    for entry in runner["repos"]:
+        if "docker" in entry:
+            jsonschema.Draft202012Validator(docker).validate(entry["docker"])
+    for name in ("io_write_device", "io_write_mb", "io_write_iops"):
+        if name in runner:
+            jsonschema.Draft202012Validator(fields[name]).validate(runner[name])
+    validate_runner_up_pools(runner["repos"])
 
 
 def validate_cloudflare_runner(config):
     runner = config["cloudflare_runner"]
     if "credentials_file" not in runner and not all(entry.get("kvz") for entry in runner["repos"]):
-        raise ValueError("cloudflare_runner.credentials_file is required unless every repository has a kvz block")
+        raise ValueError(
+            "cloudflare_runner.credentials_file is required unless every repository has a kvz block"
+        )
     if ".." in Path(runner.get("credentials_file", "")).parts:
         raise ValueError("cloudflare_runner.credentials_file must not traverse; give a plain path")
     repos = [entry["repo"].lower() for entry in runner["repos"]]
@@ -131,7 +179,8 @@ def validate_cloudflare_runner(config):
 def validate_config(document):
     config = document.get("crewship") if isinstance(document, dict) else None
     if isinstance(config, dict) and (
-        isinstance(config.get("profiles"), dict) and REMOVED_PROFILE in config["profiles"]
+        isinstance(config.get("profiles"), dict)
+        and REMOVED_PROFILE in config["profiles"]
         or isinstance(config.get("fleet"), dict)
         and any(key in config["fleet"] for key in REMOVED_FLEET_KEYS)
     ):
@@ -146,10 +195,15 @@ def validate_config(document):
     for alias, name in PROFILE_ALIASES.items():
         if alias in profiles:
             if profiles.setdefault(name, profiles[alias]) != profiles[alias]:
-                raise ValueError(f"profiles.{alias} is another name of profiles.{name}; set only one")
+                raise ValueError(
+                    f"profiles.{alias} is another name of profiles.{name}; set only one"
+                )
             del profiles[alias]
-            print(f"NOTE: crewship.profiles.{alias} is now crewship.profiles.{name}; "
-                  "the old name still works, rename it in your host config.", file=sys.stderr)
+            print(
+                f"NOTE: crewship.profiles.{alias} is now crewship.profiles.{name}; "
+                "the old name still works, rename it in your host config.",
+                file=sys.stderr,
+            )
     config = document["crewship"]
     home, workspace = Path(config["home"]), Path(config["workspace"])
     if (
@@ -174,7 +228,9 @@ def validate_config(document):
             raise ValueError("project databases require the docker and firstmate profiles")
     skills = config.get("skills", {})
     if "private_ref" in skills and skills["private_source"].startswith("/"):
-        raise ValueError("skills.private_ref applies only to a git source; remove it for a local path")
+        raise ValueError(
+            "skills.private_ref applies only to a git source; remove it for a local path"
+        )
     for block in ("imessage", "github_board"):
         if block in config and not config["profiles"]["firstmate"]:
             raise ValueError(f"{block} requires the firstmate profile")
@@ -184,14 +240,6 @@ def validate_config(document):
         raise ValueError(
             "board requires the firstmate profile and the development profile (it builds with cargo)"
         )
-    if "ci_pool" in config:
-        pool = config["ci_pool"]
-        if not config["profiles"]["docker"]:
-            raise ValueError("the CI pool requires the docker profile")
-        if ".." in Path(pool["data_dir"]).parts:
-            raise ValueError("ci_pool.data_dir must not traverse; give a plain path")
-        if len(set(entry_slugs(pool["repos"]))) != len(pool["repos"]):
-            raise ValueError("ci_pool.repos names a repository twice (or two that share a unit name)")
     if "runner_up" in config:
         validate_runner_up(config)
     if "cloudflare_runner" in config:
@@ -214,7 +262,9 @@ def migrate_config(path, document):
     if not isinstance(document, dict) or OLD_ROOT not in document:
         return document
     if NEW_ROOT in document:
-        raise ValueError("host config contains both old and new keys; resolve them before rewriting")
+        raise ValueError(
+            "host config contains both old and new keys; resolve them before rewriting"
+        )
     document = {NEW_ROOT if key == OLD_ROOT else key: value for key, value in document.items()}
     backup = path.with_name(path.name + ".bak")
     # Exclusive creation keeps the first backup and refuses an ambiguous retry.
@@ -311,15 +361,23 @@ def ask_instructions_mode(args, chosen, home):
     """The checklist's mode for a file the instructions would touch; None when it does not ask (append is the default)."""
     if "agent_instructions" not in chosen or args.with_ is not None or not sys.stdin.isatty():
         return None
-    found = [rel for rel in INSTRUCTION_FILES if (Path(home) / rel).exists() or (Path(home) / rel).is_symlink()]
+    found = [
+        rel
+        for rel in INSTRUCTION_FILES
+        if (Path(home) / rel).exists() or (Path(home) / rel).is_symlink()
+    ]
     if not found:
         return None
-    print(f"These files already exist: {', '.join('~/' + rel for rel in found)}. What should Crewship do with them?")
+    print(
+        f"These files already exist: {', '.join('~/' + rel for rel in found)}. What should Crewship do with them?"
+    )
     for mode, text in INSTRUCTION_MODES.items():
         print(f"  {mode:<10} {text}")
     while True:
         try:
-            answer = input("skip, overwrite or append; Enter for append: ").strip().lower() or "append"
+            answer = (
+                input("skip, overwrite or append; Enter for append: ").strip().lower() or "append"
+            )
         except EOFError:
             return None
         if answer in INSTRUCTION_MODES:
@@ -357,7 +415,9 @@ def initialize(args):
     with destination.open("x") as stream:
         yaml.safe_dump(config, stream, sort_keys=False)
     destination.chmod(0o600)
-    print(f"Created {destination}; review profiles before {shlex.quote(str(ROOT / 'ship.sh'))} launch.")
+    print(
+        f"Created {destination}; review profiles before {shlex.quote(str(ROOT / 'ship.sh'))} launch."
+    )
 
 
 def provision(document, check):
@@ -421,7 +481,9 @@ def firstmate_memory_ready(config):
         f"({available:,} MB available; {floor:,} MB required)."
     )
     if not ready:
-        print("Free memory or add RAM before starting workers. Swap does not count toward this floor.")
+        print(
+            "Free memory or add RAM before starting workers. Swap does not count toward this floor."
+        )
     return ready
 
 
@@ -478,10 +540,16 @@ def tool_checks(config, environment):
 
 def github_signed_in(environment):
     try:
-        return subprocess.run(
-            ["gh", "auth", "status", "--hostname", "github.com"],
-            env=environment, cwd=environment["HOME"], capture_output=True, timeout=20,
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["gh", "auth", "status", "--hostname", "github.com"],
+                env=environment,
+                cwd=environment["HOME"],
+                capture_output=True,
+                timeout=20,
+            ).returncode
+            == 0
+        )
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -489,8 +557,12 @@ def github_signed_in(environment):
 def omp_signed_in(environment):
     try:
         probe = subprocess.run(
-            ["omp", "models", "--json"], env=environment,
-            cwd=environment["HOME"], capture_output=True, text=True, timeout=30,
+            ["omp", "models", "--json"],
+            env=environment,
+            cwd=environment["HOME"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         models = json.loads(probe.stdout)["models"]
         return probe.returncode == 0 and isinstance(models, list) and bool(models)
@@ -548,7 +620,9 @@ def firstmate_checks(config, environment):
     try:
         service = subprocess.run(
             ["systemctl", "--user", "is-active", "--quiet", "herdr.service"],
-            env=environment, capture_output=True, timeout=20,
+            env=environment,
+            capture_output=True,
+            timeout=20,
         )
         if service.returncode:
             pending.append("Herdr service")
@@ -573,17 +647,27 @@ def setup_status(document, config_path):
     command = shlex.join([str(ROOT / "ship.sh"), "launch", "--config", str(config_path)])
     resume = shlex.join([str(ROOT / "ship.sh"), "setup", "--config", str(config_path)])
     if pwd.getpwuid(os.getuid()).pw_name != config["user"]:
-        resume = shlex.join([
-            "sudo", "-iu", config["user"], str(ROOT / "ship.sh"),
-            "setup", "--config", str(config_path),
-        ])
+        resume = shlex.join(
+            [
+                "sudo",
+                "-iu",
+                config["user"],
+                str(ROOT / "ship.sh"),
+                "setup",
+                "--config",
+                str(config_path),
+            ]
+        )
         for section in ("Software", "Sign-ins", "Fleet ready"):
             print(f"{section}: unchecked; run: {resume}")
         return 1
     environment = host_environment(config)
     failed = [name for name, ok, _ in tool_checks(config, environment) if not ok]
-    print(f"Software: missing or failed {', '.join(failed)}; run: {command}"
-          if failed else "Software: ready")
+    print(
+        f"Software: missing or failed {', '.join(failed)}; run: {command}"
+        if failed
+        else "Software: ready"
+    )
     missing = []
     if config["profiles"]["agents"]:
         if not github_signed_in(environment):
@@ -591,8 +675,7 @@ def setup_status(document, config_path):
             missing.append(f"{gh} auth login --hostname github.com --git-protocol https --web")
         if not omp_signed_in(environment):
             missing.append(shlex.quote(str(Path(config["home"]) / ".local/bin/omp")))
-    print(f"Sign-ins: pending; run: {' && '.join(missing)}"
-          if missing else "Sign-ins: ready")
+    print(f"Sign-ins: pending; run: {' && '.join(missing)}" if missing else "Sign-ins: ready")
     pending = firstmate_checks(config, environment)
     memory_ready = firstmate_memory_ready(config)
     if failed or missing:
@@ -630,7 +713,9 @@ def dia_cookies_offer(document, config_path):
         return 0
     environment = host_environment(config)
     if not omp_signed_in(environment):
-        print("Dia cookie sync not offered: sign in to omp with /login, then rerun ship.sh launch interactively")
+        print(
+            "Dia cookie sync not offered: sign in to omp with /login, then rerun ship.sh launch interactively"
+        )
         return 0
     try:
         reachable = (
@@ -658,10 +743,21 @@ def dia_cookies_offer(document, config_path):
     )
     argv = [home / ".local/bin/omp", prompt]
     if os.environ.get("CREWSHIP_INSTALL_LOG"):
-        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
-    returncode = subprocess.run(argv, cwd=Path(config["workspace"]) / "firstmate", env=environment).returncode
+        argv = [
+            "script",
+            "--quiet",
+            "--return",
+            "--command",
+            shlex.join(map(str, argv)),
+            "/dev/null",
+        ]
+    returncode = subprocess.run(
+        argv, cwd=Path(config["workspace"]) / "firstmate", env=environment
+    ).returncode
     if returncode:
-        print(f"Dia cookie sync offer did not complete (omp exited {returncode}); rerun ship.sh launch interactively")
+        print(
+            f"Dia cookie sync offer did not complete (omp exited {returncode}); rerun ship.sh launch interactively"
+        )
         return returncode
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
@@ -748,7 +844,14 @@ def questions(document, config_path):
         )
     argv = [omp, prompt]
     if os.environ.get("CREWSHIP_INSTALL_LOG"):
-        argv = ["script", "--quiet", "--return", "--command", shlex.join(map(str, argv)), "/dev/null"]
+        argv = [
+            "script",
+            "--quiet",
+            "--return",
+            "--command",
+            shlex.join(map(str, argv)),
+            "/dev/null",
+        ]
     returncode = subprocess.run(argv, cwd=firstmate, env=environment).returncode
     if returncode:
         print(
@@ -783,7 +886,10 @@ def main():
         ("chart", "preview provisioning changes; old config keys are rewritten once"),
         ("launch", "provision this host from the host config; old config keys are rewritten once"),
         ("survey", "check expected tools; old config keys are rewritten once"),
-        ("setup", "report software, sign-ins and Firstmate readiness; rerun after each missing step"),
+        (
+            "setup",
+            "report software, sign-ins and Firstmate readiness; rerun after each missing step",
+        ),
     ):
         command = commands.add_parser(name, help=text)
         command.add_argument("--config", type=Path, default=None)
@@ -799,7 +905,9 @@ def main():
     path = path.resolve()
     if args.command == "setup" and not path.is_file():
         if args.config:
-            recovery = f"restore the selected config with: ${{EDITOR:-nano}} {shlex.quote(str(path))}"
+            recovery = (
+                f"restore the selected config with: ${{EDITOR:-nano}} {shlex.quote(str(path))}"
+            )
         else:
             recovery = f"run: {shlex.join([str(ROOT / 'ship.sh'), 'dock'])}"
         print(f"Software: unchecked (missing config {path}); {recovery}")
@@ -831,7 +939,9 @@ def main():
             )
         if result == 0:
             if not firstmate_memory_ready(config):
-                print("Software is installed, but Firstmate cannot start workers until the memory check passes.")
+                print(
+                    "Software is installed, but Firstmate cannot start workers until the memory check passes."
+                )
                 return 1
             questions(document, path)
             dia_cookies_offer(document, path)

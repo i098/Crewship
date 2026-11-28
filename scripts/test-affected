@@ -6,7 +6,7 @@
 # testmon sees only Python that runs in the pytest process. Any changed non-.py file (playbook, shell, .ts, ...)
 # or an unknown merge base runs the full suite; testmon still records data (--testmon-noselect).
 # Exceptions: changelog.d/ never selects tests (docs and *.md stay on the full suite: tests read them); apps/imessage/ runs its bun tests and tests/test_imessage*.py.
-# CREWSHIP_TEST_TIMEOUT_SCALE (float, default 1) multiplies subprocess timeouts in tests (tests/conftest.py).
+# CREWSHIP_TEST_TIMEOUT_SCALE (float, default: the host load per CPU, at least 1) multiplies test timeouts (tests/conftest.py).
 set -euo pipefail
 
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)

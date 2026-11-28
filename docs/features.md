@@ -17,7 +17,6 @@ These features turn one server into a self-hosted AI coding agent server where y
 - [Data disk](configuration.md#data-disk)
 - [Model usage metadata and SigNoz export](usage.md) (opt-in)
 - [Private token-saving suggestions](usage.md#optional-reader-installation): a read-only report with daily delivery after a proven manual cycle (opt-in)
-- [Self-hosted CI pool](ci-pool.md): GitHub Actions runners, one job per fresh container; deprecated, replaced by runner-up (opt-in)
 - [runner-up](runner-up.md): GitHub Actions jobs, one container per waiting job, behind CPU, I/O, memory and disk caps (opt-in)
 - [Cloudflare container runner](cloudflare-runner.md): GitHub Actions jobs, one Cloudflare Container per job (opt-in)
 - [Signal bridge](../apps/signal/README.md): save a password from your phone into the secrets file, sent as a Signal Note to Self (opt-in)
@@ -35,3 +34,39 @@ These features turn one server into a self-hosted AI coding agent server where y
 - [Tailscale](security.md#remote-access): the Tailscale daemon for a private network, an option beside the gateway (opt-in)
 - [Agent host move](agent-host-move.md): move the agents to a new host with parity checks
 - [Security](security.md): the password gateway, Tailscale, and credentials
+- [Live view and replay](#live-view-and-replay): Witch setup
+
+## Live view and replay
+
+Use [Witch](https://github.com/i098/witch) to watch agent sessions live and replay recordings by device.
+You need access to the private Witch repository.
+Crewship does not install or configure Witch.
+Follow the [Witch web viewer setup](https://github.com/i098/witch/blob/HEAD/web/README.md) to watch live sessions and replays.
+Set up the Witch server for real screen capture with the [Witch configuration guide](https://github.com/i098/witch/blob/HEAD/docs/configuration.md).
+In `[voxl]`, map each device ID you pass to `--device` to its voxl WebSocket URL.
+Witch records synthetic frames only when the `[voxl]` map is empty.
+For remote access, follow [Witch’s TLS deployment guide](https://github.com/i098/witch/blob/HEAD/docs/deploy.md#tls-through-a-reverse-proxy).
+Use the proxy’s HTTPS URL for the web viewer and for `--server` on remote devices.
+
+The shared server token gives full access to recordings and capture controls for all devices.
+The viewer keeps the token in the browser profile for later visits.
+Open the viewer, local or remote, only in a browser profile that only trusted people use.
+
+Enroll only Linux or macOS devices you trust with that access.
+Install `cargo` and run the command from the root of the Witch checkout.
+Use this bootstrap synopsis to build the command:
+
+```text
+WITCH_TOKEN="$TOKEN" scripts/bootstrap.sh --server https://witch.example.com --device laptop [--agent NAME] [-- COMMAND...]
+```
+
+Replace the server URL and device ID, and set `TOKEN` to your server token.
+For the base command, omit both bracketed groups.
+For each optional group you use, remove the square brackets.
+Replace `NAME` with the agent name and `COMMAND...` with the command and its arguments.
+
+Without `-- COMMAND...`, capture continues until you run `witch stop --device ID` with the same device ID.
+Run the setup lines that bootstrap prints in the shell where you run `witch stop`.
+With `-- COMMAND...`, Witch requests a stop when the command exits only if no session was already open.
+An existing live session keeps recording after the command exits.
+Witch resumes an existing paused session and keeps recording after the command exits.

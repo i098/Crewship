@@ -1,4 +1,4 @@
-Closes #
+Refs #
 
 <!-- Every PR follows this template, including Dependabot and release PRs. There are no exemptions. -->
 
@@ -13,6 +13,10 @@ Closes #
 ## Test evidence
 
 <!-- The commands you ran and what they showed. -->
+
+## Review evidence
+
+<!-- Follow docs/review-evidence.md for the required evidence and link format. -->
 
 ## Checklist
 

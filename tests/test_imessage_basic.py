@@ -1,7 +1,9 @@
 """Run the actual bridge with isolated fake Photon and model processes. No live provider calls."""
 
+import functools
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -1650,11 +1652,28 @@ def test_new_work_cancels_the_basic_draft_and_hands_each_message_off_once(tmp_pa
         bridge.wait(10)
 
 
+@functools.cache
+def zoom_import_omp_lacks(executable):
+    """The first @oh-my-pi import of apps/imessage/zoom.ts that this omp cannot resolve, or "". Without it omp drops the
+    zoom tool, every desk turn fails in seconds, and each native test would wait out its full timeout."""
+    specs = sorted(set(re.findall(r'from "(@oh-my-pi/[^"]+)"', (ROOT / "apps/imessage/zoom.ts").read_text())))
+    code = """
+import { dirname } from "node:path";
+import { realpathSync } from "node:fs";
+const base = dirname(realpathSync(process.env.OMP));
+for (const spec of JSON.parse(process.env.SPECS)) try { Bun.resolveSync(spec, base); } catch { console.log(spec); break; }
+"""
+    return subprocess.run(["bun", "-e", code], capture_output=True, text=True, check=True, timeout=60,
+                          env={**os.environ, "OMP": executable, "SPECS": json.dumps(specs)}).stdout.strip()
+
+
 @pytest.fixture
 def native_desk(tmp_path, monkeypatch, request, desk_clock):
     executable = shutil.which("omp")
     if not executable:
         pytest.skip("needs the supported omp tool runtime")
+    if missing := zoom_import_omp_lacks(executable):
+        pytest.fail(f"{executable} cannot resolve {missing}, which apps/imessage/zoom.ts imports; the desk's zoom tool cannot load", pytrace=False)
     replies, requests = [], []
 
     class Server(BaseHTTPRequestHandler):

@@ -11,28 +11,31 @@ decisions (--dry-run counts first), spawns at most three crewmates, one per
 record, to text the owner and relay the answer with fm-send.sh --resolve-key,
 and batches the overflow into one digest text. A second mate's done line sends
 one rate-limited progress text.
+After the final failed attempt, the queue hands the exact open decision to
+the supervisor through the durable inbox. It does not text the raw record.
 ---
- bin/fm-decision-queue-lib.sh    | 128 +++++++++++++++++++++
- bin/fm-decision-queue.sh        | 191 +++++++++++++++++++++++++++++++
+ bin/fm-decision-queue-lib.sh    | 157 ++++++++++++++++++++++
+ bin/fm-decision-queue.sh        | 262 ++++++++++++++++++++++++++++++++++++
  bin/fm-watch.sh                 |  10 +-
- tests/fm-decision-queue.test.sh | 194 ++++++++++++++++++++++++++++++++
- 4 files changed, 522 insertions(+), 1 deletion(-)
+ tests/fm-decision-queue.test.sh | 272 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 700 insertions(+), 1 deletion(-)
  create mode 100755 bin/fm-decision-queue-lib.sh
  create mode 100755 bin/fm-decision-queue.sh
  create mode 100755 tests/fm-decision-queue.test.sh
 
 diff --git a/bin/fm-decision-queue-lib.sh b/bin/fm-decision-queue-lib.sh
 new file mode 100755
-index 00000000..bab2ea5e
+index 00000000..0108607d
 --- /dev/null
 +++ b/bin/fm-decision-queue-lib.sh
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,157 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue-lib.sh - durable queue for needs-decision and blocked lines.
 +#
 +# One record file per decision under $STATE/decision-queue/, named
 +# <origin>+<key>.rec ("+" is outside both slugs, so the pair is unambiguous).
-+# A record is key=value lines; state is queued, dispatched, closed, or stuck.
++# A record is key=value lines; state is queued, dispatched, handoff-pending,
++# stuck (handoff accepted, or an old record), or closed.
 +# Every write goes to a temp file in the same directory and moves into place.
 +# The queue is on only where config/decision-queue exists.
 +#
@@ -86,17 +89,44 @@ index 00000000..bab2ea5e
 +  if [ -f "$f" ]; then
 +    existed=1
 +    [ "$(dq_get "$id" note)" != "$note" ] || { echo dup; return 0; }
-+    [ "$(dq_get "$id" state)" != dispatched ] || { dq_set "$id" note "$note"; echo dup; return 0; }
++    case "$(dq_get "$id" state)" in
++      dispatched) dq_set "$id" note "$note"; echo dup; return 0 ;;
++      handoff-pending|stuck) echo dup; return 0 ;;
++    esac
 +  fi
 +  tmp=$(mktemp "$(dq_dir)/.rec.XXXXXX") || return 1
-+  printf 'origin=%s\nkey=%s\nverb=%s\nnote=%s\nenqueued_at=%s\nstate=queued\nattempts=0\n' \
-+    "$origin" "$key" "$verb" "$note" "$(dq_now)" > "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
++  printf 'origin=%s\nkey=%s\nverb=%s\nnote=%s\nenqueued_at=%s\ngeneration=%s\nstate=queued\nattempts=0\n' \
++    "$origin" "$key" "$verb" "$note" "$(dq_now)" "${tmp##*.}" > "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
 +  if [ "$existed" = 1 ]; then echo requeued; else echo new; fi
 +}
 +
-+# 0 when <key> is still an open decision in <origin>'s status log.
-+dq_is_open() {  # <origin> <key>
-+  status_own_open_decisions "$STATE/$1.status" | awk -F'\t' -v k="$2" '$1 == k { f = 1 } END { exit !f }'
++dq_live_decision() {  # <id>; print the exact open decision from its origin
++  local origin=${1%%+*} key=${1#*+}
++  [ -f "$STATE/$origin.meta" ] || return 1
++  status_own_open_decisions "$STATE/$origin.status" |
++    awk -F'\t' -v key="$key" '$1 "" == key "" { print; found=1 } END { exit !found }'
++}
++
++dq_mark_handoff() { dq_set "$1" state handoff-pending; }
++
++dq_publish_handoffs() {
++  local id request
++  for id in $(dq_ids handoff-pending); do
++    if ! dq_live_decision "$id" >/dev/null; then
++      dq_set "$id" state closed && dq_set "$id" close_reason stale
++      continue
++    fi
++    # Retry the same inbox request. The inbox owns the wake receipt.
++    request=$(printf '%s\n%s\n%s\n' "$id" "$(dq_get "$id" enqueued_at)" "$(dq_get "$id" generation)" | git -C "$FM_ROOT" hash-object --stdin) || continue
++    if FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$FM_ROOT/bin/fm-inbox.sh" note \
++      --request-id "decision-queue:$request" -- "Decision queue needs supervisor review.
++Run bin/fm-decision-queue.sh handoff $id. If it is closed or stale, acknowledge this inbox note without sending anything.
++Read the current findings and check who can decide. Use ask with the same record to send plain prose with the cause, permitted options, and a recommendation. Keep lines short. Separate the reason and each numbered option with a blank line.
++Do not send raw status text or identifiers. Use await to read the matching reply. Do not send the question again if it is already queued.
++Use resolve only for an explicit, permitted instruction for this decision. Leave the decision open on a deferral or an unclear reply. Do not waive validation." >/dev/null; then
++      dq_set "$id" state stuck
++    fi
++  done
 +}
 +
 +# Print "<id>" for every record in <state>, oldest enqueue first.
@@ -158,10 +188,10 @@ index 00000000..bab2ea5e
 +}
 diff --git a/bin/fm-decision-queue.sh b/bin/fm-decision-queue.sh
 new file mode 100755
-index 00000000..827745a7
+index 00000000..38189043
 --- /dev/null
 +++ b/bin/fm-decision-queue.sh
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,262 @@
 +#!/usr/bin/env bash
 +# fm-decision-queue.sh - keep needs-decision and blocked lines out of chat.
 +#
@@ -175,11 +205,14 @@ index 00000000..827745a7
 +#   fm-decision-queue.sh dispatch [--dry-run] [--max N]
 +#                                               one crewmate per queued record, at most N at once
 +#                                               (default 3); the overflow goes out as one digest text
-+#   fm-decision-queue.sh list [<state>]         ids in state queued (default), dispatched, closed, stuck
-+#   fm-decision-queue.sh ask <id> <text...>     text the owner; the text carries the reply tag
++#   fm-decision-queue.sh list [<state>]         ids in state queued (default), dispatched, handoff-pending, stuck, closed
++#   fm-decision-queue.sh handoff <id>          read the current decision for supervisor review
++#   fm-decision-queue.sh ask <id> <text...>     send a plain question with a reply code
 +#   fm-decision-queue.sh await <id> [--timeout S] [--interval S]
-+#                                               print the owner's tagged reply; exit 3 on timeout
-+#   fm-decision-queue.sh close <id> [reason]    mark the record closed
++#                                               print the matching reply; exit 3 on timeout
++#   fm-decision-queue.sh resolve <id> <instruction...>
++#                                               send an authorized instruction and close its exact decision
++#   fm-decision-queue.sh close <id> [reason]    mark only the queue record closed
 +#   fm-decision-queue.sh progress <mate> <note...>   one rate-limited progress text
 +#
 +# A record id is <origin>+<key>. Environment: FM_DQ_MAX (3), FM_DQ_DIGEST_INTERVAL
@@ -201,7 +234,17 @@ index 00000000..827745a7
 +
 +usage() { sed -n '2,/^set -u/p' "$0" | sed '$d' | cut -c3-; }
 +die() { echo "fm-decision-queue: $*" >&2; exit 1; }
-+need_id() { [ -f "$(dq_path "${1:-}")" ] || die "no record: ${1:-}"; }
++need_id() {
++  local id=${1:-}
++  [ "$(dq_id "${id%%+*}" "${id#*+}")" = "$id" ] && [ -n "$id" ] && [ -f "$(dq_path "$id")" ] ||
++    die "no record: $id"
++}
++
++need_live() {
++  need_id "$1"
++  [ "$(dq_get "$1" state)" != closed ] && dq_live_decision "$1" >/dev/null ||
++    die "decision no longer open: $1"
++}
 +
 +cmd_import() {
 +  local dry=0 f origin key verb note last lverb found=0 new=0 dup=0 gone=0 moved=0 out
@@ -230,38 +273,38 @@ index 00000000..827745a7
 +    "$([ "$dry" = 1 ] && echo 'dry-run: ')" "$found" "$new" "$dup" "$gone" "$moved"
 +}
 +
-+dq_stuck() {  # <id>
-+  dq_say "[$(dq_tag "$1")] decision stuck after $(dq_get "$1" attempts) attempts: $(dq_get "$1" origin) $(dq_get "$1" note)" >/dev/null 2>&1 && dq_set "$1" state stuck
-+}
-+
-+active_count() {  # [dry: 1 leaves stuck records alone]
++active_count() {  # [dry: 1 does not change records]
 +  local id n=0 cid
 +  for id in $(dq_ids dispatched); do
 +    cid=$(dq_get "$id" crewmate)
 +    if [ -f "$STATE/$cid.meta" ]; then n=$((n + 1))
-+    elif [ "$(dq_get "$id" attempts)" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then [ "${1:-0}" = 1 ] || dq_stuck "$id"
-+    else dq_set "$id" state queued; fi
++    elif [ "${1:-0}" = 0 ]; then
++      if [ "$(dq_get "$id" attempts)" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then
++        dq_mark_handoff "$id"
++      else
++        dq_set "$id" state queued
++      fi
++    fi
 +  done
 +  printf '%s' "$n"
 +}
 +
 +write_brief() {  # <crewmate> <id>
-+  local cid=$1 id=$2 intent spec tag
-+  tag=$(dq_tag "$id")
++  local cid=$1 id=$2 intent spec
 +  intent="A second mate or crewmate (origin $(dq_get "$id" origin)) opened a decision that is still unanswered, key $(dq_get "$id" key). The owner has to answer it. It must not sit in the main chat."
-+  spec="Handle this one decision. Task record id: $id. Reply tag: $tag. Held line: $(dq_get "$id" verb): $(dq_get "$id" note)
-+1. Read state/$(dq_get "$id" origin).status and data/$(dq_get "$id" origin)/ for context. Write a short question with 2-4 options and your recommendation.
-+2. Send it: $SCRIPT_DIR/fm-decision-queue.sh ask $id '<question, options, recommendation>'. The text carries the tag $tag. Never write a phone number anywhere.
++  spec="Handle this one decision. Task record id: $id. Held line: $(dq_get "$id" verb): $(dq_get "$id" note)
++1. Read state/$(dq_get "$id" origin).status and data/$(dq_get "$id" origin)/ for context. Write a short question with the cause, permitted options, and your recommendation. Keep lines short. Separate the reason and each numbered option with a blank line. Do not send raw status text.
++2. Send it: $SCRIPT_DIR/fm-decision-queue.sh ask $id '<question, options, recommendation>'. The text carries a reply code. Never write a phone number anywhere.
 +3. Wait: $SCRIPT_DIR/fm-decision-queue.sh await $id. Exit 3 means no reply: ask once more, then append paused to your status file and stop.
-+4. Relay: $SCRIPT_DIR/fm-send.sh $(dq_get "$id" origin) --resolve-key $(dq_get "$id" key) '<the owner answer, verbatim>'.
-+5. Close: $SCRIPT_DIR/fm-decision-queue.sh close $id answered. Write the answer in one line to your report, then append done to your status file."
++4. Relay: $SCRIPT_DIR/fm-send.sh $(dq_get "$id" origin) --resolve-key $(dq_get "$id" key) '<the owner answer, verbatim>'. Leave the decision open on a deferral or unclear reply. Do not waive validation.
++5. Close only after delivery succeeds: $SCRIPT_DIR/fm-decision-queue.sh close $id answered. Write the answer in one line to your report, then append done to your status file."
 +  "${FM_DQ_BRIEF:-$SCRIPT_DIR/fm-brief.sh}" "$cid" firstmate --scout >/dev/null || return 1
 +  awk -v intent="$intent" -v spec="$spec" '$0 == "{TASK}" { print intent; next } $0 == "{FIRSTMATE_SPEC}" { print spec; next } { print }' \
 +    "$DATA/$cid/brief.md" > "$DATA/$cid/brief.md.tmp" && mv -f "$DATA/$cid/brief.md.tmp" "$DATA/$cid/brief.md"
 +}
 +
 +cmd_dispatch() {
-+  local dry=0 max=${FM_DQ_MAX:-3} active slots id origin key cid over='' overn=0 stamp now
++  local dry=0 max=${FM_DQ_MAX:-3} active slots id cid over='' overn=0 stamp now attempts
 +  while [ $# -gt 0 ]; do
 +    case "$1" in
 +      --dry-run) dry=1 ;;
@@ -272,23 +315,29 @@ index 00000000..827745a7
 +  done
 +  active=$(active_count "$dry"); slots=$((max - active))
 +  for id in $(dq_ids queued); do
-+    origin=$(dq_get "$id" origin); key=$(dq_get "$id" key)
-+    if ! dq_is_open "$origin" "$key"; then
++    if ! dq_live_decision "$id" >/dev/null; then
 +      [ "$dry" = 1 ] || { dq_set "$id" state closed; dq_set "$id" close_reason stale; }
 +      echo "stale $id"; continue
 +    fi
-+    if [ "$slots" -le 0 ]; then over="$over $origin"; overn=$((overn + 1)); continue; fi
++    if [ "$slots" -le 0 ]; then over="$over ${id%%+*}"; overn=$((overn + 1)); continue; fi
 +    cid=dq-$(dq_tag "$id" | tr '[:upper:]' '[:lower:]')
 +    if [ "$dry" = 1 ]; then echo "would spawn $cid for $id"; slots=$((slots - 1)); continue; fi
-+    dq_set "$id" attempts $(($(dq_get "$id" attempts) + 1))
++    attempts=$(dq_get "$id" attempts)
++    if [ "$attempts" -ge "${FM_DQ_ATTEMPTS:-3}" ]; then
++      dq_mark_handoff "$id"
++      continue
++    fi
++    attempts=$((attempts + 1))
++    dq_set "$id" attempts "$attempts" || continue
 +    if write_brief "$cid" "$id" && "${FM_DQ_SPAWN:-$SCRIPT_DIR/fm-spawn.sh}" "$cid" "$FM_HOME" --scout >/dev/null; then
 +      dq_set "$id" crewmate "$cid"; dq_set "$id" state dispatched
 +      echo "spawned $cid for $id"; slots=$((slots - 1))
 +    else
-+      echo "spawn failed for $id (attempt $(dq_get "$id" attempts))" >&2
-+      [ "$(dq_get "$id" attempts)" -lt "${FM_DQ_ATTEMPTS:-3}" ] || dq_stuck "$id"
++      echo "spawn failed for $id (attempt $attempts)" >&2
++      [ "$attempts" -lt "${FM_DQ_ATTEMPTS:-3}" ] || dq_mark_handoff "$id"
 +    fi
 +  done
++  [ "$dry" = 1 ] || dq_publish_handoffs
 +  [ "$overn" -gt 0 ] || return 0
 +  echo "overflow $overn"
 +  [ "$dry" = 0 ] || return 0
@@ -298,32 +347,78 @@ index 00000000..827745a7
 +    && printf '%s\n' "$now" > "$stamp"
 +}
 +
++cmd_handoff() {
++  local id=${1:-}
++  need_live "$id"
++  case "$(dq_get "$id" state)" in
++    handoff-pending|stuck) ;;
++    *) die "no supervisor handoff: $id" ;;
++  esac
++  printf 'Decision: %s\n' "$id"
++  dq_live_decision "$id" || return 1
++  if [ -n "$(dq_get "$id" question)" ]; then
++    printf 'Question already queued. Use await for its reply.\n'
++  fi
++}
++
 +cmd_ask() {
-+  local id=${1:-}; need_id "$id"; shift
-+  [ $# -gt 0 ] || die "ask needs the text"
-+  dq_say "[$(dq_tag "$id")] $* (reply to this text)" || die "text not sent"
-+  dq_set "$id" sent_at "$(dq_now)"
++  local id=${1:-} code sent
++  need_live "$id"; shift
++  [ -n "${*//[[:space:]]/}" ] || die "ask needs the text"
++  case "$(dq_get "$id" state)" in
++    handoff-pending|stuck)
++      [ -z "$(dq_get "$id" question)" ] || die "question already queued; use await"
++      ;;
++  esac
++  # The bridge strips bare queue tags. Put a new code in the visible quote.
++  code=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
++  [ "${#code}" = 16 ] || die "could not generate a reply code"
++  sent=$(dq_now)
++  dq_say "Decision $code:
++$*
++
++Decision $code:
++Reply to this bubble, or start a new text with the line above." || die "text not sent"
++  dq_set "$id" question "$sent $code"
 +}
 +
 +cmd_await() {
-+  local id=${1:-} timeout=21600 interval=10 sent tag log deadline reply
-+  need_id "$id"; shift
++  local id=${1:-} timeout=21600 interval=10 sent code log deadline reply
++  need_live "$id"; shift
 +  while [ $# -gt 0 ]; do
 +    case "$1" in --timeout) timeout=$2 ;; --interval) interval=$2 ;; *) die "unknown option $1" ;; esac
 +    shift 2
 +  done
-+  sent=$(dq_get "$id" sent_at); [ -n "$sent" ] || die "ask $id first"
-+  tag=$(dq_tag "$id")
++  read -r sent code <<< "$(dq_get "$id" question)"
++  [ -n "$code" ] || die "ask $id first"
 +  log=${FM_DQ_REPLY_LOG:-${STATE_DIRECTORY:-$HOME/.local/state/fm-imessage}/routing.jsonl}
 +  command -v jq >/dev/null || die "await needs jq"
 +  deadline=$(( $(dq_now) + timeout ))
 +  while :; do
-+    reply=$([ -r "$log" ] && jq -r --argjson s "$((sent * 1000))" --arg t "$tag" \
-+      'select(.received != null and ((.received.at // .at) >= $s) and ((.received.text // "") | contains($t))) | (.received.authored // .received.text)' "$log" 2>/dev/null | tail -1)
-+    if [ -n "$reply" ]; then printf '%s\n' "$reply" | sed "s/\[$tag\]//"; return 0; fi
++    need_live "$id"
++    reply=$([ -r "$log" ] && jq -r --argjson s "$((sent * 1000))" --arg prefix "Decision $code:" '
++      .received | select(. != null and .at >= $s)
++      | (.authored // .text) as $answer
++      | if ($answer | startswith($prefix)) then ($answer | ltrimstr($prefix) | ltrimstr(" "))
++        elif .authored != null and (.text | split("\n") | last
++          | startswith("(this message is a thread reply to an earlier message from ")
++            and (split(", whose untrusted quoted text is: ")[1] // "" | startswith("\"" + $prefix)))
++        then $answer else empty end
++      | select(test("\\S"))' "$log" 2>/dev/null | tail -1)
++    if [ -n "$reply" ]; then printf '%s\n' "$reply"; return 0; fi
 +    [ "$(dq_now)" -lt "$deadline" ] || return 3
 +    sleep "$interval"
 +  done
++}
++
++cmd_resolve() {
++  local id=${1:-}
++  need_live "$id"; shift
++  [ -n "${*//[[:space:]]/}" ] || die "resolve needs an authorized instruction"
++  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-send.sh" \
++    "${id%%+*}" --resolve-key "${id#*+}" "Owner instruction: $*" || return 1
++  if dq_live_decision "$id" >/dev/null; then die "decision still open: $id"; fi
++  cmd_close "$id" answered
 +}
 +
 +cmd_close() {
@@ -350,18 +445,20 @@ index 00000000..827745a7
 +  import) cmd_import "$@" ;;
 +  dispatch) cmd_dispatch "$@" ;;
 +  list) dq_ids "${1:-queued}" ;;
++  handoff) cmd_handoff "$@" ;;
 +  ask) cmd_ask "$@" ;;
 +  await) cmd_await "$@" ;;
++  resolve) cmd_resolve "$@" ;;
 +  close) cmd_close "$@" ;;
 +  progress) cmd_progress "$@" ;;
 +  ''|-h|--help|help) usage ;;
 +  *) die "unknown command $cmd" ;;
 +esac
 diff --git a/bin/fm-watch.sh b/bin/fm-watch.sh
-index d527ef87..cb52e2d2 100755
+index 98869602520a..206be626a115 100755
 --- a/bin/fm-watch.sh
 +++ b/bin/fm-watch.sh
-@@ -269,6 +269,9 @@ WATCH_HOME_EXISTED=0
+@@ -305,6 +305,9 @@ WATCH_HOME_EXISTED=0
  # and wake emission (secondmate_liveness_tick below).
  # shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
  . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
@@ -371,17 +468,17 @@ index d527ef87..cb52e2d2 100755
  
  WATCH_LOCK="$STATE/.watch.lock"
  WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
-@@ -3602,6 +3605,9 @@ while :; do
+@@ -4148,6 +4151,9 @@ while :; do
    # No conversation scraping; unresolved records are never silently expired.
    fm_pending_reply_tick "$STATE" || true
  
 +  # Queued decisions are picked up here about once a minute (config/decision-queue).
 +  dq_tick
 +
-   # Endpoint liveness runs before queue observation: a positively dead or
-   # missing secondmate endpoint is relaunched here on a bounded cadence, which
-   # is also what unsticks that mate's foreign wake queue. The tick's single
-@@ -3850,7 +3856,9 @@ EOF
+   open_decision_reminder_tick || {
+     echo 'watcher: open-decision reminder check failed' >&2
+     exit 1
+@@ -4508,7 +4514,9 @@ EOF
        while IFS=$(printf '\t') read -r sf sig f; do
          [ -n "$sf" ] || continue
          file_reason="$reason"
@@ -394,10 +491,10 @@ index d527ef87..cb52e2d2 100755
  $pending
 diff --git a/tests/fm-decision-queue.test.sh b/tests/fm-decision-queue.test.sh
 new file mode 100755
-index 00000000..5a73fd47
+index 00000000..e701f6f8
 --- /dev/null
 +++ b/tests/fm-decision-queue.test.sh
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,272 @@
 +#!/usr/bin/env bash
 +# Behavior tests for bin/fm-decision-queue.sh and its watcher hook.
 +# Cases drive the real script against a scratch home with stub spawn, brief, and text senders.
@@ -514,22 +611,25 @@ index 00000000..5a73fd47
 +}
 +
 +test_ask_await_close_round_trip() {
-+  local h tag now
++  local h prefix now
 +  h=$(fresh_home reply)
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
 +  dq "$h" enqueue w k1 needs-decision q >/dev/null
 +  dq "$h" ask w+k1 'Ship A or B? I recommend A.'
-+  tag=$(sed -n 's/^\[\(D[0-9a-f]*\)\].*/\1/p' "$h/texts.log")
-+  assert_contains "$tag" "D" "the text carries a tag"
++  IFS=: read -r prefix _ < "$h/texts.log"
++  prefix=$prefix:
++  assert_contains "$prefix" "Decision " "the question carries a visible reply code"
 +  now=$(($(date +%s) * 1000))
 +  printf '%s\n' \
-+    "{\"at\":$((now - 60000)),\"received\":{\"at\":$((now - 60000)),\"text\":\"[$tag] too early\"}}" \
-+    "{\"at\":$((now + 5)),\"received\":{\"at\":$((now + 5)),\"text\":\"unrelated\"}}" > "$h/routing.jsonl"
-+  dq "$h" await w+k1 --timeout 1 --interval 1 >/dev/null; assert_equals "3" "$?" "no tagged reply after the ask times out"
-+  printf '%s\n' "{\"at\":$((now + 9)),\"received\":{\"at\":$((now + 9)),\"text\":\"> [$tag] Ship A or B?\\nA please\",\"authored\":\"A please\"}}" >> "$h/routing.jsonl"
-+  assert_equals "A please" "$(dq "$h" await w+k1 --timeout 5 --interval 1)" "the tagged reply is relayed"
++    "{\"received\":{\"at\":$((now - 60000)),\"text\":\"$prefix too early\"}}" \
++    "{\"received\":{\"at\":$((now + 5)),\"text\":\"Mentioned $prefix in another answer\"}}" > "$h/routing.jsonl"
++  dq "$h" await w+k1 --timeout 0 >/dev/null; assert_equals "3" "$?" "stale and unrelated replies do not match"
++  jq -nc --arg answer "$prefix A please" --argjson at "$((now + 9))" \
++    '{received: {text: $answer, at: $at}}' >> "$h/routing.jsonl"
++  assert_equals "A please" "$(dq "$h" await w+k1 --timeout 0)" "an exact reply code works without a thread"
 +  dq "$h" close w+k1 answered
 +  assert_equals "w+k1" "$(dq "$h" list closed)" "closed"
-+  pass "ask tags the text, await finds only the tagged later reply, close ends the record"
++  pass "ask and await ignore stale or unrelated replies and accept an exact reply code"
 +}
 +
 +test_progress_is_one_line_deduped_and_rate_limited() {
@@ -583,20 +683,61 @@ index 00000000..5a73fd47
 +  pass "the watcher tick picks up a queued decision with no manual call"
 +}
 +
-+test_a_failed_text_keeps_a_record_out_of_stuck() {
-+  local h
++test_handoff_retries_wake_without_retrying_spawn_or_replaying_old_records() {
++  local h out
 +  h=$(fresh_home stuck)
-+  task "$h" w ship 'needs-decision [at=1] [key=k1]: q'
-+  dq "$h" enqueue w k1 needs-decision q >/dev/null
++  task "$h" old ship 'blocked [at=1] [key=k1]: old'
++  dq "$h" import >/dev/null
++  printf 'state=stuck\norigin=old\nkey=k1\nnote=old\nenqueued_at=1\n' > "$h/state/decision-queue/old+k1.rec"
++  task "$h" w ship 'needs-decision [at=1] [key=k1]: q corr=private'
++  dq "$h" import >/dev/null
++  printf '#!/usr/bin/env bash\necho attempt >> "$FM_HOME/attempts"\nexit 1\n' > "$h/stubs/spawn"
++  mkdir "$h/state/.wake-queue"
++  dq "$h" dispatch >/dev/null
++  dq "$h" dispatch >/dev/null
++  assert_absent "$h/state/inbox" "no early wake"
++  dq "$h" dispatch >/dev/null 2>&1
++  assert_equals "w+k1" "$(dq "$h" list handoff-pending)" "failed wake leaves a pending handoff"
++  rmdir "$h/state/.wake-queue"
++  # Lose the caller's success result after the real inbox accepts the wake.
++  mkdir -p "$h/publisher/bin"
++  cat > "$h/publisher/bin/fm-inbox.sh" <<'SH'
++#!/usr/bin/env bash
++"$FM_TEST_INBOX" "$@" || exit $?
++exit 1
++SH
++  chmod +x "$h/publisher/bin/fm-inbox.sh"
++  FM_ROOT_OVERRIDE="$h/publisher" FM_TEST_INBOX="$ROOT/bin/fm-inbox.sh" dq "$h" dispatch >/dev/null
++  assert_equals "w+k1" "$(dq "$h" list handoff-pending)" "lost result leaves handoff pending"
++  assert_equals "1" "$(grep -c 'check: captain inbox note' "$h/state/.wake-queue")" "the inbox accepted the wake"
++  out=$(FM_HOME="$h" "$ROOT/bin/fm-inbox.sh" list)
++  assert_contains "$out" "handoff w+k1" "supervisor has the exact handoff"
++  case "$out" in *corr=private*|*"handoff old+k1"*) fail "a raw note or old decision was announced" ;; esac
++  dq "$h" dispatch >/dev/null
++  assert_equals "1" "$(grep -c 'check: captain inbox note' "$h/state/.wake-queue")" "one accepted wake across invocations"
++  assert_equals "3" "$(wc -l < "$h/attempts" | tr -d ' ')" "a wake retry does not spawn another worker"
++  assert_equals "old+k1"$'\n'"w+k1" "$(dq "$h" list stuck)" "the terminal records remain visible"
++  assert_absent "$h/texts.log" "no automatic text"
++  pass "a failed wake retries without spawning or replaying an old decision"
++}
++
++test_pending_handoff_drops_a_resolved_key_not_its_neighbor() {
++  local h
++  h=$(fresh_home stale-handoff)
++  task "$h" w ship 'blocked [at=1] [key=k1]: a' 'blocked [at=2] [key=k10]: b'
++  dq "$h" import >/dev/null
 +  printf '#!/usr/bin/env bash\nexit 1\n' > "$h/stubs/spawn"
-+  cp "$h/stubs/say" "$h/stubs/say.ok"; printf '#!/usr/bin/env bash\nexit 1\n' > "$h/stubs/say"
++  mkdir "$h/state/.wake-queue"
 +  FM_DQ_ATTEMPTS=1 dq "$h" dispatch >/dev/null 2>&1
-+  assert_equals "" "$(dq "$h" list stuck)" "no stuck record while the owner text fails"
-+  cp "$h/stubs/say.ok" "$h/stubs/say"
-+  FM_DQ_ATTEMPTS=1 dq "$h" dispatch >/dev/null 2>&1
-+  assert_equals "w+k1" "$(dq "$h" list stuck)" "stuck once the text is sent"
-+  assert_equals "1" "$(grep -c 'stuck' "$h/texts.log")" "one owner text"
-+  pass "a record turns stuck only with an owner text sent"
++  printf 'resolved [at=3] [key=k1]: already answered\n' >> "$h/state/w.status"
++  rmdir "$h/state/.wake-queue"
++  FM_DQ_ATTEMPTS=1 dq "$h" dispatch >/dev/null
++  assert_equals "w+k1" "$(dq "$h" list closed)" "only the resolved record closes"
++  assert_equals "w+k10" "$(dq "$h" list stuck)" "the other key still needs a handoff"
++  assert_equals "1" "$(grep -c 'check: captain inbox note' "$h/state/.wake-queue")" "only the current decision wakes"
++  dq "$h" handoff w+k1 >/dev/null 2>&1 && fail "stale handoff was available"
++  assert_contains "$(dq "$h" handoff w+k10)" "b" "the open decision can be inspected"
++  pass "a retry skips the closed key and still wakes for its neighbor"
 +}
 +
 +test_a_reworded_note_on_a_dispatched_record_keeps_its_crewmate() {
@@ -623,7 +764,8 @@ index 00000000..5a73fd47
 +  test_progress_is_one_line_deduped_and_rate_limited \
 +  test_watcher_hook_queues_decisions_only_where_enabled \
 +  test_watcher_tick_dispatches_a_queued_decision_without_a_manual_call \
-+  test_a_failed_text_keeps_a_record_out_of_stuck \
++  test_handoff_retries_wake_without_retrying_spawn_or_replaying_old_records \
++  test_pending_handoff_drops_a_resolved_key_not_its_neighbor \
 +  test_a_reworded_note_on_a_dispatched_record_keeps_its_crewmate
 -- 
 2.53.0
