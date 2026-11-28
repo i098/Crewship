@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 
 import pytest
 from test_imessage import ROOT, bun
@@ -150,26 +151,38 @@ console.log(JSON.stringify(failed));
     assert result is True
 
 
-def test_advertised_catalog_efforts_are_accepted_by_the_installed_cli():
-    if not shutil.which("omp"):
+def test_advertised_catalog_efforts_are_accepted_by_the_installed_cli(tmp_path):
+    omp = shutil.which("omp")
+    if not omp:
         pytest.skip("needs the installed omp catalog")
     result = bun(SOURCE + """
 const { realpathSync } = await import("node:fs");
 const { dirname } = await import("node:path");
 const base = dirname(realpathSync(Bun.which("omp")));
-const { parseCliThinkingLevel } = await import(Bun.resolveSync("@oh-my-pi/pi-tui/thinking", base));
 const { getBundledModels } = await import(Bun.resolveSync("@oh-my-pi/pi-catalog/models", base));
 const { getSupportedEfforts } = await import(Bun.resolveSync("@oh-my-pi/pi-catalog/model-thinking", base));
 const entries = ["anthropic", "openai-codex"].flatMap((provider) => getBundledModels(provider))
   .map((model) => ({ provider: model.provider, id: model.id, reasoning: getSupportedEfforts(model), apiKeyEnv: null }));
 const choices = dispatchModels(entries, policy);
 console.log(JSON.stringify({
-  rejects: choices.flatMap((model) => model.reasoning.filter((level) => parseCliThinkingLevel(level) !== level)),
+  levels: [...new Set(choices.flatMap((model) => model.reasoning))],
   hasMax: choices.some((model) => model.reasoning.includes("max")),
   opus: choices.find((model) => model.id === "anthropic/claude-opus-5-5").reasoning,
 }));
 """)
-    assert result == {"rejects": [], "hasMax": True, "opus": ["low", "medium", "high"]}
+
+    def rejected(level):
+        # The desk passes a level as --thinking=<level>; --export makes the CLI judge its flags and exit.
+        run = subprocess.run(
+            [omp, f"--thinking={level}", "--export", str(tmp_path / "missing.jsonl")],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+        )
+        return "Invalid --thinking value" in run.stderr
+
+    # A refused value proves that the probe can see a refusal.
+    assert rejected("bogus"), f"{omp} did not report a refused --thinking value"
+    assert [level for level in result["levels"] if rejected(level)] == [], f"{omp} refuses an advertised effort"
+    assert (result["hasMax"], result["opus"]) == (True, ["low", "medium", "high"])
 
 
 @pytest.mark.parametrize("purpose", ["general", "simple-coding"])
