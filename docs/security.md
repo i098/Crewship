@@ -176,6 +176,48 @@ A new host gets its own key; never copy `~/.ssh/id_ed25519_mac` from the old hos
 3. Run `ssh mac true` on the new host.
 4. At cutover, remove the old host's line from the Mac's `~/.ssh/authorized_keys`. Each line ends with the comment `<user>@<hostname>`, the project name and the word `mac`; the hostname identifies the host. A key made before the Crewship rename carries the earlier project name. Keep the old line until the new host works.
 
+### Reach a Mac without SSH (Rex)
+
+Use Rex to run the Mac's local Aside CLI without SSH or Aside Pro Remote Control.
+Install Superlogical Rex on both machines. Use the [Rex installation guide](https://www.superlogical.com/rex/docs/linux/installation) on the Linux host.
+Sign in to Aside on the Mac as the macOS user that runs Rex.
+Use a tailnet with [MagicDNS and HTTPS enabled](https://tailscale.com/docs/how-to/set-up-https-certificates).
+Tailscale publishes certificate names in a public log, so choose a device name that contains no private details.
+Rex gives connected devices shell access as that Mac user, not just access to Aside.
+To allow only the Crewship host, restrict access to the Rex node in your Tailscale policy before you enable it.
+
+1. On the host, run `tailscale up` to join the tailnet.
+2. On the Mac, start Rex with `rex server start`.
+   Enable its built-in Tailscale service with `rex server tailscale on --hostname '<mac-device>'`.
+   Replace `<mac-device>` with the device name you chose.
+   On first use, get the sign-in URL from `rex server status`.
+   Sign in with the same Tailscale account as on the host.
+   Only the Rex node's owner can connect by default. Do not pass `--allow-tailnet-members`.
+   This setting does not persist after a Rex server restart.
+3. On the host, replace the placeholders with the Rex node's DNS name and add it:
+   Skip this command if `mac` already points to this Rex node.
+   If `mac` belongs to a different host, choose an unused label and use it in the remaining commands.
+
+   ```bash
+   rex hosts add mac 'https://<mac-device>.<tailnet>.ts.net'
+   ```
+
+4. On the host, create a new session with `rex -S mac new --json`.
+   Copy the returned session ID to replace `<session-id>` in each command.
+   Run a read-only Aside command and capture its output:
+
+   ```bash
+   rex -S mac send -s '<session-id>' 'aside --help'
+   rex -S mac send-key -s '<session-id>' enter
+   rex -S mac capture -s '<session-id>'
+   ```
+
+Run `capture` again if the command has not finished.
+After you read the output, close only the session you created with `rex -S mac kill '<session-id>'`.
+
+`rex run --wait` reports the exit status, but the terminal output goes away when its block closes.
+Use `capture` in the open session to read the output.
+
 ### From a Mac to the host
 
 The other direction, from the operator's Mac to the host, is also a manual setup on the Mac. Apply does not change it. Every host gets `mosh` (`mosh-server`) in the base packages.
